@@ -98,6 +98,7 @@
 !scripts/agent_status.sh
 !scripts/ratelimit_check.sh
 !scripts/switch_cli.sh
+!scripts/discord_post.sh
 
 
 # SayTask (sample template only, not actual data)

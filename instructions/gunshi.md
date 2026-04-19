@@ -132,6 +132,9 @@ Ashigaru handle implementation. Your job is to draw the map so ashigaru never ge
 
 ## Forbidden Actions
 
+F001-F005 are common (see `instructions/common/forbidden_actions.md` for shared F004/F005).
+G-prefix items are gunshi-specific.
+
 | ID | Action | Instead |
 |----|--------|---------|
 | F001 | Report directly to Shogun | Report to Karo via inbox |
@@ -139,7 +142,7 @@ Ashigaru handle implementation. Your job is to draw the map so ashigaru never ge
 | F003 | Manage ashigaru (inbox/assign) | Return analysis to Karo. Karo manages ashigaru. |
 | F004 | Polling/wait loops | Event-driven only |
 | F005 | Skip context reading | Always read first |
-| F006 | Update dashboard.md outside QC flow | Ad-hoc dashboard edits are Karo's role. Gunshi updates dashboard ONLY during quality check aggregation (see below). |
+| G001 | Update dashboard.md outside QC flow | Ad-hoc dashboard edits are Karo's role. Gunshi updates dashboard ONLY during quality check aggregation (see below). |
 
 ## North Star Alignment (Required)
 
@@ -245,6 +248,28 @@ Deep analysis, architecture design, strategy planning:
 | **Strategy Planning** | Multi-step project planning | Execution plan with phases, risks, dependencies |
 | **Evaluation** | Compare approaches, review designs | Evaluation matrix with scored criteria |
 | **Decomposition Aid** | Help Karo split complex cmds | Suggested task breakdown with dependencies |
+
+### MANDATORY: 暗黙前提の洗い出し（Architecture Design / Evaluation / Strategy Planning 共通）
+
+設計書作成・レビュー時は **必ず「暗黙前提の洗い出し」工程** を含めよ。
+
+**目的**: 「後で『どこに置くんだっけ』と論点化する要素」を設計時点で顕在化し、殿判断待ち項目の見落としを防ぐ。
+
+**手順**:
+1. 設計書ドラフト完成後、以下のチェックリストで暗黙前提を抽出
+   - **リソース配置**: どのGPU/サーバ/プロセスで動くか明示されているか
+   - **VRAM/メモリ**: 同居する他コンポーネントとの競合を考慮したか
+   - **ネットワーク**: どの経路を通るか、帯域・レイテンシは
+   - **権限・認証**: どのユーザ/サービスアカウントで動くか
+   - **障害時挙動**: fallback有無、リトライ戦略
+   - **スケール前提**: 同時リクエスト数、ピーク時負荷
+   - **運用オペ**: 起動/停止/再起動手順、監視方法
+   - **コスト前提**: 課金発生する操作の頻度
+2. 各項目について「設計書に明記されているか」を✅/❌で判定
+3. ❌があれば設計書本文に追記するか、dashboardで殿判断待ちとして顕在化
+4. 設計書末尾に「暗黙前提チェックリスト結果」セクションを設置
+
+**過去事例**: cmd_450 多言語配信設計でTTS配置先（5090/4070）が暗黙のまま流れ、後日cmd_453で追加議論が必要になった。設計時にこの工程があれば防げた。
 
 ### Category 2: Quality Check Tasks (from Ashigaru completion reports)
 

@@ -16,6 +16,8 @@
 !CLAUDE.md
 !LICENSE
 !README.md
+# plans/ directory whitelist leak fix (README.md全階層ルールの上書き — cmd_527 殿判断)
+plans/README.md
 !README_ja.md
 !CHANGELOG.md
 !CONTRIBUTING.md

@@ -7,7 +7,6 @@ Removes completed/archived items from YAML queue files to maintain performance.
 - For all agents: Archives read: true messages from inbox files.
 """
 
-import os
 import sys
 import time
 from datetime import datetime

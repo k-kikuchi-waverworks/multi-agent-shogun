@@ -8,7 +8,7 @@
 # ensuring no concurrent modifications to YAML files (same pattern as inbox_write.sh).
 #
 
-set -u
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOCK_FILE="${SCRIPT_DIR}/../queue/.slim_yaml.lock"

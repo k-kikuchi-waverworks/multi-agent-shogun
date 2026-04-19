@@ -3,7 +3,7 @@
 # Usage: bash scripts/inbox_write.sh <target_agent> <content> [type] [from]
 # Example: bash scripts/inbox_write.sh karo "足軽5号、任務完了" report_received ashigaru5
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET="$1"

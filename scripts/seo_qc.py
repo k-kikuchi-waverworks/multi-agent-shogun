@@ -253,7 +253,7 @@ def check_010_cost_table(body: str) -> tuple[bool, str]:
         return False, "no H2 sections"
 
     first_section = sections[0][1]
-    table_lines = [l for l in first_section.split("\n") if l.strip().startswith("|")]
+    table_lines = [line for line in first_section.split("\n") if line.strip().startswith("|")]
     if len(table_lines) >= 4:
         return True, ""
     return False, f"table lines in H2-1: {len(table_lines)}"
@@ -340,7 +340,6 @@ def run_checks(filepath: str, site_dir: str) -> dict:
 
     fm, body = parse_frontmatter(content)
     slug = Path(filepath).stem  # filename without extension
-    filename = Path(filepath).name
 
     results = {}
 

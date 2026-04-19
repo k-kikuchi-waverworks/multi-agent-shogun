@@ -2,6 +2,8 @@
 # SayTask通知 — ntfy.sh経由でスマホにプッシュ通知
 # FR-066: ntfy認証対応 (Bearer token / Basic auth)
 
+set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SETTINGS="$SCRIPT_DIR/config/settings.yaml"
 

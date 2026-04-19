@@ -3,6 +3,8 @@
 # SEO Article QC Skill - Wrapper Script
 # Usage: bash scripts/seo_qc.sh <site|all> [summary|yaml|both]
 # ═══════════════════════════════════════════════════════════════
+set -euo pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE="${1:?Usage: seo_qc.sh <site|all> [summary|yaml|both]}"
 OUTPUT="${2:-both}"

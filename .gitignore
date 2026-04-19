@@ -101,6 +101,7 @@ plans/README.md
 !scripts/ratelimit_check.sh
 !scripts/switch_cli.sh
 !scripts/discord_post.sh
+!scripts/dashboard-viewer.py
 
 
 # SayTask (sample template only, not actual data)

@@ -2,17 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
-## [4.4.3] - 2026-04-19
-
-### Changed
-- `instructions/common/forbidden_actions.md`: D001-D008 (Destructive Operation Safety) を CLAUDE.md から移動、F/D 共通化 (cmd_527 Phase2 Day1)
-- `CLAUDE.md`: D001-D008 セクションを common 参照 1 行に縮約 (boot コンテキスト簡素化、cmd_527 Phase2 Day1)
-- `instructions/gunshi.md`: dashboard 編集制限ルールを F006 → G001 にリネーム (common F006=生成ファイル禁止 との ID 衝突解消、cmd_527 Phase2 Day1)
-- `tools/` (submodule): apply ruff auto-fix + shell hardening (cmd_527 Phase2 Day1)
+## [4.6.0] - 2026-04-19
 
 ### Added
-- `.github/FUNDING.yml`: Sponsors section (README/README_ja 併せて更新)
-- `plans/` directory: Lord-local 運用ドキュメント (CLAUDE.md + plans/README.md、cmd_527 殿判断6)
+- `shutsujin_departure.sh`: `--auto-mode-on` flag (maps to `--dangerously-skip-permissions`) and `--permission-mode <mode>` for custom permission flags (Issue #124)
+- `lib/cli_adapter.sh`: accept `PERMISSION_FLAG` override from departure script, backward-compatible
+
+### Fixed
+- Report flow unified to `Ashigaru → Gunshi → Karo` across all instruction files (`instructions/ashigaru.md`, `karo.md`, `gunshi.md`, `CLAUDE.md`, all generated CLI variants) (Issue #121)
+
+### Changed
+- `PERMISSION_FLAG` variable centralizes permission handling in `shutsujin_departure.sh` (10 call sites)
+- `tests/unit/test_cli_adapter.bats`: additional coverage for permission flag logic
+
+## [4.5.0] - 2026-04-19
+
+### Added
+- `scripts/dashboard-viewer.py`: live Markdown viewer for `dashboard.md` via `dash` command (PR #122)
+- `first_setup.sh`: auto-register `dash()` function to `.bashrc` on setup
+- GitHub Sponsors section to README and README_ja
+
+### Fixed
+- `scripts/inbox_write.sh`: self-send guard — prevent agents from messaging themselves (PR #116)
+- README quick start: missing `source ~/.bashrc` and `claude --dangerously-skip-permissions` steps (Issue #120)
+
+### Changed
+- `tests/test_inbox_write.bats`: updated for mandatory `type`/`from` arguments
 
 ## [4.4.2] - 2026-04-10
 

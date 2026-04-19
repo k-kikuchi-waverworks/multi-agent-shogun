@@ -205,6 +205,16 @@ Layer 3: YAML Queue      — persistent task data (queue/ — authoritative sour
 Layer 4: Session context — volatile (CLAUDE.md auto-loaded, instructions/*.md, lost on /clear)
 ```
 
+# plans/ Directory (Lord-local only)
+
+`plans/` is gitignored (via `.gitignore` whitelist) and **OSS本家コミット対象外**. Lord-local shared workspace only.
+
+- Path: `/mnt/c/tools/multi-agent-shogun/plans/`
+- Purpose: cmd別 refactor plan / cleanup plan / summary を家老・軍師・足軽間で共有参照
+- 命名規則: `refactor_cmdXXX_<scope>.md`, `cleanup_cmdXXX.md`, `refactor_cmdXXX_summary.md`
+- コミット禁止: `plans/` 配下は `git add` しない (memory `feedback_oss_commit_rule` 整合)
+- 詳細: `plans/README.md` 参照 (gitignored ゆえ git 管理外)
+
 # Project Management
 
 System manages ALL white-collar work, not just self-improvement. Project folders can be external (outside this repo). `projects/` is git-ignored (contains secrets).

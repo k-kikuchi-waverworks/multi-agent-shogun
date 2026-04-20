@@ -1,0 +1,22 @@
+# deploy.config.yml — 運用パラメータ（機密情報なし、commit OK）
+# 接続情報は .env を使用すること
+
+rollback:
+  remote_keep_generations: 10   # リモート tar.gz バックアップ保持世代数
+  local_keep_generations: 10    # ローカル ZIP バックアップ保持世代数
+
+prechecks:
+  require_clean_git: false       # uncommitted changes を警告のみ（エラーにしない）
+  require_gulp_build: true       # public/css/*.min.css 存在チェック
+
+http_verify:
+  paths_production:
+    - "/"
+    - "/wp-login.php"
+  paths_staging:
+    - "/"
+    - "/wp-login.php"
+
+snapshot:
+  production_required: true     # Production は Snapshot 必須 (fail-fast)
+  staging_required: false       # Staging は Snapshot 不要

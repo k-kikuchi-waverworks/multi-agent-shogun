@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     WaverWorks テーマデプロイスクリプト (PowerShell 主本)
@@ -42,7 +42,7 @@ $ErrorActionPreference = 'Stop'
 $scriptDir   = $PSScriptRoot
 $skillRoot   = Split-Path -Parent $scriptDir
 $startTime   = Get-Date
-$envUpper    = $Environment.ToUpper()
+$envUpper    = if ($Environment -eq 'Staging') { 'STG' } else { 'PRD' }
 $ts          = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 # ──────────────────────────────────────────────────────────────────
@@ -180,7 +180,7 @@ function Test-SSHConnection {
     $out = Invoke-SSH "echo 'SSH_OK'" -AllowFail
     if ($out -notmatch 'SSH_OK') {
         Write-Fail "SSH 接続失敗"
-        Write-Host @"
+        $connInfo = @"
 
 接続情報確認:
   WAVERWORKS_SSH_HOST       : $sshHost
@@ -191,7 +191,8 @@ function Test-SSHConnection {
   1. 鍵ファイルが存在するか: Test-Path '$sshKey'
   2. WPMUDEV 管理画面で公開鍵が登録済みか
   3. ssh-agent に鍵が追加済みか: ssh-add '$sshKey'
-"@ -ForegroundColor Yellow
+"@
+        Write-Host $connInfo -ForegroundColor Yellow
         exit 1
     }
     Write-OK "SSH 接続成功"

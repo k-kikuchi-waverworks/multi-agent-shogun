@@ -117,6 +117,9 @@ plans/README.md
 # Docs
 !docs/
 !docs/philosophy.md
+!docs/content/
+!docs/content/ops/
+!docs/content/ops/*.md
 
 # Screenshots (masked — no secrets)
 !images/

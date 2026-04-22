@@ -617,6 +617,113 @@ After updating dashboard.md, send ntfy notification:
 
 Note: This replaces the need for inbox_write to shogun. ntfy goes directly to Lord's phone.
 
+## Stall Watchdog (滞留監視 routine)
+
+inbox 処理後 + cmd 完遂後に毎回実行。cmd/subtask が想定時間を超えても動かない場合を検知し、早期介入。
+
+### 実行タイミング
+
+- inbox 処理完遂後 (毎回)
+- cmd 完遂後 (dashboard update 後)
+- Karo self-/clear 前 (idle 条件チェック時)
+
+### 滞留判定基準 (bloom_level 別)
+
+| bloom_level | 通常完遂時間 | 滞留しきい値 | 判定根拠 |
+|-------------|-------------|-------------|---------|
+| L1-L2 (haiku/sonnet 簡易) | 5-15 分 | 30 分 | 2x buffer |
+| L3-L4 (sonnet 標準) | 15-60 分 | 120 分 | 2x buffer |
+| L5 (opus 設計) | 30-120 分 | 240 分 | 2x buffer |
+| gunshi QC | 15-45 分 | 90 分 | 2x buffer |
+| ashigaru idle + task 未完 | — | 10 分 (無応答) | 通常の watchdog → /clear escalation |
+
+### 検出手順
+
+```bash
+# (A) queue/tasks/*.yaml を scan、updated_at から経過時間計算
+for task in queue/tasks/*.yaml; do
+  agent=$(basename "$task" .yaml)
+  status=$(grep '^status:' "$task" | awk '{print $2}')
+  [ "$status" = "in_progress" ] || continue
+  updated=$(grep '^updated_at:' "$task" | awk '{print $2}' | tr -d '"')
+  elapsed_min=$(( ($(date +%s) - $(date -d "$updated" +%s)) / 60 ))
+  # 上記 table の threshold と比較
+done
+
+# (B) 🚨 MANDATORY: gunshi inbox の未処理 report_received scan (QC dispatch 漏れ検出)
+#    2026-04-22 両 stall 実戦教訓 (msg_130618 + msg_142500): ash 完遂報告が gunshi inbox に
+#    stale のまま残り、Karo が QC task YAML 起票+clear_command を発行し忘れる再発パターン。
+#    Watchdog 毎回この scan を実行し、hit があれば即 QC dispatch (10 分以上放置禁)。
+python3 -c '
+import yaml, sys, datetime
+with open("queue/inbox/gunshi.yaml") as f: data = yaml.safe_load(f) or {}
+now = datetime.datetime.now()
+for m in (data.get("messages") or []):
+    if m.get("read") or m.get("type") != "report_received": continue
+    ts = datetime.datetime.fromisoformat(m["timestamp"])
+    elapsed = (now - ts).total_seconds() / 60
+    if elapsed > 10:
+        print(f"STALE gunshi inbox: {m[\"id\"]} from={m.get(\"from\")} elapsed={elapsed:.0f}min — QC dispatch REQUIRED NOW")
+' || true
+
+# (C) 🚨 MANDATORY: report↔task YAML 突合 scan (bookkeeping 漏れ false negative 根絶)
+#    2026-04-22 本日 stall 3 連発実戦教訓 (ash1 MT_G 5950574 / ash5 Phase 1a 2053cdc /
+#    ash6 MT-27 88d76dc): 足軽 report YAML は完遂記載、task YAML status=assigned 残存 の
+#    bookkeeping 漏れパターンを既存 (A)(B) では検出不可 (false negative)。
+#    完遂 timestamp から 30 分経過 (殿 msg_20260422_154312 (d) 準拠) で検出時、
+#    karo.yaml inbox に stall_watchdog_bookkeeping_alert type で nudge。
+#    実装: scripts/stall_watchdog_scan.sh (sh wrapper) + scripts/stall_watchdog_scan.py (python 本体)。
+bash scripts/stall_watchdog_scan.sh || true
+# 試験時は `bash scripts/stall_watchdog_scan.sh --dry-run` で stdout 確認、karo.yaml 書込抑止。
+# --threshold-min N で閾値上書き、--json で hits を JSON 出力 (将来 dashboard 連携)。
+# 独自 fallback (スクリプト未配備時) の参考 python snippet:
+python3 -c '
+import yaml, datetime
+from pathlib import Path
+COMP={"done","completed","success"}; TH=30
+now=datetime.datetime.now()
+for t in sorted(Path("queue/tasks").glob("*.yaml")):
+    agent=t.stem
+    if not (agent.startswith("ashigaru") or agent=="gunshi"): continue
+    d=yaml.safe_load(t.read_text(encoding="utf-8")) or {}
+    ti=(d.get("task") or {})
+    if ti.get("status")!="assigned": continue
+    r=Path(f"queue/reports/{agent}_report.yaml")
+    if not r.exists(): continue
+    docs=list(yaml.safe_load_all(r.read_text(encoding="utf-8")))
+    latest=None
+    for doc in docs:
+        if not isinstance(doc,dict): continue
+        inner=doc["report"] if isinstance(doc.get("report"),dict) else doc
+        ts=inner.get("timestamp")
+        if not isinstance(ts,str): continue
+        try: dt=datetime.datetime.fromisoformat(ts.replace("Z","+00:00"))
+        except ValueError: continue
+        if dt.tzinfo is not None: dt=dt.astimezone().replace(tzinfo=None)
+        rid=inner.get("task_id") or inner.get("primary_task")
+        rst=inner.get("status")
+        if latest is None or dt>latest[0]: latest=(dt,rid,rst)
+    if not latest: continue
+    dt,rid,rst=latest
+    if rid!=ti.get("task_id"): continue
+    if not isinstance(rst,str) or rst.lower() not in COMP: continue
+    em=int((now-dt).total_seconds()//60)
+    if em<TH: continue
+    print(f"BOOKKEEPING STALE: {agent} task_id={rid} parent_cmd={ti.get(\"parent_cmd\")} elapsed={em}min status={rst}")
+' || true
+```
+
+### 検出時の対応
+
+1. **初検出**: ntfy Tier 1 送信 `🚨⏰ {cmd_id}/{subtask_id} 滞留 {N}分 ({state}) — 原因調査中`
+2. **原因調査**: agent pane を capture (`tmux capture-pane -t multiagent:0.{N} -p | tail -30`) → エラー/プロンプト待ち/無応答を判別
+3. **対応分岐**:
+   - 無応答 (inbox 未読) → 再 nudge (inbox_write 再送)
+   - 明示的指示不足 → 追加 inbox_write で方針提示
+   - 重度スタック → `clear_command` type inbox で session reset (redo protocol に従う)
+4. **60 分未解消**: ntfy 再送 `🚨⏰ 滞留 60分 継続: {cmd_id} — {現状}`
+5. **120 分未解消**: ntfy 再送 `🚨⏰⏰ 滞留 120分 継続: {cmd_id} — 殿介入要判断`、dashboard 🚨要対応 に追記
+
 ## Skill Candidates
 
 When processing report scan results, check `queue/reports/ashigaru*_report.yaml` `skill_candidate` fields. If found:

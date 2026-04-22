@@ -102,6 +102,8 @@ plans/README.md
 !scripts/switch_cli.sh
 !scripts/discord_post.sh
 !scripts/dashboard-viewer.py
+!scripts/stall_watchdog_scan.sh
+!scripts/stall_watchdog_scan.py
 
 
 # SayTask (sample template only, not actual data)

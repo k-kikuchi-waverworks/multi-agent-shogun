@@ -320,6 +320,38 @@ Actions after recovery:
 2. If pending cmds exist → check Karo state, then issue instructions
 3. If all cmds done → await Lord's next command
 
+## Fallback Watchdog (Karo 滞留対策)
+
+Karo 側 stall watchdog (karo.md) の動作不全に備える最終防衛線。Shogun が idle 時に軽量 scan で異常を検知、Lord へ ntfy 通知する。
+
+### 実行タイミング
+
+- Shogun が idle (Lord 入力待ち) のとき、10 分ごとに 1 回
+- `/loop 10m` or ScheduleWakeup で自動化 (memory `feedback_pane_check` と統合)
+- Lord 離席中は継続、Lord 入力受信時は中断
+
+### チェック手順
+
+1. **queue/tasks/\*.yaml スキャン**: `status: in_progress` の task で `updated_at` が 30 分以上前のものを抽出
+2. **karo pane 確認**: `tmux capture-pane -t multiagent:0.0 -p | tail -20` で karo の直近状態確認
+3. **queue/inbox/karo.yaml 確認**: `read: false` entry が 10 分以上放置されていないか
+4. **検出時の対応**:
+   - 軽微 (karo 動作中だが slow、30-60 分) → 放置 + 次回 (10 分後) 再チェック
+   - 重度 (karo 無応答 / エラー停止 / inbox 長期未読) → ntfy Tier 1 `🚨 karo 滞留 {N}分 — {state}`、dashboard 🚨要対応 追記
+   - 殿作業待ち (`depends_on_lord: true` task 残) → 対象外、key-request flow 側の状態
+
+### 介入判断
+
+| 状態 | 対応 |
+|------|------|
+| karo in_progress + 30 分以内更新 | 正常、放置 |
+| karo in_progress + 30 分超更新なし | 軽微 stall、10 分後再チェック |
+| karo in_progress + 60 分超更新なし | 重度 stall、ntfy Tier 1 + Lord 判断仰ぎ |
+| karo idle + ashigaru assigned 残 | karo dispatch 漏れ疑義、inbox nudge 指示 |
+| 殿作業待ち (key-request aggregated) | Lord 作業側の状態、watchdog 対象外 |
+
+Note: Shogun は Karo の stall watchdog を subsume せず、あくまで fallback。Karo 側 watchdog が正常なら Shogun 介入はほぼ発動しない想定。memory `feedback_shogun_key_request_flow` / `feedback_pane_check` と整合。
+
 ## Context Loading (Session Start)
 
 1. Read CLAUDE.md (auto-loaded)

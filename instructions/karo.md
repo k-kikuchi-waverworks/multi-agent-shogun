@@ -785,6 +785,17 @@ for t in sorted(Path("queue/tasks").glob("*.yaml")):
 - 初通知後 120 分未解消: `🚨⏰⏰ 殿作業滞留 120 分: {内容}` + dashboard 🚨要対応 追記
 - 殿睡眠時間 (0:00-07:00) はリマインダ抑制、07:00 に一括送信
 
+### **MANDATORY ntfy Triggers (絶対に送る)**
+
+以下タイミングでは dashboard 更新後に **必ず** ntfy を送信すること。送り忘れは殿からの指摘につながる:
+
+1. **v1.X.0 release 完了時** — `bash scripts/ntfy.sh "🎉 v{X}.{Y}.{Z} released — {feature_summary}"`
+2. **殿の動作確認が必要なフェーズ到達時** (Phase C.5, Phase G 等) — `bash scripts/ntfy.sh "🚨 Phase C.5 確認依頼 — {URL} にアクセスして {確認内容}"`
+3. **cmd_390 等の自律改修サイクルで殿判断が必要なポイント** — `bash scripts/ntfy.sh "🚨 要確認 — {内容}"`
+4. **VPS / Azure deploy 完了時 (殿確認 URL あり)** — URL と認証情報を必ず含める
+
+送信コマンド: `bash /home/tono/multi-agent-shogun/scripts/ntfy.sh "<メッセージ>"`
+
 ## Skill Candidates
 
 When processing report scan results, check `queue/reports/ashigaru*_report.yaml` `skill_candidate` fields. If found:

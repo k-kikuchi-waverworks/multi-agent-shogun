@@ -131,6 +131,8 @@ build_cli_command() {
     model=$(get_agent_model "$agent_id")
     local thinking
     thinking=$(_cli_adapter_read_yaml "cli.agents.${agent_id}.thinking" "")
+    local effort
+    effort=$(_cli_adapter_read_yaml "cli.agents.${agent_id}.effort" "")
     local permission_flag="${PERMISSION_FLAG:---dangerously-skip-permissions}"
 
     # thinking prefix: Claude CLI でのみ有効
@@ -146,6 +148,9 @@ build_cli_command() {
             local cmd="claude"
             if [[ -n "$model" ]]; then
                 cmd="$cmd --model $model"
+            fi
+            if [[ -n "$effort" ]]; then
+                cmd="$cmd --effort $effort"
             fi
             cmd="$cmd $permission_flag"
             echo "${prefix}${cmd}"
@@ -300,6 +305,8 @@ get_model_display_name() {
     cli_type=$(get_cli_type "$agent_id")
     local thinking
     thinking=$(_cli_adapter_read_yaml "cli.agents.${agent_id}.thinking" "")
+    local effort
+    effort=$(_cli_adapter_read_yaml "cli.agents.${agent_id}.effort" "")
 
     # モデル名 → 短縮表示名
     local short=""
@@ -322,14 +329,27 @@ get_model_display_name() {
             ;;
     esac
 
+    # effort省略表示: xhigh→xH, max→Max, high→H, medium→M, low→L
+    local effort_suffix=""
+    if [[ -n "$effort" ]]; then
+        case "$effort" in
+            max)    effort_suffix=":Max" ;;
+            xhigh)  effort_suffix=":xH" ;;
+            high)   effort_suffix=":H" ;;
+            medium) effort_suffix=":M" ;;
+            low)    effort_suffix=":L" ;;
+            *)      effort_suffix=":${effort}" ;;
+        esac
+    fi
+
     # Thinking表示: Claude系はデフォルトONなので、falseの時だけ非表示
     # Claude: thinking: false → なし, それ以外(true/未設定) → "+T"
     # Codex等: Thinkingなし → 常になし
     if [[ "$cli_type" == "claude" ]]; then
         if [[ "$thinking" == "false" || "$thinking" == "False" ]]; then
-            echo "$short"
+            echo "${short}${effort_suffix}"
         else
-            echo "${short}+T"
+            echo "${short}+T${effort_suffix}"
         fi
     else
         echo "$short"

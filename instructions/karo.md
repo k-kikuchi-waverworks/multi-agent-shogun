@@ -608,14 +608,38 @@ When updating dashboard.md with Frog and streak info, use this expanded template
 - On every dashboard.md update (task received, report received)
 - Frog section should be at the **top** of dashboard.md (after title, before 進行中)
 
-## ntfy Notification to Lord
+## ntfy Notification to Lord (Tier 1/2/3 Policy)
 
-After updating dashboard.md, send ntfy notification:
+**設計意図**: `from_karo_allowed: false` (F002) ゆえ Karo→Shogun inbox 禁止。代わりに ntfy で Lord 直接通知 + dashboard 集約で Shogun 能動取得。家老はホウレンソウを ntfy で担保し、スタック滞留を watchdog で防ぐ。
+
+### Tier 分類 (`scripts/ntfy.sh` 呼び出し)
+
+**Tier 1 — 即時通知 (Lord's phone bling)**
 - cmd complete: `bash scripts/ntfy.sh "✅ cmd_{id} 完了 — {summary}"`
-- error/fail: `bash scripts/ntfy.sh "❌ {subtask} 失敗 — {reason}"`
-- action required: `bash scripts/ntfy.sh "🚨 要対応 — {content}"`
+- cmd fail: `bash scripts/ntfy.sh "❌ cmd_{id} 失敗 — {reason}"`
+- 🚨 要対応 (Lord 判断要): `bash scripts/ntfy.sh "🚨 要対応 — {content}"`
+- 殿作業検出: `bash scripts/ntfy.sh "🚨 殿作業: {内容} ({想定分}分) — 他 N 件 parallel 継続中"`
+- 殿キー待ち集約: `bash scripts/ntfy.sh "🔑 殿キー待ち集約 — {作業 list}、他 tasks 全完遂"`
+- stall 検知 (60 分 / 120 分滞留): `bash scripts/ntfy.sh "🚨⏰ {cmd_id} 滞留 {N}分 — {state}"`
 
-Note: This replaces the need for inbox_write to shogun. ntfy goes directly to Lord's phone.
+**Tier 2 — 中間進捗 (集約 OK)**
+- subtask 完遂: `bash scripts/ntfy.sh "✔ {subtask_id} PASS — {summary}"` (cmd 内 3-5 件単位で集約可)
+- QC 結果: `bash scripts/ntfy.sh "🔍 QC {result} — {subtask_id}: {points}"`
+- redo 発動: `bash scripts/ntfy.sh "🔄 redo — {subtask_id} → {new_id} ({reason})"`
+- phase 移行: `bash scripts/ntfy.sh "▶ {cmd_id} Phase {N} 開始 — {scope}"`
+
+**Tier 3 — dashboard のみ (ntfy 送らない)**
+- ashigaru task assign
+- 軽微な状態更新 (status: assigned → in_progress)
+- 定期的な statistics update
+
+### Tier 判定原則
+
+- **Lord が知らないと次の判断が詰まる** → Tier 1
+- **Lord が後で見ればよい進捗** → Tier 2 (集約して一括 ntfy)
+- **システム内部の詳細** → Tier 3 (dashboard のみ)
+
+Note: inbox_write to shogun は F002 で禁止 (`from_karo_allowed: false`)。ntfy のみで Lord へ直接通知し、dashboard で Shogun 能動取得。
 
 ## Stall Watchdog (滞留監視 routine)
 
@@ -723,6 +747,43 @@ for t in sorted(Path("queue/tasks").glob("*.yaml")):
    - 重度スタック → `clear_command` type inbox で session reset (redo protocol に従う)
 4. **60 分未解消**: ntfy 再送 `🚨⏰ 滞留 60分 継続: {cmd_id} — {現状}`
 5. **120 分未解消**: ntfy 再送 `🚨⏰⏰ 滞留 120分 継続: {cmd_id} — 殿介入要判断`、dashboard 🚨要対応 に追記
+
+## 殿 Key-Request Flow (殿作業の集約)
+
+殿のみ可能な作業 (Modal deploy / PowerShell push / .env / Stripe 承認等) で全プロジェクトが停止するのを防ぎ、並列 tasks を継続した上で最後に「キー待ち集約」で Lord に一括処理依頼する。
+
+詳細: memory `feedback_shogun_key_request_flow` 参照。
+
+### 殿作業判定 (Lord のみ可能)
+
+- Modal deploy wrapper (Windows PowerShell、環境変数依存)
+- Git push (WSL2 SSH 未登録リポ: web/ml、`feedback_commit_push_split`)
+- `.env` 機密情報更新 (Lord local 環境)
+- Modal Secret 更新 (aituber-r2 等)
+- Stripe / freee / 外部 API 承認系
+- 4 判断ケース (`feedback_shogun_retrospective_reporting`: 最終設計 / 資産毀損 / 原則級方針変更 / 殿固有コンテキスト)
+
+### 4 ステップ対応
+
+1. **Tier 1 ntfy 即送**: `🚨 殿作業: {内容} ({想定分}分) — 他 N 件 parallel 継続中`
+2. **並列 tasks 全継続**: 殿作業 blocker 以外の cmd/subtask は通常通り dispatch (止めない)
+3. **殿作業依存 tasks のみ STOP 維持**: task YAML に `depends_on_lord: true` 明示、他は dispatch 継続
+4. **他 tasks 全完遂時に集約 ntfy**:
+   ```
+   🔑 殿キー待ち集約 (他 tasks 全完遂)
+   ━━━━━━━━━━━━━━━━━━━━
+   (A) backend/.env 3 行追記 (1-2 分)
+   (B) PowerShell: .\scripts\modal_deploy.ps1 (5-10 分)
+   ━━━━━━━━━━━━━━━━━━━━
+   並列 tasks: 全 PASS、殿作業のみ残
+   完遂後: {次 step} 再開 → {cmd_id} Phase N クローズ
+   ```
+
+### 滞留リマインダ (殿無音防止)
+
+- 初通知後 60 分未解消: `🚨⏰ 殿作業滞留 60 分: {内容}`
+- 初通知後 120 分未解消: `🚨⏰⏰ 殿作業滞留 120 分: {内容}` + dashboard 🚨要対応 追記
+- 殿睡眠時間 (0:00-07:00) はリマインダ抑制、07:00 に一括送信
 
 ## Skill Candidates
 
@@ -922,6 +983,25 @@ When ashigaru completes a task, Gunshi performs the first-pass QC and reports PA
 | Deliverables exist and match task YAML | Gunshi |
 | Tests/build/scope review | Gunshi |
 | Dashboard QC aggregation | Gunshi |
+
+#### 🚨 MANDATORY: Ash Report Receipt → Karo MUST Dispatch QC Task Explicitly
+
+**Gunshi does NOT auto-QC on ash report arrival.** Gunshi interprets F003 (`use_task_agents_for_execution` exception) strictly — absent an explicit QC task YAML + clear_command, Gunshi stays idle even while `queue/inbox/gunshi.yaml` accumulates `report_received` entries. Waiting for Gunshi to "pick it up" is a Karo-side stall source (2026-04-22 two consecutive incidents, 殿 `msg_20260422_142500`).
+
+**Rule** (絶対遵守): Every ash report (from `ashigaru_report.yaml` writes or gunshi-inbox `report_received` routing) triggers this 3-step dispatch within **≤10 min** of arrival:
+
+1. **Write `queue/tasks/gunshi.yaml`** — single or bundle QC task, L5 highest priority, list all ash commits + QC observation criteria + PART letter suffix (continuing the alphabet sequence).
+2. **Send `clear_command`** to gunshi via `scripts/inbox_write.sh`, with a one-line summary of the dispatch (commits + bundle scope + expected duration).
+3. **Update dashboard + ntfy** per standard QC dispatch flow (Tier 1 if blocker-chain, Tier 2 otherwise).
+
+**Bundle vs single**: if ≥2 ash reports land within ~30 min AND scopes are independent, prefer bundle QC (single gunshi session, parallel opus). Otherwise dispatch single.
+
+**Anti-pattern (forbidden)**:
+- ❌ "Gunshi will see the report_received inbox entry and start automatically" — Gunshi will NOT, regardless of how explicit the ash message reads.
+- ❌ "I'll wait for a heads_up from Gunshi before writing the QC task" — heads_up is optional courtesy from Gunshi; the dispatch obligation is Karo's irrespective.
+- ❌ Marking ash report as read without having written gunshi.yaml in the same inbox-processing turn.
+
+**Stall Watchdog integration**: every Watchdog pass MUST scan `queue/inbox/gunshi.yaml` for `read: false` `report_received` entries older than ~10 min; any hit = immediate QC task dispatch (no "will monitor further"). See § Stall Watchdog below.
 
 #### Final Judgment → Karo May Run Fast Mechanical Spot Checks
 

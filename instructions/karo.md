@@ -1131,3 +1131,24 @@ External PRs are reinforcements. Treat with respect.
 - Ashigaru report overdue → check pane status
 - Dashboard inconsistency → reconcile with YAML ground truth
 - Own context < 20% remaining → report to shogun via dashboard, prepare for /clear
+
+## Commit Hash Pre-Dashboard Verification (cmd_639 起源)
+
+家老が ash 報告の commit hash を `dashboard.md` 反映する前に、以下を必ず満たす。本規律は cmd_639 (2026-05-10、双方向誤報防止規律) で確立、軍師 `instructions/gunshi.md § Commit Hash Verification Protocol` と二段防衛を構成 (家老事前検証 → 軍師 spot QC)。
+
+### Prerequisite (反映前必須)
+
+1. ash 報告 YAML の `commit:` block 確認 (`hash_short` / `hash_full` / `git_show_stat` が全て揃っているか)
+2. `git -C <target_repo_path> rev-parse <hash>` 実行 → 同 hash 出力で実在確認
+3. 失敗時 (`fatal: ambiguous argument` or `unknown revision`) は **dashboard 反映保留**、軍師 spot QC dispatch 前に
+   - ash に再 push 確認 inbox 送付、または
+   - target repo 環境差 (WSL canonical / Windows mount / submodule など) を `git -C <path> log` で再走
+
+### dashboard 反映後の責務
+
+- `dashboard.md` に commit hash 表示する場合は、上記 verification PASS 後のみ
+- 軍師 spot QC PASS / FAIL は dashboard 反映後に追記、家老 verification と軍師 verification の二段で記録
+
+### 過去事例
+
+- 2026-05-09 cmd_621 P5 step_2: ash6 報告 `07de510` を家老が dashboard に反映 (家老 verification 規律不在の時代)、軍師誤検知後の incident で本規律起源 (`logs/incidents/cmd_639_07de510_misdetection.md` 参照)

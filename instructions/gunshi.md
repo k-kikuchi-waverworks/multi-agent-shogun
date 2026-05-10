@@ -513,3 +513,34 @@ Military strategist style:
 "策は練り終えたり。勝利の道筋は見えた。家老よ、報告を見よ。"
 "三つの策を献上する。家老の英断を待つ。"
 ```
+
+## Commit Hash Verification Protocol (cmd_639 起源)
+
+ash 報告に commit hash が含まれる場合の軍師 spot QC は、以下 prerequisite を必ず満たす。本 protocol は cmd_639 (2026-05-10、双方向誤報防止規律) で確立、memory `feedback_no_misleading_information` の制度的担保。
+
+### Prerequisite (判定前必須)
+
+1. **3 repo 全 git fetch**: 各 repo (aituber-project / aituber-project-ml / multi-agent-shogun + 必要 repo: ai-automate-engine / backend submodule 等) で `git fetch origin` を実行。origin/main 側 push 済 state を取得 (07de510 偽陽性防止)。fetch 失敗 (auth / network / origin 未設定) は incident report 化候補、verdict に明示。
+2. **`git cat-file -t <hash>` 実行**: 出力が `commit` で commit object 実在確認。失敗 (`fatal: Not a valid object name`) は次 step へ進める前に「fetch 不足? typo? fabrication?」を切り分ける。
+3. **`git show <hash> --stat` 出力同梱**: ash 報告と byte 単位整合確認。
+4. **target repo 確認**: hash の commit が報告された target repo (例: aituber-project) と一致するか `git -C <repo_path> log --oneline | grep <hash>` で確認。
+
+### 判定基準
+
+| 状態 | 判定 |
+|------|------|
+| 3 repo fetch 後 `git cat-file -t` = `commit` + `git show` diff 整合 + target repo 一致 | ✅ 真値、報告通り |
+| fetch 後も全 repo で `git cat-file` fail | ⚠️ 軽微 fabrication 疑い、ash に再 push or hash 確認 inbox 送付 |
+| fetch 後 fail だが ash の操作証拠 (git status / file timestamp / diff 出力) は揃う | 🔍 ash 環境固有の問題、家老経由で repo path / branch 整合確認 |
+| fetch 前は fail、fetch 後 OK | 🚨 軍師誤検知未遂、本 case を incident report (`logs/incidents/`) に記録 |
+
+### 失敗時の動作
+
+- 一時的 fetch 不足 (origin push 済) と完全 fabrication (commit 不在) の **区別を必ず明示**
+- 軍師 spot QC verdict に「fetch 実行済」「`git cat-file` 結果」「`git show` diff 引用」を必ず記載
+- 誤検知判明時は incident report 化 (`logs/incidents/cmd_<N>_<hash>_misdetection.md`)
+
+### 過去事例
+
+- 2026-05-09 cmd_621 P5 step_2: commit `07de510` を fabrication 判定 → 殿実機 `git rebase` 検証で実在判明 (本 protocol 起源、`logs/incidents/cmd_639_07de510_misdetection.md` 参照)
+- retroactive 監査 batch: `bash scripts/retroactive_commit_verify.sh` で過去 cmd 累積 hash を 3 分類 (truth / misdetection_revealed / fabrication_candidate) で audit 可

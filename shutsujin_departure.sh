@@ -388,8 +388,33 @@ EOF
     done
 
     # 軍師タスクファイルリセット
+    # cmd_645 (2026-05-10): gunshi 2-instance architecture — gunshi/gunshi_a/gunshi_b 3 file 初期化 (gunshi は backward compat retain)
     cat > ./queue/tasks/gunshi.yaml << EOF
-# 軍師専用タスクファイル
+# 軍師専用タスクファイル (deprecated, backward compat — cmd_645 完遂後は gunshi_a/gunshi_b 使用)
+task:
+  task_id: null
+  parent_cmd: null
+  description: null
+  target_path: null
+  status: idle
+  timestamp: ""
+EOF
+    cat > ./queue/tasks/gunshi_a.yaml << EOF
+# 軍師 A 専用タスクファイル (cmd_645 起源)
+# 担当領域: ML/AI/データ系 (LoRA, fine-tune, prompt eng, RAG, TTS, vLLM)
+# pane: multiagent:agents.8
+task:
+  task_id: null
+  parent_cmd: null
+  description: null
+  target_path: null
+  status: idle
+  timestamp: ""
+EOF
+    cat > ./queue/tasks/gunshi_b.yaml << EOF
+# 軍師 B 専用タスクファイル (cmd_645 起源)
+# 担当領域: infra/dev/規律系 (ai-automate-engine, Windows app, regression, dispatch template, Spot QC)
+# pane: multiagent:agents.9 (殿手動 trigger 必須)
 task:
   task_id: null
   parent_cmd: null
@@ -411,8 +436,23 @@ EOF
     done
 
     # 軍師レポートファイルリセット
+    # cmd_645 (2026-05-10): gunshi/gunshi_a/gunshi_b 3 file 初期化 (gunshi は backward compat retain)
     cat > ./queue/reports/gunshi_report.yaml << EOF
 worker_id: gunshi
+task_id: null
+timestamp: ""
+status: idle
+result: null
+EOF
+    cat > ./queue/reports/gunshi_a_report.yaml << EOF
+worker_id: gunshi_a
+task_id: null
+timestamp: ""
+status: idle
+result: null
+EOF
+    cat > ./queue/reports/gunshi_b_report.yaml << EOF
+worker_id: gunshi_b
 task_id: null
 timestamp: ""
 status: idle
@@ -423,7 +463,8 @@ EOF
     echo "inbox:" > ./queue/ntfy_inbox.yaml
 
     # agent inbox リセット
-    for agent in shogun karo $_ASHIGARU_IDS_STR gunshi; do
+    # cmd_645 (2026-05-10): gunshi 2-instance architecture — gunshi/gunshi_a/gunshi_b inbox 初期化
+    for agent in shogun karo $_ASHIGARU_IDS_STR gunshi gunshi_a gunshi_b; do
         echo "messages:" > "./queue/inbox/${agent}.yaml"
     done
 
@@ -889,8 +930,9 @@ NINJA_EOF
     log_info "📬 メールボックス監視を起動中..."
 
     # inbox ディレクトリ初期化（シンボリックリンク先のLinux FSに作成）
+    # cmd_645 (2026-05-10): gunshi 2-instance — gunshi/gunshi_a/gunshi_b inbox 確保
     mkdir -p "$SCRIPT_DIR/logs"
-    for agent in shogun karo $_ASHIGARU_IDS_STR gunshi; do
+    for agent in shogun karo $_ASHIGARU_IDS_STR gunshi gunshi_a gunshi_b; do
         [ -f "$SCRIPT_DIR/queue/inbox/${agent}.yaml" ] || echo "messages:" > "$SCRIPT_DIR/queue/inbox/${agent}.yaml"
     done
 

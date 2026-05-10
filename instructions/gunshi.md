@@ -616,3 +616,78 @@ verdict 5 状態の `PASS_WITH_OBSERVATIONS` は前者用、`NEEDS_REVISION` 以
 - cmd_636/637/638/641 cascade FAIL (実行時動作確認規律不在、cmd_641 教訓直撃)
 - cmd_639 自己適用検証 (a320897 を `Commit Hash Verification Protocol` で自己検証、再帰的 verification 達成)
 - cmd_639 spot QC PASS_WITH_OBSERVATIONS 6 件 (本 template の運用先行例、verdict 影響なし容認基準を本 template で明示化)
+
+---
+
+## 軍師 2 体制 (cmd_645 起源)
+
+cmd_645 (2026-05-10 確立) で軍師 2 体制が制度化された。殿明示承認 msg_123656 (12:36 「いいよ」)、軍師 plan `plans/cmd_645_2_gunshi_architecture.md` §3 単一案 A (領域別役割分担) を採択。
+
+### 自己識別 (cmd_645 移行後)
+
+```bash
+tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
+# 出力: gunshi_a → 軍師 A (ML/AI/データ系)
+# 出力: gunshi_b → 軍師 B (infra/dev/規律系)
+# 出力: gunshi  → 過渡期 (deprecated、cmd_645 完遂前 or backward compat)
+```
+
+★cmd_645 完遂後は `gunshi` 出力は deprecated★。新規セッションは `gunshi_a` または `gunshi_b` を期待。`gunshi` 出力時は本セクション「過渡期 fallback」規律を適用 (gunshi_a 相当として動作)。
+
+### 領域別役割分担
+
+| 軍師 | pane | 担当領域 | dispatch keyword |
+|------|------|---------|------------------|
+| gunshi_a | multiagent:agents.8 | ML/AI/データ系 | LoRA, fine-tune, RAG, TTS, vLLM, Vedal, prompt, embedding, axolotl, dataset, koi_v\d+, 学習, 推論 |
+| gunshi_b | multiagent:agents.9 | infra/dev/規律系 | infra, ai-automate-engine, dev:all, regression, smoke, E2E, dispatch template, Spot QC, commit hash verification, audit, PowerShell, bash, Discord, OBS, 規律 |
+
+### ファイル path (軍師 A/B 個別)
+
+```
+queue/tasks/gunshi_a.yaml      ← 軍師 A 専用 task
+queue/tasks/gunshi_b.yaml      ← 軍師 B 専用 task
+queue/reports/gunshi_a_report.yaml
+queue/reports/gunshi_b_report.yaml
+queue/inbox/gunshi_a.yaml
+queue/inbox/gunshi_b.yaml
+```
+
+★既存 `queue/{tasks,reports,inbox}/gunshi*.yaml` (cmd_645 完遂前)★ は backward compat retain (本セクション「過渡期 fallback」規律準拠)。
+
+### 衝突調停規律
+
+- 領域 overlap 時は家老が cmd 主領域で振り分け (`instructions/karo.md` § 軍師 dispatch 振り分け規律 参照)
+- 主軍師経由で副領域は別 cmd 候補として起票提案
+- 同時 dispatch 禁止 (RACE-001 相当): 同一 cmd を両軍師に同時 dispatch しない
+
+### 相互 spot QC 規律
+
+- 軍師 A 起草 plan → ★軍師 B が spot QC★ (例外: 同領域作業中 busy 時は家老調停で順序決定)
+- 軍師 B 起草 plan → ★軍師 A が spot QC★
+- 自軍師領域 ash 完遂報告の spot QC は同一軍師 (実装詳細知識必要)
+- 規律 cmd (cmd_640/639/645 等) は ★軍師 B 担当★ (規律領域)
+- cmd_640 §C `Gunshi Spot QC Template` Phase 0-5 全走り標準、verdict 5 状態統一適用、規律 1-5 共通遵守
+
+### 軍師全員合計 2 task 並列上限
+
+- 軍師 A + 軍師 B で同時並列 task = 上限 2
+- 単一軍師複数 task は禁止 (1 task at a time per gunshi)
+- 殿明示 (msg_123656) + memory `feedback_opus_ashigaru_parallel_investigation` 軍師 2 体制恒常化規律
+
+### 過渡期 fallback (cmd_645 ash 実装直後)
+
+cmd_645 ash 実装で settings.yaml + scripts + queue/ 構造は分割済だが、★tmux pane 0.9 起草 + 軍師 B claude 起動は殿手動 trigger★ (Phase 6 完遂後)。pane 0.9 未起動時の挙動:
+
+- 軍師 A (pane 0.8) は通常運用継続
+- 軍師 B 向け task が発生した場合、家老は殿に Tier 1 ntfy で「pane 0.9 起動 + claude 起動」依頼
+- 殿手動完遂まで軍師 B 担当 cmd は queue/tasks/gunshi_b.yaml に書込待機 (assigned 状態)
+- pane 0.9 起動完遂後、軍師 B が Session Start で task YAML 読込 → 通常運用開始
+
+### 既存 gunshi 起動 instance の扱い
+
+cmd_645 ash 実装時点で既に起動中の `gunshi` 名 instance (pane 0.8) は ★cmd_645 完遂後 軍師 A (gunshi_a) として動作継続★。@agent_id を `gunshi_a` に書換要 (殿手動 or 家老再起動 trigger):
+
+```bash
+tmux set-option -p -t multiagent:agents.8 @agent_id "gunshi_a"
+tmux set-option -p -t multiagent:agents.9 @agent_id "gunshi_b"
+```

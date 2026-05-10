@@ -50,6 +50,12 @@ while true; do
     start_watcher_if_missing "ashigaru5" "multiagent:agents.5" "logs/inbox_watcher_ashigaru5.log"
     start_watcher_if_missing "ashigaru6" "multiagent:agents.6" "logs/inbox_watcher_ashigaru6.log"
     start_watcher_if_missing "ashigaru7" "multiagent:agents.7" "logs/inbox_watcher_ashigaru7.log"
+    # cmd_645 (2026-05-10): gunshi 2-instance architecture
+    # gunshi (legacy) retained for backward compat during transition; gunshi_a/gunshi_b are the new canonical entries.
+    # gunshi_a = ML/AI/データ系 (multiagent:agents.8)
+    # gunshi_b = infra/dev/規律系 (multiagent:agents.9, requires manual pane creation by Lord on first launch)
     start_watcher_if_missing "gunshi" "multiagent:agents.8" "logs/inbox_watcher_gunshi.log"
+    start_watcher_if_missing "gunshi_a" "multiagent:agents.8" "logs/inbox_watcher_gunshi_a.log"
+    start_watcher_if_missing "gunshi_b" "multiagent:agents.9" "logs/inbox_watcher_gunshi_b.log"
     sleep 5
 done

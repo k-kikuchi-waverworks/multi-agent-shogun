@@ -544,3 +544,75 @@ ash 報告に commit hash が含まれる場合の軍師 spot QC は、以下 pr
 
 - 2026-05-09 cmd_621 P5 step_2: commit `07de510` を fabrication 判定 → 殿実機 `git rebase` 検証で実在判明 (本 protocol 起源、`logs/incidents/cmd_639_07de510_misdetection.md` 参照)
 - retroactive 監査 batch: `bash scripts/retroactive_commit_verify.sh` で過去 cmd 累積 hash を 3 分類 (truth / misdetection_revealed / fabrication_candidate) で audit 可
+
+## Gunshi Spot QC Template (cmd_640 起源)
+
+軍師が ash 完遂を spot QC する際、以下 phase を必ず満たす。本 template は cmd_640 (2026-05-10、spot QC 品質規律) で確立、cmd_641 教訓 (実行時動作確認必須化) + cmd_639 自己適用検証規律の制度化。`Commit Hash Verification Protocol` と二段で双方向誤報防止規律を構成。
+
+### Phase 構成
+
+| phase | 内容 | 起源教訓 |
+|-------|------|---------|
+| phase_0 | preflight (ash task YAML 確認 + ash report 確認 + commit hash 検証 + 軍師 plan §N 全文再走) | 標準 |
+| phase_1 | 検証 N 項目再走 (syntax / grep / **★実行時動作確認★** / cmd_<M>-<L> retain) | cmd_641 教訓 |
+| phase_2 | caveats N 件妥当性判定 (verdict 影響あり/なし、容認/却下、根拠明示) | cmd_640 (A)(B) 整合 |
+| phase_3 | (任意) 必要に応じ depth 拡張 (retroactive 監査 / 関連 commit history 確認 / 影響範囲評価) | cmd_639 起源 |
+| phase_4 | 完遂判定 (verdict 5 状態 + deliverable_check + observations N 件 + summary) | 標準 |
+| phase_5 | 完遂後 trigger 順序 (stage_0 〜 stage_N) | 標準 |
+
+### verdict 5 状態
+
+| verdict | 意味 | trigger |
+|---------|------|---------|
+| `PASS` | 全項目完全 PASS、observation 0 件 | 家老 ack + 完遂宣言 + dashboard 反映 |
+| `PASS_WITH_OBSERVATIONS` | 核心項目 PASS、minor observation N 件 (verdict 影響なし) | 家老 ack + 完遂宣言 + observations を別 cmd 起票材料整理 |
+| `NEEDS_REVISION` | minor 修正で PASS 可、ash redo 不要、家老 patch 指示 or 軍師 follow-up 提案 | 家老 patch 指示 or 軍師 follow-up cmd 起票 |
+| `FAIL` | 核心項目 FAIL、ash redo 必須 | 家老 redo dispatch (clear_command + 新 task_id) |
+| `BLOCKED` | 環境 / 前提崩れで判定不能、家老/殿判断要請 | 家老/殿判断仰ぎ |
+
+### 必須規律
+
+#### 規律 1: 実行時動作確認必須化 (cmd_641 教訓)
+
+軍師 spot QC は **commit/plan 整合性のみでなく実行時動作確認も含める**。
+
+- PowerShell: AST PARSE_OK + (可能なら) dry-run 試行
+- Python: import 成功 + smoke test 実行
+- yaml: yaml parse 成功 + 関連 script 実行
+- bash script: `bash -n` syntax PASS + executable 確認 + (Lord-local 出力で) 実行効果確認
+- markdown / 規律 doc: grep で section 追記確認 + 既存 section 不変確認 (`git diff cmd_<N>^ HEAD` で削除行 0 確認)
+
+cmd_636/637/638/641 cascade FAIL は本規律不在で発生 (commit/plan 整合性のみ PASS、殿実機 FAIL 第二波で cmd_637/638 起票)。本規律で再発防止。
+
+#### 規律 2: retroactive 監査の発動条件 (cmd_639 起源)
+
+以下条件で軍師は retroactive 監査を発動:
+
+- ash 報告 commit hash の真正性に疑義 (例: 過去 ash 報告の hash 一覧と齟齬)
+- 過去 cmd で fabrication 判定があり、その後 ash redo で正しい hash が得られた場合 (cmd_621 P5 step_2 教訓)
+- 制度化目的の cmd で「過去事案 verification」が要請される場合 (cmd_639 起源)
+
+retroactive 監査 logic: `bash scripts/retroactive_commit_verify.sh > logs/audits/cmd_<N>_retroactive_verify_<YYYYMMDD>.md`
+
+#### 規律 3: 自己適用検証規律 (cmd_639 起源)
+
+verification 規律 cmd 自体の spot QC では、規律を **cmd 自身に自己適用** で検証 (再帰的 verification)。
+
+例: cmd_639 spot QC で a320897 を `Commit Hash Verification Protocol` Prerequisite 1-4 で自己検証。cmd_640 spot QC では本 template (規律 1-5) を cmd_640 自身に自己適用し、再帰的に整合性を担保。
+
+#### 規律 4: observations vs risks_to_north_star 区別
+
+- **observations**: verdict 影響なし、minor、別 cmd 候補
+- **risks_to_north_star**: 北極星到達リスク、cmd 内 or 別 cmd で mitigation 必要
+
+verdict 5 状態の `PASS_WITH_OBSERVATIONS` は前者用、`NEEDS_REVISION` 以上は後者の可能性を示唆する切り分け。
+
+#### 規律 5: skill_candidate 標準化
+
+`skill_candidate: { found: bool, note: string }` で標準化。`found: true` 時は dashboard で殿承認待ち、承認後 skill 化 cmd 起票。
+
+### 過去事例
+
+- cmd_636/637/638/641 cascade FAIL (実行時動作確認規律不在、cmd_641 教訓直撃)
+- cmd_639 自己適用検証 (a320897 を `Commit Hash Verification Protocol` で自己検証、再帰的 verification 達成)
+- cmd_639 spot QC PASS_WITH_OBSERVATIONS 6 件 (本 template の運用先行例、verdict 影響なし容認基準を本 template で明示化)

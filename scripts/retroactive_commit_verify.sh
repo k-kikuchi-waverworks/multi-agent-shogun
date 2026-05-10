@@ -81,9 +81,12 @@ SOURCES=(
 )
 for src in "${SOURCES[@]}"; do
   [ -e "$src" ] || continue
+  # cmd_640 (D) 修正 1: hex 文字 (a-f) 必須 filter で純数字 (1487978594020884650 / 20260420 等) 除外
+  # cmd_640 (D) 修正 2: ed25519 (SSH key type 名) + 軍師 plan 擬似コード内 example hash を完全一致除外
   grep -rohE '\b[0-9a-f]{7,40}\b' "$src" 2>/dev/null \
     | grep -E '^[0-9a-f]{7,40}$' \
-    | awk 'length($0) >= 7 && length($0) <= 40' \
+    | awk 'length($0) >= 7 && length($0) <= 40 && /[a-f]/' \
+    | grep -v -E '^(ed25519|a1b2c3d4e5f6|a2b3c4d5e6f7|a9f1b2c3d4e5|e1f2a3b4c5d6)$' \
     >> "$TMPFILE" || true
 done
 
@@ -108,7 +111,10 @@ misdetection_count=0
 # 軍師 fabrication 判定済 hash list (gunshi_report.yaml から抽出)
 FAB_HASHES=""
 if [ -f "${REPO_ROOT}/queue/reports/gunshi_report.yaml" ]; then
-  FAB_HASHES="$(grep -B1 -A3 -i 'fabrication' "${REPO_ROOT}/queue/reports/gunshi_report.yaml" 2>/dev/null \
+  # cmd_640 (D) 修正 3: 「fabrication 認定」明示 pattern 限定で抽出 (周辺マッチ禁、c18069d 偶発分類解消)
+  # 抽出 pattern: ★fabrication★ <hash> | fabrication 認定[: ]<hash> | fabrication_confirmed: <hash>
+  FAB_HASHES="$(grep -oE '(★fabrication★[[:space:]]+[0-9a-f]{7,40}|fabrication[[:space:]]+認定[:[:space:]]+[0-9a-f]{7,40}|fabrication_confirmed:[[:space:]]+[0-9a-f]{7,40})' \
+      "${REPO_ROOT}/queue/reports/gunshi_report.yaml" 2>/dev/null \
     | grep -oE '\b[0-9a-f]{7,40}\b' | sort -u || true)"
 fi
 

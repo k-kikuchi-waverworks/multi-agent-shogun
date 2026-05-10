@@ -1152,3 +1152,90 @@ External PRs are reinforcements. Treat with respect.
 ### 過去事例
 
 - 2026-05-09 cmd_621 P5 step_2: ash6 報告 `07de510` を家老が dashboard に反映 (家老 verification 規律不在の時代)、軍師誤検知後の incident で本規律起源 (`logs/incidents/cmd_639_07de510_misdetection.md` 参照)
+
+## Gunshi Dispatch Template (cmd_640 起源)
+
+家老が軍師に task YAML を dispatch する際、以下を必ず満たす。本 template は cmd_640 (2026-05-10、dispatch template 品質規律) で確立、memory `feedback_implicit_assumption_checklist` + `feedback_avoid_default_hybrid` の制度的担保。
+
+### 必須項目
+
+| 項目 | 内容 | 起源教訓 |
+|------|------|---------|
+| `parent_cmd` | 親 cmd ID | 標準 |
+| `type` | strategy / analysis / design / evaluation / decomposition / quality_check / cmd_<N>_<scope>_review / cmd_<N>_<scope>_plan | 標準 |
+| `description` | 背景 + 求める成果物 + 制約 + 完遂後 trigger 順序 + 完遂後の報告文面 | 標準 |
+| `north_star` | 北極星貢献経路 (1 段階以上の経路明記) | cmd_190 教訓 |
+| `preflight` | 軍師着手前に確認すべき項目 | 標準 |
+| `constraints` | 制約 (opus thinking / 1 task at a time / destructive 禁 / ハイブリッド禁 / 暗黙前提 8 項目 / Chesterton's Fence cmd_<N>-<M> retain 等) | 標準 |
+| `reference_resources` | 参考資料 (commit hash + path) | 標準 |
+| `target_path` | 軍師 deliverable 物理 path (plans/cmd_<N>_<scope>.md 等) | 標準 |
+
+### 単一推奨案命名規律 (memory feedback_avoid_default_hybrid)
+
+軍師に N scope 委任する場合、各 scope に「単一推奨案」を要求する。「ハイブリッド案 = 安全策」を定型化する傾向を回避し、制約を真面目に検討した上で単一案を推す。却下案の根拠も plan 内で明示。
+
+### caveats 容認/却下判定基準
+
+軍師 spot QC で caveats を容認する場合、以下基準を明示:
+
+- **verdict 影響なし**: 機能等価 + retain 担保 + 規律遵守 ⇒ 容認
+- **内容実質達成**: ash 編集行為としては規律遵守 + 副次効果が後続 cmd で容認可 ⇒ 容認
+- **品質向上方向**: LoC 見積差異が品質充実方向 ⇒ 容認
+- それ以外 (verdict 影響あり / 規律違反 / 後続 cmd 追加負担大) ⇒ 却下、redo 指示
+
+### 過去事例
+
+- cmd_190 north_star 不在事故 (memory `project_remaining_categories` 連鎖、軍師が「option A vs option B」を neutral 提示で affiliate revenue リスク見落とし)
+- cmd_639 spot QC 6 observations 容認事例 (基準暗黙運用 → 本 template で明示化)
+
+## Ashigaru Dispatch Template (cmd_640 起源)
+
+家老が ash に task YAML を dispatch する際、以下を必ず満たす。本 template は cmd_640 (2026-05-10) で確立、cmd_641 教訓 (実行時動作確認必須化) + ash5 教訓 (find maxdepth 制限禁) + cmd_621 教訓 (3 repo 全 git fetch) の三大教訓を構造的に組み込む。
+
+### 必須項目
+
+| 項目 | 内容 | 起源教訓 |
+|------|------|---------|
+| `parent_cmd` | 親 cmd ID | 標準 |
+| `type` | implementation / refactor / cleanup / cmd_<N>_<scope>_implementation 等 | 標準 |
+| `description` | 背景 + 軍師 plan 引用 (Phase 0-N) + 実行時動作確認指示 + caveats 正直明示指示 | cmd_641 + cmd_621 教訓 |
+| `preflight` | ash 着手前確認 (env / dependency / target file 存在 / cmd retain 確認) | 標準 |
+| `target_path` | ash deliverable 物理 path | 標準 |
+| `verification_items` | 事後検証 N 項目 (syntax / grep / commit hash + git show 自己実証 / retain 確認 / 暗黙前提 8/8) | cmd_639 起源 |
+| `constraints` | 制約 (opus thinking / destructive 禁 / 探索範囲漏れ防止 (find maxdepth 制限禁) / 3 repo 全 git fetch + cat-file 必須 / cmd_<N>-<M> retain) | cmd_641 + ash5 + cmd_621 教訓 |
+
+### 必須規律 (description に明記)
+
+#### 規律 1: 実行時動作確認必須化 (cmd_641 教訓)
+
+ash 実装の事後検証は **commit/syntax/grep のみでは不十分**。実装が動作する環境で実行時挙動を確認する。
+
+- 例 1: PowerShell スクリプト修正 → AST PARSE_OK + 実機 dry-run + 実機 invocation 試行
+- 例 2: Python script 修正 → import 成功 + smoke test 実行
+- 例 3: yaml 修正 → yaml parse 成功 + 関連 script 実行
+- 例 4: bash script 修正 → `bash -n` syntax PASS + executable 確認 + Lord-local 出力で実行効果確認
+
+殿実機 FAIL 確定後の追加 cmd 起票 (cmd_637/638) は cascade コスト大。dispatch 時に「実行時動作確認」を verification_items に明記する。
+
+#### 規律 2: 探索範囲漏れ防止 (ash5 cmd_611 Phase 2 教訓)
+
+`find` 等の探索は **maxdepth 制限禁** (or 制限する場合は理由明記)。.venv_qwen3tts 探索漏れで真因見逃し → BLOCKER の前例あり。`-prune` で除外する場合も、除外対象を task YAML に明示し漏れリスクを ash と共有する。
+
+#### 規律 3: 3 repo 全 git fetch + cat-file 必須 (cmd_621 P5 教訓)
+
+ash 報告に commit hash を含める場合、ash 自身が `git fetch origin` + `git cat-file -t <hash>` + `git show <hash> --stat` を自己実証してから報告する。軍師 spot QC で再検証する規律 (cmd_639 起源 `instructions/gunshi.md § Commit Hash Verification Protocol`) の前段として、ash 側で先行担保する。fetch 失敗時 (auth/network/origin 未設定) は隠蔽せず caveats に正直明示。
+
+#### 規律 4: report YAML 追記必須化
+
+ash 完遂後 `queue/reports/ashigaru{N}_report.yaml` 上書き必須 (status: completed + caveats 列挙 + verification 結果 + 暗黙前提 8/8 + cmd_<N>-<M> retain 確認)。report YAML 未更新で完遂報告するのは禁止。
+
+#### 規律 5: caveats 正直明示 (memory feedback_no_misleading_information)
+
+LoC 見積差異 / scope creep / micro-deviation 等は隠蔽せず正直明示する。雑な要約禁、memory・実装・軍師 plan 検証してから断言する。誤誘導は殿信頼毀損 (殿明言「間違った情報提示しないで」)。
+
+### 過去事例
+
+- cmd_641 cascade FAIL (cmd_636/637/638) — 軍師 spot QC が commit/plan 整合性のみで PASS、殿実機 FAIL 第二波で cmd_637/638 起票
+- ash5 cmd_611 Phase 2 BLOCKER — `find` maxdepth 制限で `.venv_qwen3tts` 探索漏れ、真因見逃し
+- cmd_621 P5 step_2 `07de510` fabrication 誤検知 — 軍師 fetch 不足、本 cmd_640 で ash 側担保
+

@@ -73,16 +73,24 @@ _ASHIGARU_COUNT=$(echo "$_ASHIGARU_IDS_STR" | wc -w | tr -d ' ')
 # 軍師IDリストを動的に取得（settings.yaml から、active + deprecated 全列挙）
 # cmd_652 (2026-05-16): cmd_645 hard-coded `gunshi gunshi_a gunshi_b` を agent_list.sh 経由動的化
 # legacy 'gunshi' (settings.yaml に存在しないが backward compat retain) は別途先頭追加
+# cmd_656 (2026-05-16): _ACTIVE_GUNSHI_IDS_STR 追加 — 物理 pane 構築/起動/watcher 用 (deprecated 除外)
+#                       _GUNSHI_IDS_STR は queue/inbox 等の file 初期化用 (legacy + active + deprecated 全)
 if [ -f "$SCRIPT_DIR/scripts/lib/agent_list.sh" ]; then
     # shellcheck source=scripts/lib/agent_list.sh
     . "$SCRIPT_DIR/scripts/lib/agent_list.sh"
     _GUNSHI_IDS_STR="gunshi $(get_all_gunshi_agents | tr '\n' ' ')"
+    _ACTIVE_GUNSHI_IDS_STR=$(get_active_gunshi_agents | tr '\n' ' ')
 else
     # fallback: agent_list.sh 不在時 (旧環境)
     _GUNSHI_IDS_STR="gunshi gunshi_a gunshi_b"
+    _ACTIVE_GUNSHI_IDS_STR="gunshi"
 fi
 # trim 末尾空白
 _GUNSHI_IDS_STR=$(echo "$_GUNSHI_IDS_STR" | tr -s ' ' | sed 's/ $//')
+_ACTIVE_GUNSHI_IDS_STR=$(echo "$_ACTIVE_GUNSHI_IDS_STR" | tr -s ' ' | sed 's/ $//')
+# active gunshi が空なら legacy 'gunshi' 単一に fallback (settings.yaml 異常時の安全策)
+[ -z "$_ACTIVE_GUNSHI_IDS_STR" ] && _ACTIVE_GUNSHI_IDS_STR="gunshi"
+_ACTIVE_GUNSHI_COUNT=$(echo "$_ACTIVE_GUNSHI_IDS_STR" | wc -w | tr -d ' ')
 
 # 色付きログ関数（戦国風）
 log_info() {
@@ -622,6 +630,7 @@ tmux split-window -v
 tmux split-window -v
 
 # ペインラベル・エージェントID・色設定 — settings.yaml から動的に構築
+# cmd_656 (2026-05-16): hard-coded "gunshi" 単一を _ACTIVE_GUNSHI_IDS_STR (gunshi1/gunshi2) 動的列挙に置換
 PANE_LABELS=("karo")
 AGENT_IDS=("karo")
 PANE_COLORS=("red")
@@ -630,14 +639,17 @@ for _ai in $_ASHIGARU_IDS_STR; do
     AGENT_IDS+=("$_ai")
     PANE_COLORS+=("blue")
 done
-PANE_LABELS+=("gunshi")
-AGENT_IDS+=("gunshi")
-PANE_COLORS+=("yellow")
+for _gi in $_ACTIVE_GUNSHI_IDS_STR; do
+    PANE_LABELS+=("$_gi")
+    AGENT_IDS+=("$_gi")
+    PANE_COLORS+=("yellow")
+done
 
 # モデル名設定（pane-border-format で常時表示するため）- 動的構築
+# cmd_656: gunshi 判定を prefix 一致 (gunshi*) に拡張 (gunshi1/gunshi2 対応)
 MODEL_NAMES=()
 for _ai in "${AGENT_IDS[@]}"; do
-    if [[ "$_ai" == "gunshi" ]]; then
+    if [[ "$_ai" == gunshi* ]]; then
         MODEL_NAMES+=("Opus")
     elif [ "$KESSEN_MODE" = true ]; then
         MODEL_NAMES+=("Opus")
@@ -797,25 +809,31 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
         log_info "  └─ 足軽1-${_ASHIGARU_COUNT}（平時の陣）、召喚完了"
     fi
 
-    # 軍師（pane _ASHIGARU_COUNT+1）: Opus Thinking — 戦略立案・設計判断専任
-    p=$((PANE_BASE + _ASHIGARU_COUNT + 1))
-    _gunshi_cli_type="claude"
-    _gunshi_cmd="claude --model opus --effort max $PERMISSION_FLAG"
-    if [ "$CLI_ADAPTER_LOADED" = true ]; then
-        _gunshi_cli_type=$(get_cli_type "gunshi")
-        _gunshi_cmd=$(build_cli_command "gunshi")
-    fi
-    # Codex等の初期プロンプト付加（サジェストUI停止問題対策）
-    _startup_prompt=$(get_startup_prompt "gunshi" 2>/dev/null)
-    if [[ -n "$_startup_prompt" ]]; then
-        _gunshi_cmd="$_gunshi_cmd \"$_startup_prompt\""
-    fi
-    tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_gunshi_cli_type"
-    tmux send-keys -t "multiagent:agents.${p}" "$_gunshi_cmd"
-    tmux send-keys -t "multiagent:agents.${p}" Enter
-    _gunshi_display=$(get_model_display_name "gunshi" 2>/dev/null || echo "Opus+T")
-    tmux set-option -p -t "multiagent:agents.${p}" @model_name "$_gunshi_display" 2>/dev/null || true
-    log_info "  └─ 軍師（${_gunshi_display}）、召喚完了"
+    # 軍師（pane _ASHIGARU_COUNT+1〜）: Opus Thinking — 戦略立案・設計判断専任
+    # cmd_656 (2026-05-16): _ACTIVE_GUNSHI_IDS_STR 動的列挙で gunshi1/gunshi2 並列起動
+    # legacy 'gunshi' / gunshi_a / gunshi_b は deprecated:true で skip 済 (settings.yaml)
+    _gunshi_idx=0
+    for _gi in $_ACTIVE_GUNSHI_IDS_STR; do
+        p=$((PANE_BASE + _ASHIGARU_COUNT + 1 + _gunshi_idx))
+        _gunshi_cli_type="claude"
+        _gunshi_cmd="claude --model opus --effort max $PERMISSION_FLAG"
+        if [ "$CLI_ADAPTER_LOADED" = true ]; then
+            _gunshi_cli_type=$(get_cli_type "$_gi")
+            _gunshi_cmd=$(build_cli_command "$_gi")
+        fi
+        # Codex等の初期プロンプト付加（サジェストUI停止問題対策）
+        _startup_prompt=$(get_startup_prompt "$_gi" 2>/dev/null)
+        if [[ -n "$_startup_prompt" ]]; then
+            _gunshi_cmd="$_gunshi_cmd \"$_startup_prompt\""
+        fi
+        tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_gunshi_cli_type"
+        tmux send-keys -t "multiagent:agents.${p}" "$_gunshi_cmd"
+        tmux send-keys -t "multiagent:agents.${p}" Enter
+        _gunshi_display=$(get_model_display_name "$_gi" 2>/dev/null || echo "Opus+T")
+        tmux set-option -p -t "multiagent:agents.${p}" @model_name "$_gunshi_display" 2>/dev/null || true
+        log_info "  └─ 軍師 ${_gi}（${_gunshi_display}）、召喚完了"
+        _gunshi_idx=$((_gunshi_idx + 1))
+    done
 
     if [ "$KESSEN_MODE" = true ]; then
         log_success "✅ 決戦の陣で出陣！全軍Opus！"
@@ -948,13 +966,20 @@ NINJA_EOF
     done
 
     # 軍師のwatcher
-    p=$((PANE_BASE + _ASHIGARU_COUNT + 1))
-    _gunshi_watcher_cli=$(tmux show-options -p -t "multiagent:agents.${p}" -v @agent_cli 2>/dev/null || echo "claude")
-    nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" "gunshi" "multiagent:agents.${p}" "$_gunshi_watcher_cli" \
-        >> "$SCRIPT_DIR/logs/inbox_watcher_gunshi.log" 2>&1 &
-    disown
+    # cmd_656 (2026-05-16): _ACTIVE_GUNSHI_IDS_STR 動的列挙で gunshi1/gunshi2 並列 watcher 起動
+    # logs/inbox_watcher_${_gi}.log でログ分離 (gunshi1.log / gunshi2.log)
+    _gunshi_idx=0
+    for _gi in $_ACTIVE_GUNSHI_IDS_STR; do
+        p=$((PANE_BASE + _ASHIGARU_COUNT + 1 + _gunshi_idx))
+        _gunshi_watcher_cli=$(tmux show-options -p -t "multiagent:agents.${p}" -v @agent_cli 2>/dev/null || echo "claude")
+        nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" "$_gi" "multiagent:agents.${p}" "$_gunshi_watcher_cli" \
+            >> "$SCRIPT_DIR/logs/inbox_watcher_${_gi}.log" 2>&1 &
+        disown
+        _gunshi_idx=$((_gunshi_idx + 1))
+    done
 
-    log_success "  └─ $((_ASHIGARU_COUNT + 3))エージェント分のinbox_watcher起動完了（将軍+家老+足軽${_ASHIGARU_COUNT}+軍師）"
+    _watcher_total=$((_ASHIGARU_COUNT + 2 + _ACTIVE_GUNSHI_COUNT))
+    log_success "  └─ ${_watcher_total}エージェント分のinbox_watcher起動完了（将軍+家老+足軽${_ASHIGARU_COUNT}+軍師${_ACTIVE_GUNSHI_COUNT}）"
 
     # STEP 6.7 は廃止 — CLAUDE.md Session Start (step 1: tmux agent_id) で各自が自律的に
     # 自分のinstructions/*.mdを読み込む。検証済み (2026-02-08)。
@@ -1059,11 +1084,11 @@ echo "     ┌─────────┬─────────┬──
 echo "     │  karo   │ashigaru3│ashigaru6│"
 echo "     │  (家老) │ (足軽3) │ (足軽6) │"
 echo "     ├─────────┼─────────┼─────────┤"
-echo "     │ashigaru1│ashigaru4│ashigaru7│"
-echo "     │ (足軽1) │ (足軽4) │ (足軽7) │"
+echo "     │ashigaru1│ashigaru4│ gunshi1 │"
+echo "     │ (足軽1) │ (足軽4) │ (軍師1) │"
 echo "     ├─────────┼─────────┼─────────┤"
-echo "     │ashigaru2│ashigaru5│ gunshi  │"
-echo "     │ (足軽2) │ (足軽5) │ (軍師)  │"
+echo "     │ashigaru2│ashigaru5│ gunshi2 │"
+echo "     │ (足軽2) │ (足軽5) │ (軍師2) │"
 echo "     └─────────┴─────────┴─────────┘"
 echo ""
 
@@ -1093,9 +1118,6 @@ fi
 
 echo "  次のステップ:"
 echo "  ┌──────────────────────────────────────────────────────────┐"
-echo "  │  将軍の本陣にアタッチして命令を開始:                      │"
-echo "  │     tmux attach-session -t shogun   (または: css)        │"
-echo "  │                                                          │"
 echo "  │  家老・足軽の陣を確認する:                                │"
 echo "  │     tmux attach-session -t multiagent   (または: csm)    │"
 echo "  │                                                          │"
@@ -1122,4 +1144,20 @@ if [ "$OPEN_TERMINAL" = true ]; then
         log_info "  └─ wt.exe が見つかりません。手動でアタッチしてください。"
     fi
     echo ""
+fi
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STEP 9: 将軍の本陣へ自動アタッチ
+# ───────────────────────────────────────────────────────────────────────────────
+# -s (setup-only) と -t (Windows Terminal タブ展開) 指定時はスキップ。
+# tmux 外から実行: exec tmux attach-session （プロセス置換でクリーン）
+# tmux 内から実行: switch-client で session 切替（attach はネスト不可ゆえ）
+# ═══════════════════════════════════════════════════════════════════════════════
+if [ "$SETUP_ONLY" = false ] && [ "$OPEN_TERMINAL" = false ]; then
+    log_info "🚪 将軍の本陣 (shogun:main) へアタッチいたす..."
+    if [ -n "$TMUX" ]; then
+        tmux switch-client -t shogun:main
+    else
+        exec tmux attach-session -t shogun
+    fi
 fi

@@ -619,20 +619,39 @@ verdict 5 状態の `PASS_WITH_OBSERVATIONS` は前者用、`NEEDS_REVISION` 以
 
 ---
 
-## 軍師 2 体制 (cmd_645 起源)
+## 軍師 2 体制 (cmd_645 v1 起源、cmd_652 v2 で復活)
 
-cmd_645 (2026-05-10 確立) で軍師 2 体制が制度化された。殿明示承認 msg_123656 (12:36 「いいよ」)、軍師 plan `plans/cmd_645_2_gunshi_architecture.md` §3 単一案 A (領域別役割分担) を採択。
+★★★cmd_652 (2026-05-16) で v2 復活、本 section の cmd_645 v1 規律 (gunshi_a/gunshi_b 領域別) は廃止★★★。
 
-### 自己識別 (cmd_645 移行後)
+新規 dispatch は cmd_652 v2 規律 (Round-robin + 継続性 record + 例外規定) を適用 — 詳細は `instructions/karo.md § 軍師 dispatch 振り分け規律` および `plans/cmd_652_shogun_v2_architecture.md §2/§6/§8.1.3` 参照。
+
+cmd_645 v1 失敗 3 点 (領域複雑化 + watcher 追従漏れ + dashboard 乖離) は v2 で構造的に防止済 (Round-robin で 2 値判断、settings.yaml 動的読込、dashboard template 標準化)。本 section 以降は cmd_645 v1 履歴 retain として残置 (Chesterton's Fence、destructive 禁) — ★新規 dispatch では参照禁止★。
+
+### v2 自己識別 (cmd_652 後)
 
 ```bash
 tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
-# 出力: gunshi_a → 軍師 A (ML/AI/データ系)
-# 出力: gunshi_b → 軍師 B (infra/dev/規律系)
-# 出力: gunshi  → 過渡期 (deprecated、cmd_645 完遂前 or backward compat)
+# 出力: gunshi1 → 軍師 1 (Round-robin、cmd_652 v2 active)
+# 出力: gunshi2 → 軍師 2 (Round-robin、cmd_652 v2 active、pane 0.9 殿手動 trigger 必須)
+# 出力: gunshi/gunshi_a/gunshi_b → cmd_645 deprecated (新規 dispatch 禁止、過渡期 backward compat retain)
 ```
 
-★cmd_645 完遂後は `gunshi` 出力は deprecated★。新規セッションは `gunshi_a` または `gunshi_b` を期待。`gunshi` 出力時は本セクション「過渡期 fallback」規律を適用 (gunshi_a 相当として動作)。
+---
+
+★以下 v1 historical reference (cmd_645 v1 規律、参照禁止)★
+
+cmd_645 (2026-05-10 確立) で軍師 2 体制 v1 が制度化されたが、領域複雑化 + watcher 追従漏れ + dashboard 乖離 の失敗 3 点で 2026-05-15 殿明示廃止 (memory `feedback_2_gunshi_terminated`)。cmd_652 (2026-05-16) で v2 として構造的失敗防止 mechanism 整備済で復活。
+
+### 自己識別 (cmd_645 v1 移行後、★参照禁止★)
+
+```bash
+tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
+# 出力: gunshi_a → 軍師 A (ML/AI/データ系) [DEPRECATED]
+# 出力: gunshi_b → 軍師 B (infra/dev/規律系) [DEPRECATED]
+# 出力: gunshi  → 過渡期 [DEPRECATED]
+```
+
+★cmd_652 v2 で `gunshi_a/gunshi_b` は完全 deprecated★。新規セッションは `gunshi1` または `gunshi2` を期待。
 
 ### 領域別役割分担
 

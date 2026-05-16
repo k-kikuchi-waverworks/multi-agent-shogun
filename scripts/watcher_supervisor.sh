@@ -3,9 +3,20 @@ set -euo pipefail
 
 # Keep inbox watchers alive in a persistent tmux-hosted shell.
 # This script is designed to run forever.
+#
+# cmd_652 (2026-05-16): settings.yaml `cli.agents` 動的読込化 (cmd_645 hard-coded list 廃止)。
+# - ashigaru / gunshi 列挙は scripts/lib/agent_list.sh 経由で settings.yaml から動的取得
+# - shogun (別 pane shogun:main.0) と karo (multiagent:agents.0) は special、hardcoded retain
+# - ashigaru{N} の pane = multiagent:agents.{N} 規則で導出 (番号 = pane index)
+# - gunshi{N} の pane は settings.yaml `cli.agents.<gunshi>.pane` field を参照
+# - deprecated agent (settings.yaml の deprecated:true) は自動 skip
+# - pane 不在時 (例: gunshi2 の pane 0.9 殿手動起動前) は start_watcher_if_missing 内 pane_exists guard で skip
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"
+
+# shellcheck source=lib/agent_list.sh
+. "$SCRIPT_DIR/scripts/lib/agent_list.sh"
 
 mkdir -p logs queue/inbox
 
@@ -40,22 +51,30 @@ start_watcher_if_missing() {
     nohup bash scripts/inbox_watcher.sh "$agent" "$pane" "$cli" >> "$log_file" 2>&1 &
 }
 
+ashigaru_pane() {
+    # 命名規約: ashigaru{N} → multiagent:agents.{N}
+    local agent="$1"
+    local idx="${agent#ashigaru}"
+    echo "multiagent:agents.${idx}"
+}
+
 while true; do
     start_watcher_if_missing "shogun" "shogun:main.0" "logs/inbox_watcher_shogun.log"
     start_watcher_if_missing "karo" "multiagent:agents.0" "logs/inbox_watcher_karo.log"
-    start_watcher_if_missing "ashigaru1" "multiagent:agents.1" "logs/inbox_watcher_ashigaru1.log"
-    start_watcher_if_missing "ashigaru2" "multiagent:agents.2" "logs/inbox_watcher_ashigaru2.log"
-    start_watcher_if_missing "ashigaru3" "multiagent:agents.3" "logs/inbox_watcher_ashigaru3.log"
-    start_watcher_if_missing "ashigaru4" "multiagent:agents.4" "logs/inbox_watcher_ashigaru4.log"
-    start_watcher_if_missing "ashigaru5" "multiagent:agents.5" "logs/inbox_watcher_ashigaru5.log"
-    start_watcher_if_missing "ashigaru6" "multiagent:agents.6" "logs/inbox_watcher_ashigaru6.log"
-    start_watcher_if_missing "ashigaru7" "multiagent:agents.7" "logs/inbox_watcher_ashigaru7.log"
-    # cmd_645 (2026-05-10): gunshi 2-instance architecture
-    # gunshi (legacy) retained for backward compat during transition; gunshi_a/gunshi_b are the new canonical entries.
-    # gunshi_a = ML/AI/データ系 (multiagent:agents.8)
-    # gunshi_b = infra/dev/規律系 (multiagent:agents.9, requires manual pane creation by Lord on first launch)
-    start_watcher_if_missing "gunshi" "multiagent:agents.8" "logs/inbox_watcher_gunshi.log"
-    start_watcher_if_missing "gunshi_a" "multiagent:agents.8" "logs/inbox_watcher_gunshi_a.log"
-    start_watcher_if_missing "gunshi_b" "multiagent:agents.9" "logs/inbox_watcher_gunshi_b.log"
+
+    # cmd_652 (2026-05-16): ashigaru list を settings.yaml から動的取得
+    while IFS= read -r ash; do
+        [ -n "$ash" ] || continue
+        start_watcher_if_missing "$ash" "$(ashigaru_pane "$ash")" "logs/inbox_watcher_${ash}.log"
+    done < <(get_active_ashigaru_agents)
+
+    # cmd_652 (2026-05-16): active gunshi list を settings.yaml から動的取得 (deprecated 除外)
+    while IFS= read -r gun; do
+        [ -n "$gun" ] || continue
+        local_pane=$(get_agent_pane "$gun")
+        [ -n "$local_pane" ] || continue  # pane 未設定 gunshi はスキップ
+        start_watcher_if_missing "$gun" "$local_pane" "logs/inbox_watcher_${gun}.log"
+    done < <(get_active_gunshi_agents)
+
     sleep 5
 done

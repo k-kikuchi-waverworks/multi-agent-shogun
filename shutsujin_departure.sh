@@ -70,6 +70,20 @@ else
 fi
 _ASHIGARU_COUNT=$(echo "$_ASHIGARU_IDS_STR" | wc -w | tr -d ' ')
 
+# 軍師IDリストを動的に取得（settings.yaml から、active + deprecated 全列挙）
+# cmd_652 (2026-05-16): cmd_645 hard-coded `gunshi gunshi_a gunshi_b` を agent_list.sh 経由動的化
+# legacy 'gunshi' (settings.yaml に存在しないが backward compat retain) は別途先頭追加
+if [ -f "$SCRIPT_DIR/scripts/lib/agent_list.sh" ]; then
+    # shellcheck source=scripts/lib/agent_list.sh
+    . "$SCRIPT_DIR/scripts/lib/agent_list.sh"
+    _GUNSHI_IDS_STR="gunshi $(get_all_gunshi_agents | tr '\n' ' ')"
+else
+    # fallback: agent_list.sh 不在時 (旧環境)
+    _GUNSHI_IDS_STR="gunshi gunshi_a gunshi_b"
+fi
+# trim 末尾空白
+_GUNSHI_IDS_STR=$(echo "$_GUNSHI_IDS_STR" | tr -s ' ' | sed 's/ $//')
+
 # 色付きログ関数（戦国風）
 log_info() {
     echo -e "\033[1;33m【報】\033[0m $1"
@@ -388,9 +402,12 @@ EOF
     done
 
     # 軍師タスクファイルリセット
-    # cmd_645 (2026-05-10): gunshi 2-instance architecture — gunshi/gunshi_a/gunshi_b 3 file 初期化 (gunshi は backward compat retain)
-    cat > ./queue/tasks/gunshi.yaml << EOF
-# 軍師専用タスクファイル (deprecated, backward compat — cmd_645 完遂後は gunshi_a/gunshi_b 使用)
+    # cmd_652 (2026-05-16): settings.yaml 動的 + legacy 'gunshi' backward compat retain
+    # gunshi (legacy, deprecated) / gunshi_a, gunshi_b (cmd_645 deprecated retain) / gunshi1, gunshi2 (cmd_652 v2 active)
+    for gunshi_id in $_GUNSHI_IDS_STR; do
+        cat > "./queue/tasks/${gunshi_id}.yaml" << EOF
+# 軍師タスクファイル (${gunshi_id})
+# cmd_652 (2026-05-16): settings.yaml \`cli.agents\` 動的初期化、deprecated agent (gunshi_a/b) も physical retain
 task:
   task_id: null
   parent_cmd: null
@@ -399,30 +416,7 @@ task:
   status: idle
   timestamp: ""
 EOF
-    cat > ./queue/tasks/gunshi_a.yaml << EOF
-# 軍師 A 専用タスクファイル (cmd_645 起源)
-# 担当領域: ML/AI/データ系 (LoRA, fine-tune, prompt eng, RAG, TTS, vLLM)
-# pane: multiagent:agents.8
-task:
-  task_id: null
-  parent_cmd: null
-  description: null
-  target_path: null
-  status: idle
-  timestamp: ""
-EOF
-    cat > ./queue/tasks/gunshi_b.yaml << EOF
-# 軍師 B 専用タスクファイル (cmd_645 起源)
-# 担当領域: infra/dev/規律系 (ai-automate-engine, Windows app, regression, dispatch template, Spot QC)
-# pane: multiagent:agents.9 (殿手動 trigger 必須)
-task:
-  task_id: null
-  parent_cmd: null
-  description: null
-  target_path: null
-  status: idle
-  timestamp: ""
-EOF
+    done
 
     # 足軽レポートファイルリセット
     for i in $(seq 1 "$_ASHIGARU_COUNT"); do
@@ -436,35 +430,23 @@ EOF
     done
 
     # 軍師レポートファイルリセット
-    # cmd_645 (2026-05-10): gunshi/gunshi_a/gunshi_b 3 file 初期化 (gunshi は backward compat retain)
-    cat > ./queue/reports/gunshi_report.yaml << EOF
-worker_id: gunshi
+    # cmd_652 (2026-05-16): settings.yaml 動的 + legacy 'gunshi' backward compat retain
+    for gunshi_id in $_GUNSHI_IDS_STR; do
+        cat > "./queue/reports/${gunshi_id}_report.yaml" << EOF
+worker_id: ${gunshi_id}
 task_id: null
 timestamp: ""
 status: idle
 result: null
 EOF
-    cat > ./queue/reports/gunshi_a_report.yaml << EOF
-worker_id: gunshi_a
-task_id: null
-timestamp: ""
-status: idle
-result: null
-EOF
-    cat > ./queue/reports/gunshi_b_report.yaml << EOF
-worker_id: gunshi_b
-task_id: null
-timestamp: ""
-status: idle
-result: null
-EOF
+    done
 
     # ntfy inbox リセット
     echo "inbox:" > ./queue/ntfy_inbox.yaml
 
     # agent inbox リセット
-    # cmd_645 (2026-05-10): gunshi 2-instance architecture — gunshi/gunshi_a/gunshi_b inbox 初期化
-    for agent in shogun karo $_ASHIGARU_IDS_STR gunshi gunshi_a gunshi_b; do
+    # cmd_652 (2026-05-16): _GUNSHI_IDS_STR で settings.yaml 動的列挙 (legacy 'gunshi' + active + deprecated 全)
+    for agent in shogun karo $_ASHIGARU_IDS_STR $_GUNSHI_IDS_STR; do
         echo "messages:" > "./queue/inbox/${agent}.yaml"
     done
 
@@ -930,9 +912,9 @@ NINJA_EOF
     log_info "📬 メールボックス監視を起動中..."
 
     # inbox ディレクトリ初期化（シンボリックリンク先のLinux FSに作成）
-    # cmd_645 (2026-05-10): gunshi 2-instance — gunshi/gunshi_a/gunshi_b inbox 確保
+    # cmd_652 (2026-05-16): _GUNSHI_IDS_STR で settings.yaml 動的列挙
     mkdir -p "$SCRIPT_DIR/logs"
-    for agent in shogun karo $_ASHIGARU_IDS_STR gunshi gunshi_a gunshi_b; do
+    for agent in shogun karo $_ASHIGARU_IDS_STR $_GUNSHI_IDS_STR; do
         [ -f "$SCRIPT_DIR/queue/inbox/${agent}.yaml" ] || echo "messages:" > "$SCRIPT_DIR/queue/inbox/${agent}.yaml"
     done
 

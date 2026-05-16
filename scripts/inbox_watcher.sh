@@ -28,6 +28,9 @@ if [ "${__INBOX_WATCHER_TESTING__:-}" != "1" ]; then
     set -euo pipefail
 
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+    # cmd_652 (2026-05-16): settings.yaml `cli.agents` 動的読込 helper 取り込み (cmd_645 hard-coded list 廃止)
+    # shellcheck source=lib/agent_list.sh
+    . "$SCRIPT_DIR/scripts/lib/agent_list.sh"
     AGENT_ID="$1"
     PANE_TARGET="$2"
     CLI_TYPE="${3:-claude}"  # CLI種別（claude/codex/copilot）。未指定→claude（後方互換）
@@ -618,8 +621,8 @@ send_context_reset() {
     # Only ashigaru should receive automatic context resets (clear stale task context).
     # Shogun (human-controlled), Karo (coordinator state), Gunshi (strategic state)
     # all maintain complex running context that should not be wiped automatically.
-    # cmd_645 (2026-05-10): gunshi 2-instance architecture — gunshi_a/gunshi_b added (gunshi retained for backward compat).
-    if [ "$AGENT_ID" = "shogun" ] || [ "$AGENT_ID" = "karo" ] || [ "$AGENT_ID" = "gunshi" ] || [ "$AGENT_ID" = "gunshi_a" ] || [ "$AGENT_ID" = "gunshi_b" ]; then
+    # cmd_652 (2026-05-16): scripts/lib/agent_list.sh の命名規約ベース判定に統一 (cmd_645 hard-coded list 廃止、deprecated gunshi 含む全 command-layer 抑制)
+    if is_command_layer_agent "$AGENT_ID"; then
         echo "[$(date)] [SKIP] $AGENT_ID: suppressing context reset (command-layer agent)" >&2
         return 0
     fi
@@ -1116,9 +1119,9 @@ for s in data.get('specials', []):
                     echo "[$(date)] ESCALATION Phase 3: $AGENT_ID unresponsive for ${age}s, but cli=codex — skipping /clear." >&2
                     FIRST_UNREAD_SEEN=$now  # Reset timer (no destructive action)
                     send_wakeup "$normal_count"
-                elif [ "$AGENT_ID" = "shogun" ] || [ "$AGENT_ID" = "karo" ] || [ "$AGENT_ID" = "gunshi" ] || [ "$AGENT_ID" = "gunshi_a" ] || [ "$AGENT_ID" = "gunshi_b" ]; then
-                    # Command-layer agents (karo/gunshi/gunshi_a/gunshi_b/shogun): suppress /clear even in Phase 3
-                    # cmd_645 (2026-05-10): gunshi_a/gunshi_b added (gunshi retained for backward compat)
+                elif is_command_layer_agent "$AGENT_ID"; then
+                    # Command-layer agents (karo/gunshi*/shogun): suppress /clear even in Phase 3
+                    # cmd_652 (2026-05-16): scripts/lib/agent_list.sh 命名規約ベース判定に統一 (cmd_645 hard-coded list 廃止)
                     echo "[$(date)] [SKIP] ESCALATION Phase 3: $AGENT_ID suppressed (command-layer agent, ${age}s). Using Escape+nudge." >&2
                     FIRST_UNREAD_SEEN=$now  # Reset timer
                     send_wakeup_with_escape "$normal_count"

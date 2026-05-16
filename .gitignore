@@ -107,6 +107,10 @@ plans/README.md
 !scripts/stall_watchdog_scan.py
 !scripts/retroactive_commit_verify.sh
 
+# cmd_652 (2026-05-16): scripts/lib/ helper (settings.yaml 動的読込)
+!scripts/lib/
+!scripts/lib/agent_list.sh
+
 
 # SayTask (sample template only, not actual data)
 !saytask/

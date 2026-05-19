@@ -716,7 +716,7 @@ if [ "$SETUP_ONLY" = false ]; then
 
     # 将軍: CLI Adapter経由でコマンド構築
     _shogun_cli_type="claude"
-    _shogun_cmd="claude --model opus --effort max $PERMISSION_FLAG"
+    _shogun_cmd="claude --model opus --effort high $PERMISSION_FLAG"  # cmd_706 (2026-05-19): cmd_652 軽量化 sweep 移行漏れ補完、CLI Adapter fallback 値も effort high で整合 (settings.yaml cli.agents.shogun と一致)
     if [ "$CLI_ADAPTER_LOADED" = true ]; then
         _shogun_cli_type=$(get_cli_type "shogun")
         _shogun_cmd=$(build_cli_command "shogun")

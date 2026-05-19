@@ -56,6 +56,7 @@ plans/README.md
 !lib/cli_adapter.sh
 !lib/ntfy_auth.sh
 !lib/agent_status.sh
+!lib/agent_registry.sh
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md
@@ -136,6 +137,7 @@ logs/audits/
 !docs/content/
 !docs/content/ops/
 !docs/content/ops/*.md
+!docs/vps_pr118_verification_plan.md
 
 # Screenshots (masked — no secrets)
 !images/
@@ -213,4 +215,9 @@ tests/specs/osato_lms_*
 # Android companion app
 !android/
 !android/**
+
+# reports/ (empty placeholder only — content is intentionally local-only)
+!reports/
+!reports/.gitkeep
+
 .claude/settings.local.json

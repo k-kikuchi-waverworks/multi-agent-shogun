@@ -20,6 +20,14 @@ cd "$SCRIPT_DIR"
 
 mkdir -p logs queue/inbox
 
+get_multiagent_pane_base() {
+    if [ -n "${SHOGUN_PANE_BASE:-}" ]; then
+        echo "$SHOGUN_PANE_BASE"
+        return 0
+    fi
+    tmux show-options -gv pane-base-index 2>/dev/null || echo 0
+}
+
 ensure_inbox_file() {
     local agent="$1"
     if [ ! -f "queue/inbox/${agent}.yaml" ]; then
@@ -43,8 +51,12 @@ start_watcher_if_missing() {
         return 0
     fi
 
-    if pgrep -f "scripts/inbox_watcher.sh ${agent} " >/dev/null 2>&1; then
+    if pgrep -f "scripts/inbox_watcher.sh ${agent} ${pane}( |$)" >/dev/null 2>&1; then
         return 0
+    fi
+
+    if pgrep -f "scripts/inbox_watcher.sh ${agent} " >/dev/null 2>&1; then
+        echo "[$(date)] [WARN] stale watcher detected for ${agent}; starting watcher for expected pane ${pane}" >&2
     fi
 
     cli=$(tmux show-options -p -t "$pane" -v @agent_cli 2>/dev/null || echo "codex")

@@ -16,7 +16,8 @@
 #
 # エスカレーション（未読メッセージが放置されている場合）:
 #   0〜2分: 通常nudge（send-keys）。ただしWorking中はスキップ
-#   2〜4分: Escape×2 + nudge（カーソル位置バグ対策）
+#   2〜4分: Copilot/Kimi は Escape×2 + Ctrl-C + nudge。
+#            Claude/Codex/OpenCode は通常nudgeへフォールバック
 #   4分〜 : /clear送信（5分に1回まで。強制リセット+YAML再読）
 # ═══════════════════════════════════════════════════════════════
 
@@ -33,7 +34,7 @@ if [ "${__INBOX_WATCHER_TESTING__:-}" != "1" ]; then
     . "$SCRIPT_DIR/scripts/lib/agent_list.sh"
     AGENT_ID="$1"
     PANE_TARGET="$2"
-    CLI_TYPE="${3:-claude}"  # CLI種別（claude/codex/copilot）。未指定→claude（後方互換）
+    CLI_TYPE="${3:-claude}"  # CLI種別（claude/codex/copilot/kimi/opencode）。未指定→claude（後方互換）
 
     INBOX="$SCRIPT_DIR/queue/inbox/${AGENT_ID}.yaml"
     LOCKFILE="${INBOX}.lock"
@@ -134,6 +135,28 @@ NUDGE_COOLDOWN_SEC_CODEX=${NUDGE_COOLDOWN_SEC_CODEX:-300}
 reset_nudge_throttle() {
     LAST_NUDGE_TS=0
     LAST_NUDGE_COUNT=""
+}
+
+acquire_inbox_lock() {
+    local lock_dir="${LOCKFILE}.d"
+    local i=0
+
+    while ! mkdir "$lock_dir" 2>/dev/null; do
+        sleep 0.1
+        i=$((i + 1))
+        [ "$i" -ge 300 ] && return 1
+    done
+
+    if command -v flock &>/dev/null; then
+        flock -x 200 || {
+            rmdir "$lock_dir" 2>/dev/null
+            return 1
+        }
+    fi
+}
+
+release_inbox_lock() {
+    rmdir "${LOCKFILE}.d" 2>/dev/null || true
 }
 
 # ─── Context reset tracking ───
@@ -238,7 +261,7 @@ should_throttle_nudge() {
 
 is_valid_cli_type() {
     case "${1:-}" in
-        claude|codex|copilot|kimi) return 0 ;;
+        claude|codex|copilot|kimi|opencode) return 0 ;;
         *) return 1 ;;
     esac
 }
@@ -296,7 +319,12 @@ normalize_special_command() {
 
 enqueue_recovery_task_assigned() {
     (
-        if command -v flock &>/dev/null; then flock -x 200; else _ld="${LOCKFILE}.d"; _i=0; while ! mkdir "$_ld" 2>/dev/null; do sleep 0.1; _i=$((_i+1)); [ $_i -ge 300 ] && break; done; trap "rmdir '$_ld' 2>/dev/null" EXIT; fi
+        # acquire_inbox_lock also takes flock when available.
+        if ! acquire_inbox_lock; then
+            echo "ERROR"
+            exit 0
+        fi
+        trap release_inbox_lock EXIT
         INBOX_PATH="$INBOX" AGENT_ID="$AGENT_ID" "$SCRIPT_DIR/.venv/bin/python3" - << 'PY'
 import datetime
 import os
@@ -404,12 +432,17 @@ except Exception:
 PY
 }
 
-# ─── Extract unread message info (lock-free read) ───
+# ─── Extract unread message info ───
 # Returns JSON lines: {"count": N, "has_special": true/false, "specials": [...]}
 # Test anchor for bats awk pattern: get_unread_info\\(\\)
 get_unread_info() {
     (
-        if command -v flock &>/dev/null; then flock -x 200; else _ld="${LOCKFILE}.d"; _i=0; while ! mkdir "$_ld" 2>/dev/null; do sleep 0.1; _i=$((_i+1)); [ $_i -ge 300 ] && break; done; trap "rmdir '$_ld' 2>/dev/null" EXIT; fi
+        # acquire_inbox_lock also takes flock when available.
+        if ! acquire_inbox_lock; then
+            echo '{"count": 0, "specials": []}'
+            exit 0
+        fi
+        trap release_inbox_lock EXIT
         INBOX_PATH="$INBOX" "$SCRIPT_DIR/.venv/bin/python3" - << 'PY'
 import json
 import os
@@ -459,7 +492,7 @@ PY
 # ─── Send CLI command via pty direct write ───
 # For /clear and /model only. These are CLI commands, not conversation messages.
 # CLI_TYPE別分岐: claude→そのまま, codex→/clear対応・/modelスキップ,
-#                  copilot→Ctrl-C+再起動・/modelスキップ
+#                  copilot→Ctrl-C+再起動・/modelスキップ, opencode→/clear→/new・/modelスキップ
 # 実行時にtmux paneの @agent_cli を再確認し、ドリフト時はpane値を優先する。
 send_cli_command() {
     local cmd="$1"
@@ -482,13 +515,19 @@ send_cli_command() {
     # Shogun is controlled by the Lord; keystroke injection can clobber human input.
     if [ "$AGENT_ID" = "shogun" ]; then
         echo "[$(date)] [SKIP] shogun: suppressing CLI command injection ($cmd)" >&2
-        return 0
+        return 1
     fi
 
     # Busy guard: never send /clear when agent is actively processing.
     # clear_command inbox processor also checks busy, but this is a defense-in-depth guard.
     # Sending /clear during Working destroys in-progress context and causes data loss.
-    if [[ "$cmd" == "/clear" ]] && agent_is_busy; then
+    # OpenCode startup can leave capture-pane blank before the first frame renders,
+    # so only apply this guard after we can actually observe pane text.
+    local pane_snapshot=""
+    if [[ "$cmd" == "/clear" ]]; then
+        pane_snapshot=$(timeout 2 tmux capture-pane -t "$PANE_TARGET" -p 2>/dev/null || true)
+    fi
+    if [[ "$cmd" == "/clear" ]] && ! [[ "$effective_cli" == "opencode" && -z "${pane_snapshot//[[:space:]]/}" ]] && agent_is_busy; then
         echo "[$(date)] [SKIP] Agent is busy — /clear deferred to next cycle (agent=$AGENT_ID)" >&2
         return 0
     fi
@@ -522,6 +561,28 @@ send_cli_command() {
             fi
             if [[ "$cmd" == /model* ]]; then
                 echo "[$(date)] Skipping $cmd (not supported on codex)" >&2
+                return 0
+            fi
+            ;;
+        opencode)
+            # OpenCode: /clear is normalized to /new, /model changes are restart-only.
+            if [[ "$cmd" == "/clear" ]]; then
+                if [ "${NEW_CONTEXT_SENT:-0}" -eq 1 ]; then
+                    echo "[$(date)] [SKIP] OpenCode /new already sent for $AGENT_ID — skipping duplicate clear_command" >&2
+                    return 0
+                fi
+                echo "[$(date)] [SEND-KEYS] OpenCode /new for clear_command: starting new conversation for $AGENT_ID" >&2
+                timeout 5 tmux send-keys -t "$PANE_TARGET" C-u 2>/dev/null || true
+                sleep 0.3
+                timeout 5 tmux send-keys -t "$PANE_TARGET" "/new" 2>/dev/null || true
+                sleep 0.3
+                timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+                sleep 3
+                NEW_CONTEXT_SENT=1
+                return 0
+             fi
+            if [[ "$cmd" == /model* ]]; then
+                echo "[$(date)] Skipping $cmd (OpenCode model changes are restart-only)" >&2
                 return 0
             fi
             ;;
@@ -577,6 +638,7 @@ send_cli_command() {
 # ─── Send startup prompt after context reset ───
 # Waits for agent to become idle, then sends a startup prompt that includes
 # full recovery steps (identify, read task YAML, read inbox, start work).
+# Codex uses a typed `x` to dismiss its suggestion UI.
 # Called from both send_cli_command (clear_command) and send_context_reset.
 send_startup_prompt() {
     # Poll until agent becomes idle (prompt ready) instead of fixed sleep.
@@ -601,12 +663,16 @@ send_startup_prompt() {
     if [[ -z "$startup_prompt" ]]; then
         startup_prompt="Session Start — do ALL of this in one turn, do NOT stop early: 1) tmux display-message to identify yourself. 2) Read queue/tasks/${AGENT_ID}.yaml. 3) Read queue/inbox/${AGENT_ID}.yaml, mark read:true. 4) Read context_files. 5) Execute the assigned task to completion — edit files, run commands, write reports. Keep working until done."
     fi
-    echo "[$(date)] [STARTUP] Sending startup prompt to $AGENT_ID: ${startup_prompt:0:80}..." >&2
+    local effective_cli
+    effective_cli=$(get_effective_cli_type)
+    echo "[$(date)] [STARTUP] Sending startup prompt to $AGENT_ID (${effective_cli}): ${startup_prompt:0:80}..." >&2
     # Dismiss suggestion UI, then send startup prompt
-    timeout 5 tmux send-keys -t "$PANE_TARGET" "x" 2>/dev/null || true
-    sleep 0.3
-    timeout 5 tmux send-keys -t "$PANE_TARGET" C-u 2>/dev/null || true
-    sleep 0.3
+    if [[ "$effective_cli" != "opencode" ]]; then
+        timeout 5 tmux send-keys -t "$PANE_TARGET" "x" 2>/dev/null || true
+        sleep 0.3
+        timeout 5 tmux send-keys -t "$PANE_TARGET" C-u 2>/dev/null || true
+        sleep 0.3
+    fi
     timeout 5 tmux send-keys -l -t "$PANE_TARGET" "$startup_prompt" 2>/dev/null || true
     sleep 0.3
     timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
@@ -617,7 +683,8 @@ send_startup_prompt() {
 # Called when task_assigned is detected in unread messages.
 # Sends the appropriate "new conversation" command per CLI type to clear
 # stale context from the previous task.
-# CLI mapping: claude→/clear, codex→/new, copilot→/clear, kimi→/clear
+# CLI mapping: claude→/clear, codex→/new, opencode→/new, copilot→/clear, kimi→/clear
+
 send_context_reset() {
     local effective_cli
     effective_cli=$(get_effective_cli_type)
@@ -635,6 +702,7 @@ send_context_reset() {
     local reset_cmd
     case "$effective_cli" in
         codex)    reset_cmd="/new" ;;
+        opencode) reset_cmd="/new" ;;
         claude)   reset_cmd="/clear" ;;
         copilot)  reset_cmd="/clear" ;;
         kimi)     reset_cmd="/clear" ;;
@@ -643,21 +711,26 @@ send_context_reset() {
 
     echo "[$(date)] [CONTEXT-RESET] Sending $reset_cmd before task_assigned for $AGENT_ID ($effective_cli)" >&2
 
-    # Codex: send /new + startup prompt as a single atomic operation.
+    # Codex/OpenCode: send /new as a single atomic operation.
     # When called from clear_command path, NEW_CONTEXT_SENT=1 prevents reaching here.
     # When called for standalone task_assigned, this is the only /new send.
-    if [[ "$effective_cli" == "codex" ]]; then
-        # Dismiss suggestion UI + send /new
-        timeout 5 tmux send-keys -t "$PANE_TARGET" "x" 2>/dev/null || true
-        sleep 0.3
+    if [[ "$effective_cli" == "codex" || "$effective_cli" == "opencode" ]]; then
+        # Dismiss suggestion UI (Codex only) + send /new
+        if [[ "$effective_cli" == "codex" ]]; then
+            timeout 5 tmux send-keys -t "$PANE_TARGET" "x" 2>/dev/null || true
+            sleep 0.3
+        fi
         timeout 5 tmux send-keys -t "$PANE_TARGET" C-u 2>/dev/null || true
         sleep 0.3
         timeout 5 tmux send-keys -t "$PANE_TARGET" "/new" 2>/dev/null || true
         sleep 0.3
         timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
         sleep 3
-        # Wait for idle + send startup prompt via shared helper
-        send_startup_prompt
+        # Codex: send startup prompt (agent has no auto-loaded instructions).
+        # OpenCode: skip — agent definition is auto-loaded via --agent flag.
+        if [[ "$effective_cli" == "codex" ]]; then
+            send_startup_prompt
+        fi
         return 0
     fi
 
@@ -692,7 +765,7 @@ send_context_reset() {
 # Check if the agent has an active inotifywait on its inbox.
 # If yes, the agent will self-wake — no nudge needed.
 agent_has_self_watch() {
-    # Codex/Copilot/Kimi CLIs cannot run self-watch. Only Claude Code agents can.
+    # Codex/Copilot/Kimi/OpenCode CLIs cannot run self-watch. Only Claude Code agents can.
     local effective_cli
     effective_cli=$(get_effective_cli_type)
     if [[ "$effective_cli" != "claude" ]]; then
@@ -737,7 +810,7 @@ agent_is_busy() {
         [ ! -f "${IDLE_FLAG_DIR:-/tmp}/shogun_idle_${AGENT_ID}" ]
     else
         # 従来のpane解析（Codex等フォールバック）
-        agent_is_busy_check "$PANE_TARGET"
+        agent_is_busy_check "$PANE_TARGET" "$effective_cli"
     fi
 }
 
@@ -863,14 +936,13 @@ send_wakeup() {
 }
 
 # ─── Send wake-up nudge with Escape prefix ───
-# Phase 2 escalation: send Escape×2 + C-c to clear stuck input, then nudge.
-# Addresses the "echo last tool call" cursor position bug and stale input.
+# Phase 2 escalation: Copilot/Kimi get Escape×2 + single Ctrl-C + nudge.
+# Claude/Codex/OpenCode fall back to a plain nudge.
 send_wakeup_with_escape() {
     local unread_count="$1"
     local nudge="inbox${unread_count}"
     local effective_cli
     effective_cli=$(get_effective_cli_type)
-    local c_ctrl_state="skipped"
 
     # Safety: never send Escape escalation to shogun. It can wipe the Lord's input.
     if [ "$AGENT_ID" = "shogun" ]; then
@@ -895,6 +967,14 @@ send_wakeup_with_escape() {
         return 0
     fi
 
+    # OpenCode: Escape is bound to session_interrupt in the pinned TUI config.
+    # Phase 2 must not interrupt the session; fall back to a plain nudge.
+    if [[ "$effective_cli" == "opencode" ]]; then
+        echo "[$(date)] [SKIP] opencode: suppressing Escape escalation for $AGENT_ID (Escape interrupts the session); sending plain nudge" >&2
+        send_wakeup "$unread_count"
+        return 0
+    fi
+
     if [ "${FINAL_ESCALATION_ONLY:-0}" = "1" ]; then
         echo "[$(date)] [SKIP] FINAL_ESCALATION_ONLY=1, suppressing phase2 nudge for $AGENT_ID" >&2
         return 0
@@ -914,16 +994,14 @@ send_wakeup_with_escape() {
     # Escape×2 to exit any mode
     timeout 5 tmux send-keys -t "$PANE_TARGET" Escape Escape 2>/dev/null || true
     sleep 0.5
-    # C-c to clear stale input (but Codex CLI terminates on C-c when idle, so skip it)
-    if [[ "$effective_cli" != "codex" ]]; then
+    if [[ "$effective_cli" == "copilot" || "$effective_cli" == "kimi" ]]; then
         timeout 5 tmux send-keys -t "$PANE_TARGET" C-c 2>/dev/null || true
         sleep 0.5
-        c_ctrl_state="sent"
     fi
     if timeout 5 tmux send-keys -t "$PANE_TARGET" "$nudge" 2>/dev/null; then
         sleep 0.3
         timeout 5 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
-        echo "[$(date)] Escape+nudge sent to $AGENT_ID (${unread_count} unread, cli=$effective_cli, C-c=$c_ctrl_state)" >&2
+        echo "[$(date)] Escape+nudge sent to $AGENT_ID (${unread_count} unread, cli=$effective_cli)" >&2
         return 0
     fi
 
@@ -1000,8 +1078,9 @@ for s in data.get('specials', []):
             fi
             cmd=$(normalize_special_command "$msg_type" "$msg_content")
             if [ -n "$cmd" ]; then
-                send_cli_command "$cmd"
-                [ "$msg_type" = "clear_command" ] && clear_sent=1
+                if send_cli_command "$cmd"; then
+                    [ "$msg_type" = "clear_command" ] && clear_sent=1
+                fi
             fi
         done <<< "$specials"
     fi
@@ -1065,7 +1144,7 @@ for s in data.get('specials', []):
                     fi
                     echo "[$(date)] $normal_count unread for $AGENT_ID but agent is busy (claude) — Stop hook will deliver" >&2
                 else
-                    # Codex/Copilot/Kimi: No Stop hook. Pause escalation timer while busy.
+                    # Codex/Copilot/Kimi/OpenCode: No Stop hook. Pause escalation timer while busy.
                     FIRST_UNREAD_SEEN=$now
                     echo "[$(date)] $normal_count unread for $AGENT_ID but agent is busy ($busy_cli) — pausing escalation timer" >&2
                 fi

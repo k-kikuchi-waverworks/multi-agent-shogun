@@ -26,6 +26,13 @@ if [ "$FROM" = "$TARGET" ]; then
     exit 1
 fi
 
+# Escalate suppression: skip if suppress flag file exists for this sender
+SUPPRESS_FLAG="$SCRIPT_DIR/queue/suppress_escalate_${FROM}.flag"
+if [ "$TYPE" = "escalate" ] && [ -f "$SUPPRESS_FLAG" ]; then
+    echo "[inbox_write] SUPPRESSED: escalate from $FROM suppressed by flag file" >&2
+    exit 0
+fi
+
 # Initialize inbox if not exists
 if [ ! -f "$INBOX" ]; then
     mkdir -p "$(dirname "$INBOX")"

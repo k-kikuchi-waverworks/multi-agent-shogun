@@ -13,6 +13,20 @@ INBOX="$SCRIPT_DIR/queue/ntfy_inbox.yaml"
 LOCKFILE="${INBOX}.lock"
 CORRUPT_DIR="$SCRIPT_DIR/logs/ntfy_inbox_corrupt"
 
+# 単一プロセス保証ガード (cmd_805 冪等性修復)
+# shutsujin_departure.sh の pkill に依存せず、スクリプト自身で重複起動を防ぐ
+PIDFILE="$SCRIPT_DIR/logs/ntfy_listener.pid"
+mkdir -p "$SCRIPT_DIR/logs"
+if [ -f "$PIDFILE" ]; then
+    _existing_pid=$(cat "$PIDFILE" 2>/dev/null || true)
+    if [ -n "$_existing_pid" ] && kill -0 "$_existing_pid" 2>/dev/null; then
+        echo "[ntfy_listener] Already running (PID $_existing_pid). Exiting." >&2
+        exit 0
+    fi
+fi
+echo $$ > "$PIDFILE"
+trap 'rm -f "$PIDFILE"' EXIT
+
 # ntfy_auth.sh読み込み
 # shellcheck source=../lib/ntfy_auth.sh
 source "$SCRIPT_DIR/lib/ntfy_auth.sh"

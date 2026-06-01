@@ -1050,9 +1050,9 @@ NTFY_TOPIC=$(grep 'ntfy_topic:' ./config/settings.yaml 2>/dev/null | awk '{print
 if [ -n "$NTFY_TOPIC" ]; then
     pkill -f "ntfy_listener.sh" 2>/dev/null || true
     [ ! -f ./queue/ntfy_inbox.yaml ] && echo "inbox:" > ./queue/ntfy_inbox.yaml
-    nohup bash "$SCRIPT_DIR/scripts/ntfy_listener.sh" &>/dev/null &
+    nohup bash "$SCRIPT_DIR/scripts/ntfy_listener.sh" >> "$SCRIPT_DIR/logs/ntfy_listener.log" 2>&1 &
     disown
-    log_info "📱 ntfy入力リスナー起動 (topic: $NTFY_TOPIC)"
+    log_info "📱 ntfy入力リスナー起動 (topic: $NTFY_TOPIC, log: logs/ntfy_listener.log)"
 else
     log_info "📱 ntfy未設定のためリスナーはスキップ"
 fi

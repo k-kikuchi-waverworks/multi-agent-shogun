@@ -631,19 +631,23 @@ When updating dashboard.md with Frog and streak info, use this expanded template
 
 ### Tier 分類 (`scripts/ntfy.sh` 呼び出し)
 
+**呼び出し形式**: `bash scripts/ntfy.sh "タイトル" "本文"` (2引数必須 — feedback_ntfy_usage)
+- 第1引数 = Title (スマホ通知のヘッドライン)
+- 第2引数 = Body (詳細・補足)
+
 **Tier 1 — 即時通知 (Lord's phone bling)**
-- cmd complete: `bash scripts/ntfy.sh "✅ cmd_{id} 完了 — {summary}"`
-- cmd fail: `bash scripts/ntfy.sh "❌ cmd_{id} 失敗 — {reason}"`
-- 🚨 要対応 (Lord 判断要): `bash scripts/ntfy.sh "🚨 要対応 — {content}"`
-- 殿作業検出: `bash scripts/ntfy.sh "🚨 殿作業: {内容} ({想定分}分) — 他 N 件 parallel 継続中"`
-- 殿キー待ち集約: `bash scripts/ntfy.sh "🔑 殿キー待ち集約 — {作業 list}、他 tasks 全完遂"`
-- stall 検知 (60 分 / 120 分滞留): `bash scripts/ntfy.sh "🚨⏰ {cmd_id} 滞留 {N}分 — {state}"`
+- cmd complete: `bash scripts/ntfy.sh "✅ cmd_{id} 完了" "{summary}"`
+- cmd fail: `bash scripts/ntfy.sh "❌ cmd_{id} 失敗" "{reason}"`
+- 🚨 要対応 (Lord 判断要): `bash scripts/ntfy.sh "🚨 要対応" "{content}"`
+- 殿作業検出: `bash scripts/ntfy.sh "🚨 殿作業検出" "{内容} ({想定分}分) — 他 N 件 parallel 継続中"`
+- 殿キー待ち集約: `bash scripts/ntfy.sh "🔑 殿キー待ち集約" "{作業 list}、他 tasks 全完遂"`
+- stall 検知 (60 分 / 120 分滞留): `bash scripts/ntfy.sh "🚨⏰ {cmd_id} 滞留 {N}分" "{state}"`
 
 **Tier 2 — 中間進捗 (集約 OK)**
-- subtask 完遂: `bash scripts/ntfy.sh "✔ {subtask_id} PASS — {summary}"` (cmd 内 3-5 件単位で集約可)
-- QC 結果: `bash scripts/ntfy.sh "🔍 QC {result} — {subtask_id}: {points}"`
-- redo 発動: `bash scripts/ntfy.sh "🔄 redo — {subtask_id} → {new_id} ({reason})"`
-- phase 移行: `bash scripts/ntfy.sh "▶ {cmd_id} Phase {N} 開始 — {scope}"`
+- subtask 完遂: `bash scripts/ntfy.sh "✔ {subtask_id} PASS" "{summary}"` (cmd 内 3-5 件単位で集約可)
+- QC 結果: `bash scripts/ntfy.sh "🔍 QC {result}" "{subtask_id}: {points}"`
+- redo 発動: `bash scripts/ntfy.sh "🔄 redo" "{subtask_id} → {new_id} ({reason})"`
+- phase 移行: `bash scripts/ntfy.sh "▶ {cmd_id} Phase {N} 開始" "{scope}"`
 
 **Tier 3 — dashboard のみ (ntfy 送らない)**
 - ashigaru task assign

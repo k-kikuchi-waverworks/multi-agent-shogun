@@ -25,9 +25,13 @@ done < <(ntfy_get_auth_args "$SCRIPT_DIR/config/ntfy_auth.env")
 
 TITLE="${1:-}"
 BODY="${2:-}"
+LOG_FILE="$SCRIPT_DIR/logs/ntfy_send.log"
+mkdir -p "$SCRIPT_DIR/logs"
+
 # shellcheck disable=SC2086
 if [ -n "$BODY" ]; then
-  curl -s "${AUTH_ARGS[@]}" -H "Title: $TITLE" -H "Tags: outbound" -d "$BODY" "https://ntfy.sh/$TOPIC" > /dev/null
+  _http_status=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_ARGS[@]}" -H "Title: $TITLE" -H "Tags: outbound" -d "$BODY" "https://ntfy.sh/$TOPIC" 2>/dev/null)
 else
-  curl -s "${AUTH_ARGS[@]}" -H "Tags: outbound" -d "$TITLE" "https://ntfy.sh/$TOPIC" > /dev/null
+  _http_status=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_ARGS[@]}" -H "Tags: outbound" -d "$TITLE" "https://ntfy.sh/$TOPIC" 2>/dev/null)
 fi
+echo "[$(date '+%Y-%m-%dT%H:%M:%S')] HTTP=$_http_status title=$(echo "$TITLE" | head -c 80)" >> "$LOG_FILE"

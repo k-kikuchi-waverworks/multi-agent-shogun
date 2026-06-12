@@ -122,91 +122,110 @@ new_variant = "${new_variant}" or None
 with open(settings_path, 'r', encoding='utf-8') as f:
     content = f.read()
 
-with open(settings_path, 'r', encoding='utf-8') as f:
-    data = yaml.safe_load(f) or {}
-
-cli = data.setdefault('cli', {})
-agents = cli.setdefault('agents', {})
-agent_cfg = agents.get(agent_id)
-if not isinstance(agent_cfg, dict):
-    agent_cfg = {}
-    agents[agent_id] = agent_cfg
-
 timestamp = datetime.datetime.now().strftime('%Y-%m-%d')
 comment = f"# {timestamp}: switch_cli.sh による切替"
 
-if new_type:
-    agent_cfg['type'] = new_type
-if new_model:
-    agent_cfg['model'] = new_model
-if new_variant:
-    agent_cfg['variant'] = new_variant
-
-data['cli']['agents'][agent_id] = agent_cfg
-
-# コメント保持のため、対象エージェント行だけsedで置換する方が安全だが
-# 完全性のためyaml.dumpを使用。コメントは失われる。
-# → 代わりにsed的なアプローチ: 対象ブロックだけ書き換える
-
-# Simple approach: read lines, find agent block, replace
+# 対象エージェントブロック内の該当フィールド行のみ置換し、
+# thinking/effort/pane/variant 等の後続フィールドは一切変更しない。
+# (旧実装は全サブフィールドを読み飛ばして消してしまうバグがあった)
 lines = content.split('\n')
 new_lines = []
 in_agent_block = False
 agent_indent = None
-skip_until_next = False
 agent_block_found = False
+type_written = False
+model_written = False
+variant_written = False
 
 i = 0
 while i < len(lines):
     line = lines[i]
     stripped = line.lstrip()
 
-    # Detect our agent's block start
-    if stripped.startswith(f'{agent_id}:'):
+    # エージェントブロック開始を検出（他エージェントのサブキーと区別するため非インデント行のみ）
+    if not in_agent_block and stripped.startswith(f'{agent_id}:'):
         agent_block_found = True
         in_agent_block = True
         agent_indent = len(line) - len(stripped)
         new_lines.append(line)
-        # Write the updated fields
-        inner_indent = ' ' * (agent_indent + 2)
-        if new_type:
-            new_lines.append(f'{inner_indent}type: {new_type}')
-        if new_model:
-            new_lines.append(f'{inner_indent}model: {new_model}  {comment}')
-        if new_variant:
-            new_lines.append(f'{inner_indent}variant: {new_variant}  {comment}')
-        # Skip old sub-fields
         i += 1
-        while i < len(lines):
-            next_line = lines[i]
-            next_stripped = next_line.lstrip()
-            if next_stripped == '' or next_stripped.startswith('#'):
-                # Keep blank lines and comments between blocks
-                if next_stripped.startswith('#') and len(next_line) - len(next_stripped) > agent_indent:
-                    i += 1
-                    continue
-                break
-            next_indent = len(next_line) - len(next_stripped)
-            if next_indent <= agent_indent:
-                break  # Next agent or section
-            i += 1
-        in_agent_block = False
         continue
-    else:
-        new_lines.append(line)
+
+    if in_agent_block:
+        # ブロック終端検出: 非空・非コメント行でインデントが agent_indent 以下 → ブロック脱出
+        if stripped and not stripped.startswith('#'):
+            current_indent = len(line) - len(stripped)
+            if current_indent <= agent_indent:
+                # ブロック終端に達した。まだ書いていないフィールドをここに追記
+                inner_indent = ' ' * (agent_indent + 2)
+                if new_type and not type_written:
+                    new_lines.append(f'{inner_indent}type: {new_type}')
+                if new_model and not model_written:
+                    new_lines.append(f'{inner_indent}model: {new_model}  {comment}')
+                if new_variant and not variant_written:
+                    new_lines.append(f'{inner_indent}variant: {new_variant}  {comment}')
+                in_agent_block = False
+                new_lines.append(line)
+                i += 1
+                continue
+
+        # ブロック内: 更新対象フィールドのみ置換、それ以外は保持
+        if stripped.startswith('type:') and new_type:
+            current_indent = len(line) - len(stripped)
+            new_lines.append(f'{" " * current_indent}type: {new_type}')
+            type_written = True
+        elif stripped.startswith('model:') and new_model:
+            current_indent = len(line) - len(stripped)
+            new_lines.append(f'{" " * current_indent}model: {new_model}  {comment}')
+            model_written = True
+        elif stripped.startswith('variant:') and new_variant:
+            current_indent = len(line) - len(stripped)
+            new_lines.append(f'{" " * current_indent}variant: {new_variant}  {comment}')
+            variant_written = True
+        else:
+            # thinking/effort/pane/domain/deprecated 等は一切変更せず保持
+            new_lines.append(line)
+        i += 1
+        continue
+
+    new_lines.append(line)
     i += 1
 
+# ファイル末尾がエージェントブロックの場合
+if in_agent_block:
+    inner_indent = ' ' * (agent_indent + 2)
+    if new_type and not type_written:
+        new_lines.append(f'{inner_indent}type: {new_type}')
+    if new_model and not model_written:
+        new_lines.append(f'{inner_indent}model: {new_model}  {comment}')
+    if new_variant and not variant_written:
+        new_lines.append(f'{inner_indent}variant: {new_variant}  {comment}')
+
 if not agent_block_found:
-    # Agent block not found: fall back to yaml.dump (adds new block, comments lost)
+    # エージェントブロック未検出: yaml.dump でフォールバック (コメントは失われる)
+    with open(settings_path, 'r', encoding='utf-8') as f:
+        data = yaml.safe_load(f) or {}
+    cli = data.setdefault('cli', {})
+    agents = cli.setdefault('agents', {})
+    agent_cfg = agents.get(agent_id)
+    if not isinstance(agent_cfg, dict):
+        agent_cfg = {}
+        agents[agent_id] = agent_cfg
+    if new_type:
+        agent_cfg['type'] = new_type
+    if new_model:
+        agent_cfg['model'] = new_model
+    if new_variant:
+        agent_cfg['variant'] = new_variant
+    data['cli']['agents'][agent_id] = agent_cfg
     with open(settings_path, 'w', encoding='utf-8') as f:
         yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
 else:
+    result = '\n'.join(new_lines)
+    if content.endswith('\n') and not result.endswith('\n'):
+        result += '\n'
     with open(settings_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(new_lines))
-        if not content.endswith('\n'):
-            pass
-        else:
-            f.write('\n') if not '\n'.join(new_lines).endswith('\n') else None
+        f.write(result)
 
 print("OK")
 PYEOF

@@ -34,6 +34,14 @@ mkdir -p "$LOG_DIR" || true
 echo "[$(date -Iseconds)] $AGENT_ID session_start_hook fired" \
     >> "$LOG_DIR/session_start_hook.log" || true
 
+# Create idle flag so watcher correctly identifies this agent as idle from startup.
+# Fixes dead zone: fresh start / /tmp reboot / /clear leaves flag absent → watcher
+# treats agent as busy → nudge skip → no one wakes the agent (cmd_895 RCA).
+# shogun is excluded — it relies on a human-managed busy mechanism.
+if [ "$AGENT_ID" != "shogun" ]; then
+    touch "${IDLE_FLAG_DIR:-/tmp}/shogun_idle_${AGENT_ID}" 2>/dev/null || true
+fi
+
 case "$AGENT_ID" in
     shogun|karo|gunshi)
         # command-layer agents: full Session Start (Step 1-5)

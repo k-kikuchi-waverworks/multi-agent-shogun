@@ -126,6 +126,9 @@ LAST_CLEAR_TS=${LAST_CLEAR_TS:-0}
 ESCALATE_PHASE1=${ESCALATE_PHASE1:-120}
 ESCALATE_PHASE2=${ESCALATE_PHASE2:-240}
 ESCALATE_COOLDOWN=${ESCALATE_COOLDOWN:-300}
+# Stall alert: notify karo when ashigaru has unread messages for this long
+STALL_NOTIFY_SEC=${STALL_NOTIFY_SEC:-90}
+STALL_NOTIFIED=${STALL_NOTIFIED:-0}
 
 # ─── Nudge throttle ───
 # Avoid spamming the same "inboxN" into the pane every timeout tick.
@@ -1169,10 +1172,20 @@ for s in data.get('specials', []):
             # Stale busy safety net: if agent has been "busy" for >5 minutes with
             # unread messages, force-create idle flag. This recovers from false-busy
             # deadlock where stop_hook failed to create the flag.
-            local stale_busy_limit=300  # 5 minutes
+            local stale_busy_limit=90  # 90s (cmd_895: shortened from 300s for faster recovery)
             if [ "${FIRST_UNREAD_SEEN:-0}" -gt 0 ] && [ "$((now - FIRST_UNREAD_SEEN))" -ge "$stale_busy_limit" ]; then
-                echo "[$(date)] WARNING: $AGENT_ID busy for $((now - FIRST_UNREAD_SEEN))s with $normal_count unread — forcing idle flag (stale busy recovery)" >&2
+                local stall_age=$((now - FIRST_UNREAD_SEEN))
+                echo "[$(date)] WARNING: $AGENT_ID busy for ${stall_age}s with $normal_count unread — forcing idle flag (stale busy recovery)" >&2
                 touch "${IDLE_FLAG_DIR:-/tmp}/shogun_idle_${AGENT_ID}"
+                # Stall alert: notify karo once per stall event so it can re-dispatch.
+                # Watcher-driven (F004: karo polling forbidden). Throttled to 1 per event.
+                if [ "${STALL_NOTIFIED:-0}" -eq 0 ] && [[ "$AGENT_ID" == ashigaru* ]]; then
+                    STALL_NOTIFIED=1
+                    bash "${SCRIPT_DIR}/scripts/inbox_write.sh" karo \
+                        "${AGENT_ID} dispatch stall: ${normal_count}件未読 ${stall_age}s 未処理。idle flag強制作成済。再dispatch/確認要。" \
+                        stall_alert inbox_watcher 2>/dev/null || true
+                    echo "[$(date)] stall_alert sent to karo for $AGENT_ID (${stall_age}s, ${normal_count} unread)" >&2
+                fi
                 # Fall through to normal nudge/escalation below
             else
                 if [[ "$busy_cli" == "claude" ]]; then
@@ -1277,6 +1290,7 @@ for s in data.get('specials', []):
         fi
         FIRST_UNREAD_SEEN=0
         NEW_CONTEXT_SENT=0
+        STALL_NOTIFIED=0
         reset_nudge_throttle
         # Ensure idle flag exists when all messages are read.
         # Recovers from stop_hook_inbox.sh flag loss during block cycles.

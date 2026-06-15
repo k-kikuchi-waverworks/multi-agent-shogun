@@ -41,6 +41,7 @@ plans/README.md
 !instructions/cli_specific/copilot_tools.md
 !instructions/cli_specific/kimi_tools.md
 !instructions/cli_specific/opencode_tools.md
+!instructions/cli_specific/cursor_tools.md
 
 # Multi-CLI: Build template parts (roles, common sections)
 !instructions/roles/
@@ -69,6 +70,11 @@ plans/README.md
 # Multi-CLI: OpenCode custom tools
 !.opencode/tools/
 !.opencode/tools/mark-as-read.ts
+
+# Multi-CLI: Cursor Agent skills
+!.cursor/skills/
+!.cursor/skills/inbox-write/
+!.cursor/skills/inbox-write/SKILL.md
 
 # Setup and deployment scripts
 !shutsujin_departure.sh
@@ -106,8 +112,8 @@ plans/README.md
 !scripts/build_instructions.sh
 !scripts/slim_yaml.sh
 !scripts/slim_yaml.py
-!scripts/seo_qc.py
-!scripts/seo_qc.sh
+scripts/seo_qc.py
+scripts/seo_qc.sh
 !scripts/stop_hook_inbox.sh
 !scripts/session_start_hook.sh
 !scripts/agent_status.sh
@@ -118,6 +124,7 @@ plans/README.md
 !scripts/stall_watchdog_scan.sh
 !scripts/stall_watchdog_scan.py
 !scripts/retroactive_commit_verify.sh
+!scripts/mcp_health_check.sh
 
 # cmd_652 (2026-05-16): scripts/lib/ helper (settings.yaml 動的読込)
 !scripts/lib/

@@ -3,7 +3,7 @@
 # switch_cli.sh — エージェントのCLIセッションを安全に切り替える
 #
 # Usage:
-#   bash scripts/switch_cli.sh <agent_id> [--type <cli_type>] [--model <model_name>] [--variant <variant>]
+#   bash scripts/switch_cli.sh <agent_id> [--type <cli_type>] [--model <model_name>] [--effort <level>] [--variant <variant>]
 #
 # Examples:
 #   # settings.yaml の現在値で再起動（CLI種別/モデル変更なし）
@@ -18,8 +18,8 @@
 #   # OpenCode provider-specific reasoning variant
 #   bash scripts/switch_cli.sh ashigaru3 --type opencode --model openrouter/minimax/minimax-m2.5 --variant xhigh
 #
-#   # 同一CLI内でモデルだけ変更（Sonnet → Opus）
-#   bash scripts/switch_cli.sh ashigaru3 --model claude-opus-4-6
+#   # 同一CLI内でモデルとClaude effortを変更（Sonnet → Opus/max）
+#   bash scripts/switch_cli.sh ashigaru3 --model claude-opus-4-8 --effort max
 #
 #   # 全足軽を一括切替
 #   for i in $(seq 1 7); do bash scripts/switch_cli.sh ashigaru$i --type claude --model claude-sonnet-4-6; done
@@ -53,10 +53,13 @@ log() {
 
 # ─── Usage ───
 usage() {
-    echo "Usage: $0 <agent_id> [--type <cli_type>] [--model <model_name>] [--variant <variant>]"
+    echo "Usage: $0 <agent_id> [--type <cli_type>] [--model <model_name>] [--effort <level>] [--variant <variant>]"
     echo ""
     echo "  agent_id   Agent configured in config/settings.yaml (e.g. karo, ashigaru1, gunshi)"
-    echo "  --type     claude | codex | copilot | kimi | opencode"
+    echo "  --type     claude | codex | copilot | kimi | opencode | cursor"
+    echo "  --model    claude-sonnet-4-6 | claude-opus-4-8 | gpt-5.3-codex | openai/gpt-5.4-mini | etc."
+    echo "  --effort   Claude effort level: low | medium | high | xhigh | max"
+    echo "  --type     claude | codex | copilot | kimi | opencode | antigravity"
     echo "  --model    claude-sonnet-4-6 | claude-opus-4-6 | gpt-5.3-codex | openai/gpt-5.4-mini | etc."
     echo "  --variant  OpenCode model variant such as xhigh, high, max, minimal"
     echo ""
@@ -103,12 +106,13 @@ update_settings_yaml() {
     local new_type="${2:-}"
     local new_model="${3:-}"
     local new_variant="${4:-}"
+    local new_effort="${5:-}"
 
-    if [[ -z "$new_type" && -z "$new_model" && -z "$new_variant" ]]; then
+    if [[ -z "$new_type" && -z "$new_model" && -z "$new_variant" && -z "$new_effort" ]]; then
         return 0
     fi
 
-    log "Updating settings.yaml: ${agent_id} → type=${new_type:-<unchanged>}, model=${new_model:-<unchanged>}, variant=${new_variant:-<unchanged>}"
+    log "Updating settings.yaml: ${agent_id} → type=${new_type:-<unchanged>}, model=${new_model:-<unchanged>}, effort=${new_effort:-<unchanged>}, variant=${new_variant:-<unchanged>}"
 
     "${PROJECT_ROOT}/.venv/bin/python3" << PYEOF
 import yaml, sys, os, datetime
@@ -118,114 +122,121 @@ agent_id = "${agent_id}"
 new_type = "${new_type}" or None
 new_model = "${new_model}" or None
 new_variant = "${new_variant}" or None
+new_effort = "${new_effort}" or None
 
 with open(settings_path, 'r', encoding='utf-8') as f:
     content = f.read()
 
+with open(settings_path, 'r', encoding='utf-8') as f:
+    data = yaml.safe_load(f) or {}
+
+cli = data.setdefault('cli', {})
+agents = cli.setdefault('agents', {})
+agent_cfg = agents.get(agent_id)
+if not isinstance(agent_cfg, dict):
+    agent_cfg = {}
+    agents[agent_id] = agent_cfg
+
 timestamp = datetime.datetime.now().strftime('%Y-%m-%d')
 comment = f"# {timestamp}: switch_cli.sh による切替"
 
-# 対象エージェントブロック内の該当フィールド行のみ置換し、
-# thinking/effort/pane/variant 等の後続フィールドは一切変更しない。
-# (旧実装は全サブフィールドを読み飛ばして消してしまうバグがあった)
+if new_type:
+    agent_cfg['type'] = new_type
+if new_model:
+    agent_cfg['model'] = new_model
+if new_variant:
+    agent_cfg['variant'] = new_variant
+if new_effort:
+    agent_cfg['effort'] = new_effort
+
+data['cli']['agents'][agent_id] = agent_cfg
+
+# コメント保持のため、対象エージェント行だけsedで置換する方が安全だが
+# 完全性のためyaml.dumpを使用。コメントは失われる。
+# → 代わりにsed的なアプローチ: 対象ブロックだけ書き換える
+
+# Simple approach: read lines, find agent block, replace
 lines = content.split('\n')
 new_lines = []
 in_agent_block = False
 agent_indent = None
+skip_until_next = False
 agent_block_found = False
-type_written = False
-model_written = False
-variant_written = False
 
 i = 0
 while i < len(lines):
     line = lines[i]
     stripped = line.lstrip()
 
-    # エージェントブロック開始を検出（他エージェントのサブキーと区別するため非インデント行のみ）
-    if not in_agent_block and stripped.startswith(f'{agent_id}:'):
+    # Detect our agent's block start
+    if stripped.startswith(f'{agent_id}:'):
         agent_block_found = True
         in_agent_block = True
         agent_indent = len(line) - len(stripped)
         new_lines.append(line)
-        i += 1
-        continue
+        # Write the updated block. Preserve unspecified existing fields so
+        # passing --effort alone cannot accidentally drop type/model/thinking.
+        inner_indent = ' ' * (agent_indent + 2)
+        ordered_keys = ['type', 'model', 'effort', 'thinking', 'variant']
+        ordered_keys.extend(k for k in agent_cfg.keys() if k not in ordered_keys)
 
-    if in_agent_block:
-        # ブロック終端検出: 非空・非コメント行でインデントが agent_indent 以下 → ブロック脱出
-        if stripped and not stripped.startswith('#'):
-            current_indent = len(line) - len(stripped)
-            if current_indent <= agent_indent:
-                # ブロック終端に達した。まだ書いていないフィールドをここに追記
-                inner_indent = ' ' * (agent_indent + 2)
-                if new_type and not type_written:
-                    new_lines.append(f'{inner_indent}type: {new_type}')
-                if new_model and not model_written:
-                    new_lines.append(f'{inner_indent}model: {new_model}  {comment}')
-                if new_variant and not variant_written:
-                    new_lines.append(f'{inner_indent}variant: {new_variant}  {comment}')
-                in_agent_block = False
-                new_lines.append(line)
-                i += 1
+        def format_scalar(value):
+            if isinstance(value, bool):
+                return 'true' if value else 'false'
+            dumped = yaml.safe_dump(value, allow_unicode=True, default_flow_style=True).strip()
+            if dumped.endswith('\n...'):
+                dumped = dumped[:-4].strip()
+            if dumped == '...':
+                dumped = ''
+            return dumped
+
+        changed_keys = set()
+        if new_type:
+            changed_keys.add('type')
+        if new_model:
+            changed_keys.add('model')
+        if new_variant:
+            changed_keys.add('variant')
+        if new_effort:
+            changed_keys.add('effort')
+
+        for key in ordered_keys:
+            if key not in agent_cfg:
                 continue
-
-        # ブロック内: 更新対象フィールドのみ置換、それ以外は保持
-        if stripped.startswith('type:') and new_type:
-            current_indent = len(line) - len(stripped)
-            new_lines.append(f'{" " * current_indent}type: {new_type}')
-            type_written = True
-        elif stripped.startswith('model:') and new_model:
-            current_indent = len(line) - len(stripped)
-            new_lines.append(f'{" " * current_indent}model: {new_model}  {comment}')
-            model_written = True
-        elif stripped.startswith('variant:') and new_variant:
-            current_indent = len(line) - len(stripped)
-            new_lines.append(f'{" " * current_indent}variant: {new_variant}  {comment}')
-            variant_written = True
-        else:
-            # thinking/effort/pane/domain/deprecated 等は一切変更せず保持
-            new_lines.append(line)
+            suffix = f'  {comment}' if key in changed_keys else ''
+            new_lines.append(f'{inner_indent}{key}: {format_scalar(agent_cfg[key])}{suffix}')
+        # Skip old sub-fields
         i += 1
+        while i < len(lines):
+            next_line = lines[i]
+            next_stripped = next_line.lstrip()
+            if next_stripped == '' or next_stripped.startswith('#'):
+                # Keep blank lines and comments between blocks
+                if next_stripped.startswith('#') and len(next_line) - len(next_stripped) > agent_indent:
+                    i += 1
+                    continue
+                break
+            next_indent = len(next_line) - len(next_stripped)
+            if next_indent <= agent_indent:
+                break  # Next agent or section
+            i += 1
+        in_agent_block = False
         continue
-
-    new_lines.append(line)
+    else:
+        new_lines.append(line)
     i += 1
 
-# ファイル末尾がエージェントブロックの場合
-if in_agent_block:
-    inner_indent = ' ' * (agent_indent + 2)
-    if new_type and not type_written:
-        new_lines.append(f'{inner_indent}type: {new_type}')
-    if new_model and not model_written:
-        new_lines.append(f'{inner_indent}model: {new_model}  {comment}')
-    if new_variant and not variant_written:
-        new_lines.append(f'{inner_indent}variant: {new_variant}  {comment}')
-
 if not agent_block_found:
-    # エージェントブロック未検出: yaml.dump でフォールバック (コメントは失われる)
-    with open(settings_path, 'r', encoding='utf-8') as f:
-        data = yaml.safe_load(f) or {}
-    cli = data.setdefault('cli', {})
-    agents = cli.setdefault('agents', {})
-    agent_cfg = agents.get(agent_id)
-    if not isinstance(agent_cfg, dict):
-        agent_cfg = {}
-        agents[agent_id] = agent_cfg
-    if new_type:
-        agent_cfg['type'] = new_type
-    if new_model:
-        agent_cfg['model'] = new_model
-    if new_variant:
-        agent_cfg['variant'] = new_variant
-    data['cli']['agents'][agent_id] = agent_cfg
+    # Agent block not found: fall back to yaml.dump (adds new block, comments lost)
     with open(settings_path, 'w', encoding='utf-8') as f:
         yaml.dump(data, f, allow_unicode=True, default_flow_style=False)
 else:
-    result = '\n'.join(new_lines)
-    if content.endswith('\n') and not result.endswith('\n'):
-        result += '\n'
     with open(settings_path, 'w', encoding='utf-8') as f:
-        f.write(result)
+        f.write('\n'.join(new_lines))
+        if not content.endswith('\n'):
+            pass
+        else:
+            f.write('\n') if not '\n'.join(new_lines).endswith('\n') else None
 
 print("OK")
 PYEOF
@@ -331,12 +342,17 @@ send_exit() {
             sleep 0.3
             tmux send-keys -t "$pane" Enter 2>/dev/null || true
             ;;
-        copilot|kimi)
+        copilot|kimi|antigravity)
             tmux send-keys -t "$pane" C-c 2>/dev/null || true
             sleep 0.5
             tmux send-keys -t "$pane" "/exit" 2>/dev/null || true
             sleep 0.3
             tmux send-keys -t "$pane" Enter 2>/dev/null || true
+            ;;
+        cursor)
+            tmux send-keys -t "$pane" "/quit" 2>/dev/null || true
+            sleep 0.3
+            tmux send-keys -t "$pane" "" Enter 2>/dev/null || true
             ;;
         *)
             tmux send-keys -t "$pane" "/exit" 2>/dev/null || true
@@ -416,6 +432,7 @@ shift
 NEW_TYPE=""
 NEW_MODEL=""
 NEW_VARIANT=""
+NEW_EFFORT=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -425,6 +442,10 @@ while [ $# -gt 0 ]; do
             ;;
         --model)
             NEW_MODEL="$2"
+            shift 2
+            ;;
+        --effort)
+            NEW_EFFORT="$2"
             shift 2
             ;;
         --variant)
@@ -444,6 +465,14 @@ done
 # バリデーション
 if [[ -n "$NEW_TYPE" ]] && ! _cli_adapter_is_valid_cli "$NEW_TYPE"; then
     log "ERROR: Invalid CLI type: ${NEW_TYPE}. Allowed: ${CLI_ADAPTER_ALLOWED_CLIS}"
+    exit 1
+fi
+if [[ -n "$NEW_TYPE" ]]; then
+    NEW_TYPE=$(_cli_adapter_normalize_cli_type "$NEW_TYPE")
+fi
+
+if [[ -n "$NEW_EFFORT" && ! "$NEW_EFFORT" =~ ^(low|medium|high|xhigh|max)$ ]]; then
+    log "ERROR: Invalid effort: ${NEW_EFFORT}. Allowed: low, medium, high, xhigh, max"
     exit 1
 fi
 
@@ -478,20 +507,21 @@ if [[ -n "$NEW_MODEL" && -z "$NEW_TYPE" ]]; then
 fi
 
 # Step 1: settings.yaml 更新（--type/--model/--variant 指定時のみ）
-if [[ -n "$NEW_TYPE" || -n "$NEW_MODEL" || -n "$NEW_VARIANT" ]]; then
-    update_settings_yaml "$AGENT_ID" "$NEW_TYPE" "$NEW_MODEL" "$NEW_VARIANT"
+if [[ -n "$NEW_TYPE" || -n "$NEW_MODEL" || -n "$NEW_VARIANT" || -n "$NEW_EFFORT" ]]; then
+    update_settings_yaml "$AGENT_ID" "$NEW_TYPE" "$NEW_MODEL" "$NEW_VARIANT" "$NEW_EFFORT"
 fi
 
 # Step 2: 切替後のCLI情報を取得（settings.yaml反映後）
 TARGET_CLI_TYPE=$(get_cli_type "$AGENT_ID")
 TARGET_MODEL=$(get_agent_model "$AGENT_ID")
+TARGET_EFFORT=$(get_agent_effort "$AGENT_ID")
 TARGET_VARIANT=$(_cli_adapter_read_yaml "cli.agents.${AGENT_ID}.variant" "")
 if [[ "$TARGET_CLI_TYPE" == "opencode" ]]; then
     sync_opencode_agent_frontmatter "$AGENT_ID" "$TARGET_MODEL" "$TARGET_VARIANT"
 fi
 TARGET_CMD=$(build_cli_command "$AGENT_ID")
 
-log "Target: cli=${TARGET_CLI_TYPE}, model=${TARGET_MODEL}, cmd=${TARGET_CMD}"
+log "Target: cli=${TARGET_CLI_TYPE}, model=${TARGET_MODEL}, effort=${TARGET_EFFORT:-<unset>}, cmd=${TARGET_CMD}"
 
 # Step 3: 現在のCLIを /exit で終了
 CURRENT_CLI=$(get_current_pane_cli "$PANE_TARGET")

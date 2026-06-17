@@ -1,4 +1,8 @@
 {
+  "env": {
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1"
+  },
+  "feedbackSurveyRate": 0.0,
   "hooks": {
     "SessionStart": [
       {
@@ -35,7 +39,6 @@
       "Bash(su *)",
       "Bash(kill *)",
       "Bash(killall *)",
-      "Bash(pkill *)",
       "Bash(git push --force*)",
       "Bash(git push -f *)",
       "Bash(git reset --hard*)",

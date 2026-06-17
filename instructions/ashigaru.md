@@ -179,7 +179,7 @@ date "+%Y-%m-%dT%H:%M:%S"
 After writing report YAML, notify Gunshi (NOT Karo):
 
 ```bash
-bash scripts/inbox_write.sh gunshi "足軽{N}号、任務完了でござる。品質チェックを仰ぎたし。" report_received ashigaru{N}
+bash scripts/inbox_write.sh gunshi1 "足軽{N}号、任務完了でござる。品質チェックを仰ぎたし。" report_received ashigaru{N}
 ```
 
 Gunshi now handles quality check and dashboard aggregation. No state checking, no retry, no delivery verification.

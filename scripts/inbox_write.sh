@@ -11,6 +11,51 @@ CONTENT="$2"
 TYPE="$3"
 FROM="$4"
 
+# Deprecated gunshi redirect (write-layer): gunshi/gunshi_a/gunshi_b → active gunshi (Round-robin)
+# Ensures ashigaru reports land in active gunshi1/2 inboxes regardless of caller using deprecated name.
+case "$TARGET" in
+    gunshi|gunshi_a|gunshi_b)
+        _LIB="$SCRIPT_DIR/scripts/lib/agent_list.sh"
+        if [ -f "$_LIB" ]; then
+            # shellcheck source=scripts/lib/agent_list.sh
+            . "$_LIB"
+            _ACTIVE_GUNSHI=$(get_active_gunshi_agents 2>/dev/null || true)
+            if [ -n "$_ACTIVE_GUNSHI" ]; then
+                # Round-robin: pick agent with fewest unread messages
+                _BEST_TARGET=""
+                _BEST_COUNT=999999
+                while IFS= read -r _AGENT; do
+                    [ -z "$_AGENT" ] && continue
+                    _AGENT_INBOX="$SCRIPT_DIR/queue/inbox/${_AGENT}.yaml"
+                    if [ -f "$_AGENT_INBOX" ]; then
+                        _COUNT=$(grep -c "read: false" "$_AGENT_INBOX" 2>/dev/null || true)
+                        _COUNT=${_COUNT:-0}
+                    else
+                        _COUNT=0
+                    fi
+                    if [ "$_COUNT" -lt "$_BEST_COUNT" ]; then
+                        _BEST_COUNT=$_COUNT
+                        _BEST_TARGET=$_AGENT
+                    fi
+                done <<< "$_ACTIVE_GUNSHI"
+                if [ -n "$_BEST_TARGET" ]; then
+                    echo "[inbox_write] REDIRECT: deprecated '$TARGET' → '$_BEST_TARGET' (active gunshi, unread=$_BEST_COUNT)" >&2
+                    TARGET="$_BEST_TARGET"
+                else
+                    echo "[inbox_write] WARNING: redirect failed, defaulting '$TARGET' → 'gunshi1'" >&2
+                    TARGET="gunshi1"
+                fi
+            else
+                echo "[inbox_write] WARNING: no active gunshi found, defaulting '$TARGET' → 'gunshi1'" >&2
+                TARGET="gunshi1"
+            fi
+        else
+            echo "[inbox_write] WARNING: agent_list.sh not found, defaulting '$TARGET' → 'gunshi1'" >&2
+            TARGET="gunshi1"
+        fi
+        ;;
+esac
+
 INBOX="$SCRIPT_DIR/queue/inbox/${TARGET}.yaml"
 LOCKFILE="${INBOX}.lock"
 

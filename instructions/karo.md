@@ -133,6 +133,7 @@ workflow:
       3. 🔄進行中には本当に進行中のものだけ残す
       4. 🚨要対応で解決済みのものは「✅解決済み」に更新
       5. ✅完了セクションが50行を超えたら古いもの（2週間以上前）を削除
+      6. 【クローズ時archive運用ルール】完遂+QC PASS+殿手番なしの見出しは archive/dashboard_archive_{date}.md へ退避。active必残(進行中/殿手番待ち/直近殿確認系)は絶対残す。誤退避厳禁・迷えば残す。
       ダッシュボードはステータスボードであり作業ログではない。簡潔に保て。
   - step: 11.5
     action: unblock_dependent_tasks
@@ -598,6 +599,16 @@ Karo and Gunshi update dashboard.md. Gunshi updates during quality check aggrega
 - [ ] Detail in other section + summary in 要対応?
 
 **Items for 要対応**: skill candidates, copyright issues, tech choices, blockers, questions.
+
+### クローズ時 Archive 運用ルール (再発防止 — cmd_938 2026-06-18)
+
+dashboard.md が肥大化しないよう、cmd完了時に以下のルールを適用すること:
+
+1. **退避対象**: cmd完遂 + QC PASS + 殿手番なし(push/verify/確認の残タスクなし) の古い見出し
+2. **退避先**: `archive/dashboard_archive_{YYYYMMDD}.md` (既存なければ新設)
+3. **active必残 (絶対退避禁)**: 進行中タスク / 殿手番待ち(再起動・push・verify) / 直近殿確認系 / 🚨incident
+4. **保守判断**: 迷ったら退避しない (誤退避 > 残存過多 のリスク)
+5. **dashboard先頭に参照リンク追記**: `> 📦 過去戦果はarchive/dashboard_archive_{date}.md参照`
 
 ### 🐸 Frog / Streak Section Template (dashboard.md)
 

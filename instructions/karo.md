@@ -146,7 +146,10 @@ workflow:
     note: |
       After report processing, check queue/shogun_to_karo.yaml for unprocessed pending cmds.
       If pending exists → go back to step 2 (process new cmd).
-      If no pending → stop (await next inbox wakeup).
+      If no pending → BEFORE going idle, evaluate Idle Backlog Auto-Pull (cmd_1095):
+        → See "## Idle Backlog Auto-Pull (cmd_1095)" section below.
+        → If idle precondition met → dispatch 1 deferred cmd (G-A〜G-E ガード通過必須).
+        → If precondition not met or no candidates → proceed to self-/clear or stop.
       WHY: Shogun may have added new cmds while karo was processing reports.
       Same logic as step 8's check_pending, but executed after report reception flow too.
 
@@ -877,7 +880,97 @@ STEP 5以降は不要（watcherが一括処理）
 
 Shogun needs conversation history with the lord.
 
-### Karo Self-/clear (Context Relief)
+### Idle Backlog Auto-Pull (cmd_1095)
+
+karo が idle に入る直前(step 12 後)に実行する。self-/clear より先に評価し、消化できる仕事があれば idle にしない。
+
+### 発火前提 (idle precondition — 全て満たす時のみ検討)
+
+1. `shogun_to_karo.yaml` に `status: in_progress` の cmd が **ゼロ** (新規優先作業なし)
+2. `queue/inbox/karo.yaml` に未読ゼロ (処理すべき report/指示なし)
+3. 空き足軽が 1 体以上 (`bash scripts/agent_status.sh` で Pane=待機中 & Status=done/idle)
+4. `status: deferred` & `defer.autopull: eligible` の cmd が 1 件以上
+
+→ どれか欠ければ自動 pull せず通常 idle / self-/clear へ (空振り静か)。
+
+### ガード付き選定アルゴリズム (★肝 — default-deny★)
+
+```
+候補 = [c for c in cmds if c.status=="deferred" and c.defer.autopull=="eligible"]
+
+for c in 候補:
+  # G-A 殿手番ガード
+  if c.defer.autopull != "eligible":           skip  # 二重チェック
+  if cmd_has(c, depends_on_lord=true):         skip  # 殿依存 = 自動禁止
+  # G-B 危険操作ガード (eligible 誤分類への二重防御)
+  if danger_scan(c):         skip + 殿 surface  # 下記参照
+  # G-C 5090逼迫ガード
+  if c.defer.resource == "gpu" and not gpu_is_free():  skip
+  # resource 未記載 → gpu 扱い (安全側 default-deny)
+  if "resource" not in c.defer and not gpu_is_free():  skip
+  通過候補.append(c)
+
+if 通過候補 空: → 自動pullせず idle/self-clear へ (空振り静か)
+
+# G-D launch柱優先ソート
+通過候補.sort(key=(launch_pillar desc, priority[high>med>low], deferred_at asc))
+
+# G-E 1サイクル1件 (burst回避)
+対象 = 通過候補[0]
+空き足軽1体に通常 dispatch フロー (task YAML 起票 → inbox_write task_assigned)。
+status: deferred → in_progress に更新。dashboard 反映。
+```
+
+**launch 柱が来れば**: `in_progress` 発生で precondition-(1) が崩れ、自動 pull は自動停止 (launch 柱優先が構造的に担保される)。
+
+### G-B 危険操作 scan (danger_scan)
+
+`eligible` 誤分類に備え、dispatch 直前に cmd の `purpose`/内容を文字列 scan:
+
+```
+rm -rf | prune | volume rm | DROP | TRUNCATE | migrate (prod/本番)
+| git push | force-push | .env | Stripe (live) | deploy (本番/Modal)
+| 破壊 | 削除 (大規模) | wsl --shutdown
+```
+
+Hit → **強制 skip + 殿 surface** (dashboard 🚨 追記 + `/backlog` 🔴 表示)。
+
+### G-C GPU-free 判定 (gpu_is_free)
+
+```bash
+# 1. gpu_occupancy_record.yaml を読み active レコードあれば busy
+# 2. nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader -i 0
+#    → util > 20% or memory.used が閾値超 → busy
+# 3. nvidia-smi 取得失敗 → busy 扱い (default-deny)
+# CUDA index: nvidia-smi と反転 (memory feedback_gpu_assignment_rule 参照)
+```
+
+### defer: ブロック形式 (家老が後回し記録時に付与)
+
+```yaml
+- id: cmd_XXXX
+  timestamp: '2026-06-27T21:00:00+09:00'
+  purpose: "..."
+  status: deferred            # 後回し中を明示
+  defer:
+    reason: "launch柱優先ゆえ後回し"
+    autopull: eligible        # eligible=自動pull可 / hold=殿手番ゆえ自動禁止
+    resource: cpu             # cpu=GPU不要 / gpu=5090逼迫ガード対象
+    priority: medium          # high|medium|low
+    launch_pillar: false      # true=launch柱(常に最優先)
+    deferred_at: '2026-06-27T21:00:00+09:00'
+```
+
+**家老の defer 記録規律**: 分類に迷ったら `autopull: hold` (=殿手番扱いで安全側)。`eligible` は安全確証がある時のみ。`defer:` ブロック無し旧エントリは自動 pull から構造的に不可視 (回帰非破壊)。
+
+### /backlog skill との連携
+
+殿が `/backlog` を実行するとバックログ一覧 (✅完了/🔄進行/⏸️後回し/🔴殿手番) を表示。
+自動 pull が発火した cmd は `status: in_progress` → `/backlog` の 🔄 進行中に移動。
+
+---
+
+## Karo Self-/clear (Context Relief)
 
 Karo MAY self-/clear when ALL of the following conditions are met:
 

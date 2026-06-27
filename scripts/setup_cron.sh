@@ -29,6 +29,9 @@ cron_block() {
 0 * * * * bash $SCRIPT_DIR/scripts/branch_drift_check.sh >> $SCRIPT_DIR/logs/branch_drift_check.log 2>&1
 0 */6 * * * bash $SCRIPT_DIR/scripts/auto_merge_short_lived.sh >> $SCRIPT_DIR/logs/auto_merge_short_lived.log 2>&1
 # multi-agent-shogun branch policy end
+# multi-agent-shogun idle backlog sweep start (cmd_1095)
+*/20 * * * * bash $SCRIPT_DIR/scripts/idle_backlog_sweep.sh >> $SCRIPT_DIR/logs/idle_backlog_sweep.log 2>&1
+# multi-agent-shogun idle backlog sweep end
 EOF
 }
 

@@ -199,6 +199,8 @@ logs/audits/
 !skills/discord-ch-state-verify/scripts/*.py
 !skills/shogun-context-cleanup/
 !skills/shogun-context-cleanup/SKILL.md
+!skills/shogun-decision-triage/
+!skills/shogun-decision-triage/SKILL.md
 
 # Python venv (explicit deny — whitelist patterns like LICENSE leak through !*/)
 .venv/

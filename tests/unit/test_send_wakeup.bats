@@ -150,6 +150,10 @@ pgrep() { "$MOCK_PGREP" "\$@"; }
 sleep() { :; }
 export -f tmux timeout pgrep sleep
 
+# Production sources scripts/lib/agent_list.sh at startup (is_command_layer_agent).
+# The testing guard skips that block, so load it here to match production behavior.
+source "$PROJECT_ROOT/scripts/lib/agent_list.sh"
+
 # Source the REAL inbox_watcher.sh (testing guard skips startup & main loop)
 export __INBOX_WATCHER_TESTING__=1
 source "$WATCHER_SCRIPT"

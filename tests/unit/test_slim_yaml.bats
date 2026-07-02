@@ -146,6 +146,18 @@ PY
     [ "$archive_count" -eq 1 ]
 }
 
+@test "inbox with null messages value is treated as empty and does not fail" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" "queue: []"
+    write_yaml "$SHOGUN_QUEUE_DIR/inbox/gunshi_a.yaml" "messages:"
+
+    run run_slim karo
+    assert_success
+
+    [ "$(yaml_value "$SHOGUN_QUEUE_DIR/inbox/gunshi_a.yaml" "messages")" = "" ]
+    archive_count="$(find "$SHOGUN_QUEUE_DIR" -name 'inbox_gunshi_a_*.yaml' 2>/dev/null | wc -l)"
+    [ "$archive_count" -eq 0 ]
+}
+
 @test "ntfy inbox old pending entries are inventoried but not deleted" {
     write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" "queue: []"
     write_yaml "$SHOGUN_QUEUE_DIR/ntfy_inbox.yaml" $'inbox:\n- id: pending-old\n  status: pending\n  timestamp: "2000-01-01T00:00:00+09:00"\n- id: done-old\n  status: done\n  timestamp: "2000-01-01T00:00:00+09:00"\n'

@@ -89,28 +89,8 @@ join_lines() {
     [ "$(agent_registry_multiagent_pane_for_agent gunshi2 1)" = "multiagent:agents.4" ]
 }
 
-@test "watcher_supervisor: --print-watchers uses dynamic settings and pane base" {
-    local settings="$TEST_TMP/settings.yaml"
-    write_settings "$settings" 'cli:
-  agents:
-    shogun:
-      type: codex
-    karo:
-      type: codex
-    ashigaru3:
-      type: codex
-    gunshi:
-      type: codex
-    gunshi2:
-      type: codex'
-
-    run env AGENT_REGISTRY_SETTINGS="$settings" SHOGUN_PANE_BASE=1 \
-        bash "$PROJECT_ROOT/scripts/watcher_supervisor.sh" --print-watchers
-
-    [ "$status" -eq 0 ]
-    [[ "$output" == *$'shogun\tshogun:main.0\tlogs/inbox_watcher_shogun.log'* ]]
-    [[ "$output" == *$'karo\tmultiagent:agents.1\tlogs/inbox_watcher_karo.log'* ]]
-    [[ "$output" == *$'ashigaru3\tmultiagent:agents.2\tlogs/inbox_watcher_ashigaru3.log'* ]]
-    [[ "$output" == *$'gunshi\tmultiagent:agents.3\tlogs/inbox_watcher_gunshi.log'* ]]
-    [[ "$output" == *$'gunshi2\tmultiagent:agents.4\tlogs/inbox_watcher_gunshi2.log'* ]]
-}
+# NOTE (cmd_1170): upstream 2f1ebd0 の「watcher_supervisor: --print-watchers」test は削除。
+# merge cde895e で watcher_supervisor.sh は cmd_652 版 (scripts/lib/agent_list.sh 方式) を
+# 意図的に retain しており、--print-watchers を持つ upstream registry 版実装はローカル不採用。
+# test だけが upstream から残留し、オプション不在の supervisor が無限ループに入って hang していた。
+# lib/agent_registry.sh 自体は agent_status.sh / switch_cli.sh で現役ゆえ上記 3 test は維持。

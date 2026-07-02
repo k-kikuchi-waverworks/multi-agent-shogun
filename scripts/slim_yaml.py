@@ -7,6 +7,7 @@ Removes completed/archived items from YAML queue files to maintain performance.
 - For all agents: Archives read: true messages from inbox files.
 """
 
+import os
 import sys
 import time
 from datetime import datetime
@@ -309,6 +310,9 @@ def slim_inbox(agent_id, dry_run=False):
         return True
 
     messages = data.get('messages', [])
+    if messages is None:
+        # `messages:` with no value (empty inbox) parses as None
+        messages = []
     if not isinstance(messages, list):
         print("Error: messages is not a list", file=sys.stderr)
         return False

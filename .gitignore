@@ -120,7 +120,6 @@ scripts/seo_qc.sh
 !scripts/ratelimit_check.sh
 !scripts/switch_cli.sh
 !scripts/discord_post.sh
-!scripts/dashboard-viewer.py
 !scripts/stall_watchdog_scan.sh
 !scripts/stall_watchdog_scan.py
 !scripts/retroactive_commit_verify.sh

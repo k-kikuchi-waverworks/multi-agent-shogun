@@ -680,6 +680,31 @@ Note: inbox_write to shogun は F002 で禁止 (`from_karo_allowed: false`)。nt
 
 inbox 処理後 + cmd 完遂後に毎回実行。cmd/subtask が想定時間を超えても動かない場合を検知し、早期介入。
 
+### ★能動 idle-poll 機構 = karo 非依存化 (cmd_1154)★
+
+**主機構は `scripts/idle_revive_scan.py`(cron 常駐・karo loop 外)へ移行済**。この Watchdog(karo-run)は
+**補助へ降格**する。理由=従来の idle→revive は karo loop 内で走るため、家老が degrade/固着すると
+停止し、将軍が手動 revive(whack-a-mole)する構造だった。cron scan は karo 非依存ゆえ家老 degrade にも耐性がある。
+
+- **idle_revive_scan.py が主(reactive)**: 足軽/軍師の idle 固着(spinner無 AND status=assigned/in_progress 且つ未完
+  AND 出力file mtime 停止 の複合 AND)を検知 → `clear_command` 自動発行。slow-gen(出力漸進)は mtime 新鮮ゆえ
+  誤 revive しない。rate limit(agent≥5分 / karo≥20分 / 連続3回で escalation 停止)内蔵。
+- **家老 degrade も同 scan が検知(Task B)**: `dashboard.md` mtime が 20分超 stale + active task 存在(+ task/report
+  YAML が dashboard より新しい=実態乖離)→ scan が karo へ `clear_command` 発行 → SessionStart hook で復旧。
+- **karo Watchdog(この節)は補助**: cron 未活性 or 障害時の fallback として残す。二重発火は rate limit(clear_log.yaml)で吸収。
+- 活性化は staged(`scripts/idle_revive_scan.cron`)。smoke S1-S4 QC PASS 後に 家老/殿 が crontab 登録。
+- ADR: `docs/content/ops/cmd_1154_idle_revive_scan_adr.md`(なぜ script 独立か=家老 degrade 耐性)。
+
+### ★家老 定期 self-clear backstop (proactive・cmd_1154)★
+
+reactive 検知(scan)の漏れに対する保険。**家老は context 肥大を溜め込まず、能動的に self-clear する**:
+
+- **契機**: 重い dispatch loop(企画 re-author 等 15-20件/batch)を回した後、または dashboard 更新が重くなった実感時、
+  または一定 dispatch 数ごと(目安。`feedback_heavy_generation_periodic_clear` の仕組み化)。
+- **手順**: self-clear 前に inbox 空 + dashboard 最新化を確認 → `/clear` → SessionStart hook で persona/戦国口調/state 復旧
+  → CLAUDE.md Session Start で queue YAML から dashboard 再構築。**state は YAML 永続ゆえ非破壊(損失ゼロ)**。
+- reactive(scan の karo clear)と proactive(この self-clear)の二段で、家老機能不全(2026-07-01 dashboard 4h 放置事案)を断つ。
+
 ### 実行タイミング
 
 - inbox 処理完遂後 (毎回)

@@ -1492,3 +1492,58 @@ ash1-5 は default Sonnet medium だが、以下 4 trigger 該当 cmd では Opu
 | (b) watcher 追従漏れ | settings.yaml `cli.agents` 動的読込 (`scripts/lib/agent_list.sh` helper)、agent 追加/削除は settings.yaml 更新のみで watcher 自動追従 |
 | (c) dashboard 表記乖離 | dashboard.md template に軍師 stack section 標準化 + cmd_owner_record + gpu_occupancy_record 自動取得 |
 
+---
+
+## cmd起票時登録規律 (cmd_1251 起源)
+
+`queue/shogun_to_karo.yaml` の意味論を「将軍→家老 dispatch log」から「**全起票 cmd 台帳 (SSoT)**」へ正式再定義する。背景: 台帳が dispatch log 扱いだったため家老起票 cmd (cmd_1245〜1252) が一度も登録されず、engine backlog 閲覧から不可視になる運用ギャップが実測された。dispatch payload 機能 (command 全文) は将軍 entry では従来通り同居してよい。**将軍側運用 (CLAUDE.md) は不変** — 本規律は家老側の台帳管理義務を定めるものである。
+
+### 起票時登録 (originator 問わず必須)
+
+★全 cmd は起票と同時に台帳へ登録する★。台帳登録 = 採番 gate (cmd 番号衝突の根絶。cmd_1231/cmd_1124 衝突の前例あり)。
+
+| 起票元 | 登録の書き手 |
+|--------|-------------|
+| 将軍起票 | 将軍 (従来通り。north_star/acceptance_criteria/command 全文の重量 entry は v2 必須 field を含む限り上位互換で歓迎) |
+| **家老起票** | **家老 — subtask YAML を書く前に slim entry を台帳へ追記** (flock = inbox_write.sh 同型規律・slim_yaml.sh の lock 流儀準拠) |
+| 殿口頭起票 | 受けた側 (将軍 or 家老) が代筆登録 |
+
+登録 entry の最低要件 = **slim entry schema v2** (必須 8 field + 任意 3):
+
+```yaml
+- id: cmd_1246                      # ★必須★ 一意。台帳登録=採番gate
+  title: 恋backend memleak根治      # ★必須★ 短名 (memory feedback_cmd_with_task_name 整合)
+  origin: karo                      # ★必須★ shogun | karo | lord (起票元)
+  status: in_progress               # ★必須★ 正規語彙=pending/in_progress/deferred/done/superseded/archived/dispatched/cancelled
+  project: aituber-app              # ★必須★ repo帰属
+  priority: high                    # ★必須★
+  timestamp: '2026-07-08T07:40:00'  # ★必須★ 起票時刻 (date コマンド実測、推測禁)
+  evidence: "B1実装完遂(a975a27)・gunshi2 QC中"  # ★必須★ 最新根拠1行
+  lane: B                                        # 任意 (campaign lane等)
+  deliverable: plans/cmd_1246_memleak_rca.md     # 任意
+  description: |                                 # 任意 (家老起票は1-3行要旨で足りる)
+    恋backend起動15hでRSS15.7GB肥大の根治。
+```
+
+既存 entry の schema 書換は不要 (Chesterton's Fence — 履歴保全、schema v2 は「新規登録の最低要件」)。
+
+### status 遷移・evidence 更新の書き手 = 家老
+
+- **status 変更のたび、家老が当該 entry の `status` と `evidence` (最新根拠 1 行) を必ず書換える** (ash 完遂受領時の status 是正 = memory `feedback_ash_status_bookkeeping` と同一線)。evidence を放置すると「最新根拠」が風化し、真 status 突合コストが再発する。
+- 書込は必ず台帳 (SSoT) へ。engine 側 cache/SQLite への cmd status 直書きは禁 (cmd_1233 規律 — engine index は f(queue YAML) の derived view)。
+- 本台帳 bookkeeping は「家老は交通整理」原則の範疇 (全エージェント状態ファイルの一元管理 = 家老直接実行の正当事由、CLAUDE.md Test Rules 4 整合)。F001 (self_execute_task) には該当しない。
+
+### 剪定 = 削除禁・archive 移動
+
+- 剪定対象 = **終端 status (done/superseded/cancelled/archived) の entry のみ**。非終端 entry の剪定は禁。
+- ★削除禁★ — 必ず `queue/archive/shogun_to_karo_<timestamp>.yaml` へ移動 (既存の archive 世代運用の正式化)。**union(active + archives) = 全史** の invariant を維持する。
+- 剪定 gate: 「終端 status かつ evidence 欄に close 根拠があること」を満たす entry のみ剪定可 (evidence なき done 剪定は禁 = 風化防止)。
+
+### 形骸化防止 = 三重検知
+
+| # | 検知層 | 内容 |
+|---|--------|------|
+| 1 | 発生源遮断 | 本起票時登録規律 — 家老起票が subtask YAML dispatch 前に必ず台帳を通る |
+| 2 | 検知網 | task-review skill の定期走行 (家老 idle 時 or 週次) で台帳未登録 cmd / status-lag を検出 → cmd_1245 edit-sheet 方式 (read-only シート→軍師 QC→家老 flock 適用) で差分適用 |
+| 3 | 突合 | engine M1 三角突合 (shogun_to_karo × tasks × reports の status 乖離検知、cmd_1233 実装済) が乖離を機械で炙り出す |
+

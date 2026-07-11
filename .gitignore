@@ -125,6 +125,9 @@ scripts/seo_qc.sh
 !scripts/retroactive_commit_verify.sh
 !scripts/mcp_health_check.sh
 !scripts/context_cleanup_diagnose.sh
+# cmd_1255 (2026-07-11): 台帳parse自己検証gate (ledger_guard watcher + 手動検証CLI)
+!scripts/ledger_guard.sh
+!scripts/ledger_validate.py
 
 # cmd_652 (2026-05-16): scripts/lib/ helper (settings.yaml 動的読込)
 !scripts/lib/

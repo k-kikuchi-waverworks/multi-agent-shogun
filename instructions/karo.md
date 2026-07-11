@@ -1533,6 +1533,16 @@ ash1-5 は default Sonnet medium だが、以下 4 trigger 該当 cmd では Opu
 - 書込は必ず台帳 (SSoT) へ。engine 側 cache/SQLite への cmd status 直書きは禁 (cmd_1233 規律 — engine index は f(queue YAML) の derived view)。
 - 本台帳 bookkeeping は「家老は交通整理」原則の範疇 (全エージェント状態ファイルの一元管理 = 家老直接実行の正当事由、CLAUDE.md Test Rules 4 整合)。F001 (self_execute_task) には該当しない。
 
+### ★自由文エスケープ規律 (cmd_1255 — 台帳破損事故の第一防衛線)★
+
+2026-07-11 に **evidence 自由文へ半角 `: ` (コロン+空白) を混入** させた結果、YAML が入れ子 mapping と誤認して台帳全体の parse が失敗し、殿の engine backlog view が死亡する事故が発生した。同種前例 = Ren'Py アポストロフィ inbox 破損。**evidence/progress/note/command 等の自由文 field を編集するときは以下いずれか必須**:
+
+- **(i) 長文は必ず block scalar `|` を使う** (★推奨★ — quote エスケープ地獄を避ける最も頑健な形。既存 entry も `|` 多用)。
+- (ii) 値全体をダブルクォートで囲む。
+- (iii) 半角コロンを全角コロン `：` で代替する。
+
+★行頭 `- ` (ハイフン+空白) や先頭の `?`/`&`/`*`/`{`/`[` 等の YAML 構文文字も自由文先頭では同様に危険。迷ったら `|` にせよ★。この規律は「そもそも壊さない」第一線であり、保証は `scripts/ledger_guard.sh` watcher (破損検知→自動 rollback→quarantine→本 inbox 警告) が後ろ盾となる (defense-in-depth の役割分離)。手動検証は `python3 scripts/ledger_validate.py queue/shogun_to_karo.yaml` で随時可能。
+
 ### 剪定 = 削除禁・archive 移動
 
 - 剪定対象 = **終端 status (done/superseded/cancelled/archived) の entry のみ**。非終端 entry の剪定は禁。

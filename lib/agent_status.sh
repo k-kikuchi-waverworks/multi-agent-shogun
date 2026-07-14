@@ -20,8 +20,13 @@
 #   2. Status bar check (last non-empty line): 'esc to' only appears in
 #      Claude Code's status bar during active processing. This is the most
 #      reliable busy signal — immune to old spinner text in scroll-back.
-#   3. Idle checks: CLI-specific idle prompts (❯, Codex ? prompt)
-#   4. Text-based busy markers: spinner keywords in bottom 5 lines
+#   3. Live spinner row check (cmd_1280): on narrow panes the status bar is
+#      width-truncated ('⏵⏵ bypass permissions on          ·') and 'esc to
+#      interrupt' falls off screen, so signal 2 misses busy. Claude Code
+#      renders a live spinner row '<glyph> <phrase>… (elapsed · …)' directly
+#      above the input box while processing; detect it anchored to the box.
+#   4. Idle checks: CLI-specific idle prompts (❯, Codex ? prompt)
+#   5. Text-based busy markers: spinner keywords in bottom 5 lines
 #
 # Why this order matters:
 #   - Claude Code shows ❯ prompt even during thinking/working, so idle
@@ -29,7 +34,9 @@
 #   - Old spinner text (e.g. "Working on task • esc to interrupt") lingers
 #     in scroll-back, so checking all 5 lines for 'esc to' causes false-busy
 #     (the bug T-BUSY-008 fixed). Solution: check ONLY the last line for
-#     'esc to' — the status bar is always at the bottom.
+#     'esc to' — the status bar is always at the bottom. The live spinner
+#     check keeps this guarantee by looking ONLY at the first non-blank line
+#     directly above the input box top border (never into scroll-back).
 agent_is_busy_check() {
     local pane_target="$1"
     local cli_type="${2:-}"
@@ -105,6 +112,16 @@ agent_is_busy_check() {
         return 0  # busy — status bar confirms active processing
     fi
 
+    # ── Live spinner row check (cmd_1280 narrow-pane fix) ──
+    # Panes narrower than ~65 cols truncate the status bar before 'esc to
+    # interrupt' ('⏵⏵ bypass permissions on          ·'), so the check above
+    # returns false-idle on busy agents. The live spinner row above the input
+    # box is width-independent; it is anchored to the box so stale busy text
+    # in scroll-back can never match (T-BUSY-008 stays fixed).
+    if claude_code_live_spinner_check "$full_capture"; then
+        return 0  # busy — live spinner row above the input box
+    fi
+
     # ── Idle checks ──
     # Codex idle prompt
     if echo "$pane_tail" | grep -qE '(\? for shortcuts|context left)'; then
@@ -126,6 +143,69 @@ agent_is_busy_check() {
     fi
 
     return 1  # idle (default)
+}
+
+# claude_code_live_spinner_check <capture_text>
+# Claude Code busy中は入力ボックス直上に spinner 行
+#   『<glyph> 状態文言… (2m 3s · thinking)』
+# が描画される (glyph は · ✢ ✳ ✶ ✻ ✽ * + を巡回)。狭pane では末尾の
+# (elapsed …) が幅で切れることがある (実測: 幅31 pane で『✻ 文言…』のみ)。
+# Returns: 0 = live spinner row found (busy), 1 = not found.
+#
+# T-BUSY-008 non-regression design:
+#   - Anchor on the input box: locate the composer prompt line (❯/›) and
+#     require a box border (─ run) directly above it.
+#   - Inspect ONLY the first non-blank line above that border (allowing up
+#     to 2 intervening blank rows). Anything further up is scroll-back and
+#     is never read, so stale busy text cannot cause false-busy.
+#   - The row must start with a spinner glyph + space AND carry busy
+#     evidence: an ellipsis '…' or an elapsed-time '(Nh/Nm/Ns'. Response
+#     text (● bullets, plain prose) fails the glyph gate.
+claude_code_live_spinner_check() {
+    local capture_text="$1"
+    local -a lines
+    mapfile -t lines <<< "$capture_text"
+    local n=${#lines[@]}
+    (( n < 3 )) && return 1
+
+    # Composer prompt line: search bottom-up, status bar + borders sit below
+    # it, so a 10-line window from the bottom is always enough.
+    local i prompt_idx=-1 trimmed
+    local start=$(( n > 10 ? n - 10 : 0 ))
+    for (( i = n - 1; i >= start; i-- )); do
+        trimmed="${lines[i]#"${lines[i]%%[![:space:]]*}"}"
+        case "$trimmed" in
+            '❯'*|'›'*) prompt_idx=$i; break ;;
+        esac
+    done
+    (( prompt_idx < 2 )) && return 1
+
+    # The line directly above the prompt must be the input box top border.
+    trimmed="${lines[prompt_idx-1]#"${lines[prompt_idx-1]%%[![:space:]]*}"}"
+    case "$trimmed" in
+        '───'*) ;;
+        *) return 1 ;;
+    esac
+
+    # First non-blank line above the border (skip at most 2 blank rows).
+    local blanks=0
+    for (( i = prompt_idx - 2; i >= 0 && blanks <= 2; i-- )); do
+        trimmed="${lines[i]#"${lines[i]%%[![:space:]]*}"}"
+        if [[ -z "$trimmed" ]]; then
+            blanks=$(( blanks + 1 ))
+            continue
+        fi
+        # Byte-wise prefix match (locale-independent): glyph + space.
+        case "$trimmed" in
+            '· '*|'✢ '*|'✳ '*|'✶ '*|'✻ '*|'✽ '*|'* '*|'+ '*)
+                if printf '%s' "$trimmed" | grep -qE '…|\([0-9]+(h|m|s)'; then
+                    return 0
+                fi
+                ;;
+        esac
+        return 1  # first non-blank row is not a live spinner → idle region
+    done
+    return 1
 }
 
 # opencode_has_busy_animation <capture_text>

@@ -1570,6 +1570,7 @@ NEW_ID=$(bash scripts/cmd_id_alloc.sh --title "短名" --origin karo \
 - **追記のみ・既存 entry 非破壊**。自由文 (title/evidence) は block scalar `|` へ自動整形 = cmd_1255 規律を script が機械的に守る。
 - 追記後 `ledger_validate.py` を自動実行し、FAIL なら自分の追記のみ rollback (fail-closed)。lock は `inbox_write.sh` 同型 (mkdir 協調 + flock) で、`ledger_guard.sh` の検証 lock とも同一 path = 相互排他。
 - ★将軍側も同じ script を通す (CLAUDE.md Shogun Mandatory Rules 9)。双方が同じ払い出し口を通ることで衝突が構造的に消える★。台帳を目視して番号を決める手動採番は禁。
+- **緊急の手書き起票・改番の充当先番号も `--claim` で払い出せ** (`bash scripts/cmd_id_alloc.sh --claim --origin karo` = 番号のみ払い出し・台帳へは書かない。entry 本文は手書きしてよい)。★gate非経由の手動追記は ledger_guard の検知層 (cmd_1336) が払い出しjournal (`queue/.cmd_id_alloc.journal`) と突合して検知し、是正手順つき警告が家老inboxへ届く★。警告が来たら手順に従い即改番せよ (2026-07-25 18:08 家老自身の手動appendが本日7件目の衝突を起こした実害への構造対策)。
 
 ### status 遷移・evidence 更新の書き手 = 家老
 

@@ -229,7 +229,7 @@ System manages ALL white-collar work, not just self-improvement. Project folders
 6. **Skill candidates**: Ashigaru reports include `skill_candidate:`. Karo collects → dashboard. Shogun approves → creates design doc.
 7. **Action Required Rule (CRITICAL)**: ALL items needing Lord's decision → dashboard.md 🚨要対応 section. ALWAYS. Even if also written elsewhere. Forgetting = Lord gets angry.
 8. **Ledger free-text escape (cmd_1255)**: When editing `queue/shogun_to_karo.yaml` (also a write path for Shogun), any free-text field (progress/evidence/note/command) containing `: ` (colon+space) or a leading YAML syntax char MUST use a block scalar `|` (preferred), full quoting, or a full-width colon `：`. A bare `: ` breaks YAML parse and kills the Lord's engine backlog view. `scripts/ledger_guard.sh` watcher auto-recovers (rollback+quarantine+karo warning) as backstop.
-9. **cmd採番は機械gate経由 (cmd_1333)**: 新規cmd番号は `bash scripts/cmd_id_alloc.sh --title "短名" --origin shogun --project <repo> --priority <p> --evidence "1行根拠"` で採番+台帳予約を同時に行う (flock排他・追記のみ・validate込み。長文は `--evidence-file`)。家老も同じ払い出し口を通る — ★台帳を目視して番号を決める手動採番は禁★ (2026-07-25 に1日6件衝突した実害の根絶策)。
+9. **cmd採番は機械gate経由 (cmd_1333)**: 新規cmd番号は `bash scripts/cmd_id_alloc.sh --title "短名" --origin shogun --project <repo> --priority <p> --evidence "1行根拠"` で採番+台帳予約を同時に行う (flock排他・追記のみ・validate込み。長文は `--evidence-file`)。家老も同じ払い出し口を通る — ★台帳を目視して番号を決める手動採番は禁★ (2026-07-25 に1日6件衝突した実害の根絶策)。緊急で entry 本文を手書きする時も★番号だけは `bash scripts/cmd_id_alloc.sh --claim --origin shogun` で払い出せ★ (台帳へ書かず番号のみ予約=手書きより速い)。gate非経由の手動追記は ledger_guard が検知して家老へ是正警告が飛ぶ (cmd_1336)。
 
 # Test Rules (all agents)
 

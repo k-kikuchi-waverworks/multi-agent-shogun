@@ -15,8 +15,21 @@
 #         [--status pending] [--evidence "1行根拠" | --evidence-file <path>] \
 #         [--timestamp 'YYYY-MM-DDTHH:MM:SS']
 #     → stdout に払い出した id (例: cmd_1334) のみを出力。log は stderr。
+#   番号のみ払い出し (cmd_1336 — 緊急の手書き起票・改番の充当先用。台帳へは書かない):
+#     bash scripts/cmd_id_alloc.sh --claim --origin <shogun|karo|lord>
+#     → 番号を journal に記録して払い出す。entry 本文は呼び出し側が手書きしてよい
+#       (番号が gate を通っておれば ledger_guard の手動起票検知は鳴らない)。
 #   参照 (予約なし。窓は開いたままゆえ正式採番には使うな):
 #     bash scripts/cmd_id_alloc.sh --peek
+#
+# 払い出し記録 = journal (cmd_1336 手動起票検知の突合先):
+#   - reserve / claim の払い出しは queue/.cmd_id_alloc.journal へ1行追記される
+#     (形式: cmd_N<TAB>timestamp<TAB>origin=X<TAB>mode=reserve|claim)。
+#   - compute_next_id / assert_id_unused は journal も走査する
+#     = claim 済みで台帳未記帳の番号を再払い出ししない。
+#   - journal 追記は台帳 append より先 (台帳に現れる id は必ず journal 済 =
+#     ledger_guard 検知層が script 経由の払い出しを誤検知しない順序保証)。
+#     reserve の validate FAIL rollback 時も journal 行は残す (番号焼却=安全側)。
 #
 # 採番規則:
 #   - 正本 = queue/shogun_to_karo.yaml + queue/archive/ 配下 *.yaml (再帰走査)。
@@ -49,6 +62,9 @@ ARCHIVE_DIR="${ARCHIVE_DIR:-$SCRIPT_DIR/queue/archive}"
 VALIDATOR="${LEDGER_VALIDATOR:-$SCRIPT_DIR/scripts/ledger_validate.py}"
 PYTHON="${LEDGER_PYTHON:-$SCRIPT_DIR/.venv/bin/python3}"
 [ -x "$PYTHON" ] || PYTHON="python3"
+
+# cmd_1336: 払い出し記録 (ledger_guard 手動起票検知の突合先。queue/ は git 管理外)
+ALLOC_JOURNAL="${ALLOC_JOURNAL:-$SCRIPT_DIR/queue/.cmd_id_alloc.journal}"
 
 LOCKFILE="${LEDGER_FILE}.lock"
 LOCK_DIR="${LOCKFILE}.d"
@@ -108,6 +124,10 @@ compute_next_id() {
             # 全走査 = 広い方が再利用事故に対して厳密に安全。
             find "$ARCHIVE_DIR" -type f -name '*.yaml' -print0 2>/dev/null \
                 | xargs -0 -r grep -hE "$ID_LINE_RE" 2>/dev/null || true
+            # cmd_1336: claim 済み・台帳未記帳の番号も max に含める (再払い出し防止)
+            if [ -f "$ALLOC_JOURNAL" ]; then
+                cut -f1 "$ALLOC_JOURNAL" 2>/dev/null || true
+            fi
         } \
             | grep -oE 'cmd_[0-9]+' \
             | sed -e 's/^cmd_//' -e 's/^0*\([0-9]\)/\1/' \
@@ -129,9 +149,21 @@ assert_id_unused() {
             grep -hE "$hit_re" "$LEDGER_FILE" 2>/dev/null || true
             find "$ARCHIVE_DIR" -type f -name '*.yaml' -print0 2>/dev/null \
                 | xargs -0 -r grep -hE "$hit_re" 2>/dev/null || true
+            # cmd_1336: journal 上の claim/reserve 済み番号も「使用済」扱い
+            if [ -f "$ALLOC_JOURNAL" ]; then
+                grep -hE "^cmd_0*${candidate}([^0-9]|\$)" "$ALLOC_JOURNAL" 2>/dev/null || true
+            fi
         } | head -1
     )
     [ -z "$hits" ]
+}
+
+# ─── cmd_1336: 払い出し記録の追記。記録できぬ番号は払い出さない (fail-closed) ───
+journal_record() {
+    local id="$1" mode="$2"
+    printf '%s\t%s\torigin=%s\tmode=%s\n' "$id" "$TIMESTAMP" "$ORIGIN" "$mode" \
+        >> "$ALLOC_JOURNAL" \
+        || die "journal 追記失敗 ($ALLOC_JOURNAL)。記録できぬ番号は払い出さない (fail-closed)"
 }
 
 # ─── block scalar 整形: 全行に4space indent (空行は素通し) ───
@@ -158,6 +190,7 @@ TIMESTAMP=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --peek) MODE="peek"; shift ;;
+        --claim) MODE="claim"; shift ;;
         --title) TITLE="${2:-}"; shift 2 ;;
         --origin) ORIGIN="${2:-}"; shift 2 ;;
         --project) PROJECT="${2:-}"; shift 2 ;;
@@ -221,6 +254,21 @@ if [ "$MODE" = "reserve" ]; then
     fi
 fi
 
+# cmd_1336: claim = 番号のみ払い出し (journal 記録あり・台帳へは書かない)
+if [ "$MODE" = "claim" ]; then
+    [ -n "$ORIGIN" ] || die "--origin is required (shogun|karo|lord)"
+    case "$ORIGIN" in
+        shogun|karo|lord) ;;
+        *) die "--origin must be shogun|karo|lord (got: $ORIGIN)" ;;
+    esac
+    if [ -n "$TIMESTAMP" ]; then
+        printf '%s' "$TIMESTAMP" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?$' \
+            || die "--timestamp must be YYYY-MM-DDTHH:MM[:SS] (got: $TIMESTAMP)"
+    else
+        TIMESTAMP="$(date '+%Y-%m-%dT%H:%M:%S')"
+    fi
+fi
+
 # ─── 本体: lock 下で 読み→採番→(予約なら)追記→検証 を一括実行 ───
 _acquire_lock || die "lock acquisition failed after ${LOCK_TIMEOUT_SEC}s ($LOCK_DIR が stale なら手で除去せよ)"
 trap _release_lock EXIT
@@ -239,6 +287,18 @@ NEW_ID="cmd_${NEXT_NUM}"
 
 if [ "$MODE" = "peek" ]; then
     log "peek: 次の空き番号は $NEW_ID (★予約していない。正式採番は予約モードで行え★)"
+    echo "$NEW_ID"
+    exit 0
+fi
+
+# cmd_1336: 払い出しは journal 記録が先 (台帳に現れる id は必ず journal 済の順序保証。
+# peek は上で exit 済 = 記録しない)
+journal_record "$NEW_ID" "$MODE"
+
+if [ "$MODE" = "claim" ]; then
+    _release_lock
+    trap - EXIT
+    log "claimed: $NEW_ID (journal記録のみ・台帳へは未記帳。entry本文は手書きしてよいが id は本番号を使え)"
     echo "$NEW_ID"
     exit 0
 fi

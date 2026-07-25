@@ -1,0 +1,56 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# mutation_registry.yaml — 変異の台帳 (cmd_1352 gate-2)
+#
+# 「この変異を当てれば、この試験は必ず赤くなる」という契約の登録簿。
+# scripts/gate_mutation_replay.py が全件を再走し、赤くならなくなった変異を名指しする。
+#
+# ★掟★
+#   ・出所はこの 1 file のみ (二重管理禁 — cmd_1350 の harness順/実機順の食い違いと同型の罠を作るな)
+#   ・0 件は PASS ではない (空にする変更をしたなら、その変更こそ疑え)
+#   ・entry を外す時は理由を commit log に書け (黙って外すな)
+#   ・mutate/test は scratch コピーの上で走る = repo 実体には触れぬ
+#   ・変異試験を新設した者は「赤を一度確認した」その変異をここへ登録せよ
+#     (登録せねば、次の仕様変更で静かに無効化される — cmd_1330 W0-2 G2 事故の型)
+#
+# 書式は scripts/gate_mutation_replay.py 冒頭 docstring を正とする。
+# なぜこの台帳が在るか: docs/content/ops/cmd_1352_silent_pitfall_gates.md
+# ═══════════════════════════════════════════════════════════════════════════
+mutations:
+  - id: MUT-1352-001
+    origin: cmd_1352
+    desc: |
+      gate-1 の ignore 検出の牙 (git check-ignore 呼び出し) を折ると、gate-1 selftest の
+      S2 (cmd_1349 実事故の再現 = .gitignore が dir add から黙って弾く) が赤くなるべき。
+      折っても緑なら gate-1 は「弾かれた理由を名指しできぬ飾り」に堕ちておる。
+    paths: [scripts/gate_artifact_capture.sh]
+    mutate: |
+      sed -i 's/check-ignore -q/check-ignore-neutered -q/g' scripts/gate_artifact_capture.sh
+    test: |
+      bash scripts/gate_artifact_capture.sh --selftest
+    expect: nonzero
+
+  - id: MUT-1352-002
+    origin: cmd_1352
+    desc: |
+      gate-1 の「宣言 0 件 = UNDETERMINED」契約を PASS (exit 0) へ倒すと、
+      selftest S5 (0件宣言) が赤くなるべき。倒しても緑なら「空の manifest で緑」
+      という真空 PASS (cmd_1342 Phase1d で六号が封じた型) が再発する。
+    paths: [scripts/gate_artifact_capture.sh]
+    mutate: |
+      sed -i 's/^EMPTY_UNDETERMINED_EXIT=2$/EMPTY_UNDETERMINED_EXIT=0/' scripts/gate_artifact_capture.sh
+    test: |
+      bash scripts/gate_artifact_capture.sh --selftest
+    expect: nonzero
+
+  - id: MUT-1352-003
+    origin: cmd_1352
+    desc: |
+      gate-2 runner 自身の「変異後も緑 = FAIL」契約 (GREEN_AFTER_MUTATION_IS_FAIL) を
+      False へ倒すと、gate-2 selftest の T2 (静かな無効化の検出) が赤くなるべき。
+      倒しても緑なら本台帳そのものが飾りになる (gate の gate)。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^GREEN_AFTER_MUTATION_IS_FAIL = True$/GREEN_AFTER_MUTATION_IS_FAIL = False/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero

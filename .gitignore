@@ -90,6 +90,10 @@ plans/README.md
 !config/ntfy_auth.env.sample
 !config/opencode-tui.json
 !config/opencode-permissions.yaml
+# cmd_1352 (2026-07-26): 変異の台帳 + 成果物manifest置き場 (沈黙落とし穴gateの正本)
+!config/mutation_registry.yaml
+!config/artifact_manifests/
+!config/artifact_manifests/*.manifest
 
 # Templates
 !templates/
@@ -130,6 +134,13 @@ scripts/seo_qc.sh
 !scripts/ledger_validate.py
 # cmd_1333 (2026-07-25): cmd採番の排他払い出しgate (番号衝突根絶)
 !scripts/cmd_id_alloc.sh
+# cmd_1352 (2026-07-26): 沈黙する落とし穴gate (gate-1=commit捕捉 / gate-2=変異台帳再走。
+# 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
+!scripts/gate_artifact_capture.sh
+!scripts/gate_mutation_replay.py
+!scripts/gate_precommit.sh
+!scripts/install_gate_hooks.sh
+!scripts/gate_nightly.sh
 
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)

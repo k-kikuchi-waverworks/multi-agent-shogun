@@ -21,11 +21,16 @@
       test: |                   # bash・cwd=scratch。変異後に【赤くなるべき】試験
         bash scripts/foo.sh --selftest
       expect: nonzero           # 既定。整数を書けば厳密一致 (例 1)
+      red_needle: "not ok 1 X"  # 任意。★赤の理由が変異を名指ししておるか★の検分 (原理(iii)):
+                                # 変異後の test 出力にこの文字列が無ければ「別の理由で偶然赤い」
+                                # 疑いとして FAIL (cmd_1350 五号の教訓 = 実効は【失敗出力が
+                                # 変異内容を名指しするか】で取る。行移動型変異は diff 目視に効かぬ)
       timeout: 180              # 任意 (秒)
 
 判定 (三値 — 0件/未判定を緑にせぬ):
-  PASS         = baseline 緑 かつ 変異後に赤 (契約どおり)
-  FAIL         = ★変異後も緑 = 変異が静かに無効化された★ (名指しで報告)
+  PASS         = baseline 緑 かつ 変異後に赤 (契約どおり・red_needle があれば名指しまで確認)
+  FAIL         = ★変異後も緑 = 変異が静かに無効化された★ (名指しで報告) /
+                 赤いが red_needle 不在 = 別の理由で偶然赤い疑い
   UNDETERMINED = baseline が赤 / mutate 失敗 / ★mutate 空振り (何も変えておらぬ=sed の
                  当たり損ねも沈黙する★) / 台帳 0 件 / schema 不備 / timeout
 exit: 0 PASS / 1 FAIL あり / 2 UNDETERMINED あり (FAIL 優先)
@@ -33,6 +38,8 @@ exit: 0 PASS / 1 FAIL あり / 2 UNDETERMINED あり (FAIL 優先)
 使い方:
   python3 scripts/gate_mutation_replay.py               # 台帳全件を再走
   python3 scripts/gate_mutation_replay.py --sanity      # 台帳の形だけ検分 (実行なし・pre-commit 用)
+  python3 scripts/gate_mutation_replay.py --coverage    # 台帳登録検知 (cmd_1352b): 変異testらしき
+                                                        #   file が台帳に無ければ名指しで警告
   python3 scripts/gate_mutation_replay.py --selftest    # 変異試験つき自己検分
 """
 from __future__ import annotations
@@ -40,6 +47,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -55,6 +63,21 @@ GREEN_AFTER_MUTATION_IS_FAIL = True
 
 # CONTRACT: 台帳 0 件は PASS ではない (真空 PASS 禁 — cmd_1342 Phase1d の流儀)
 EMPTY_REGISTRY_IS_UNDETERMINED = True
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gate-2 付帯: 台帳登録検知 (--coverage) — cmd_1352b (caveat C4 への家老裁定)
+# 「変異testらしきものが在るのに台帳に無い」を検知して警告する層。強制はせぬ
+# (登録必須化は形骸化を生む) — cmd_1336 の detect→warn 流儀に倣う。
+# 検出規則の正本はここ (出所を1つに)。人向けの定義・限界・誤検知実測は
+# docs/content/ops/cmd_1352_silent_pitfall_gates.md「台帳登録検知」節。
+# ─────────────────────────────────────────────────────────────────────────────
+COVERAGE_EXTS = {".sh", ".bash", ".py", ".bats"}  # 実行可能な test の宿る拡張子のみ (prose/YAML 対象外)
+COVERAGE_MUT_KEYWORDS = r"変異試験|変異を当て|わざと壊|壊して赤|壊せば落ち|mutation"
+COVERAGE_SELFTEST_MARKERS = r"--selftest|def selftest|selftest\(\)"
+COVERAGE_D1_NEGATIVE = r"(?:without|no|not)\s+mutation"  # データ変異の意 ("without mutation" 等) を除く
+# 陽性対照: 本 file 自身 (selftest T2 = 変異試験を永続内蔵)。これが検出されねば検出規則の
+# 牙が折れておる = 0件検出もここへ畳んで UNDETERMINED (真空 PASS 禁・対照を必ず置く流儀)
+COVERAGE_POSITIVE_CONTROL = "scripts/gate_mutation_replay.py"
 
 PASS, FAIL, UNDET = "PASS", "FAIL", "UNDETERMINED"
 _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc")
@@ -157,19 +180,25 @@ def evaluate_entry(e, repo: Path, work: Path):
         return UNDET, "mutate 空振り (何も変えておらぬ) = pattern の当たり損ね。mutate を直せ"
 
     # ④ 変異後に test は赤くなるべき
-    rc, _ = run_sh(e["test"], mut, timeout)
+    rc, out = run_sh(e["test"], mut, timeout)
     if rc is None:
         return UNDET, "変異後 test が timeout"
-    if expect == "nonzero":
-        if rc != 0:
-            return PASS, f"変異後 exit {rc} (赤) = 契約どおり"
+    red = (rc != 0) if expect == "nonzero" else (rc == int(expect))
+    if not red:
+        if expect != "nonzero":
+            return FAIL, f"変異後 exit {rc} ≠ 期待 {expect} (赤の出方が契約とずれた)"
         if GREEN_AFTER_MUTATION_IS_FAIL:
             return FAIL, "★変異後も緑 = この変異は静かに無効化された。仕様変更が試験の牙を折っておる★"
         return PASS, "(契約無効化中)"
-    else:
-        if rc == int(expect):
-            return PASS, f"変異後 exit {rc} = 期待 {expect} と一致"
-        return FAIL, f"変異後 exit {rc} ≠ 期待 {expect} (赤の出方が契約とずれた)"
+    # ⑤ 名指し検分 (red_needle・任意) — 原理(iii): 赤の理由が当てた変異を名指ししておるか。
+    #    「別の理由で偶然赤い」を「変異が効いた」と誤認せぬため (cmd_1350 五号の教訓:
+    #    行移動型変異は diff 目視に効かぬ。実効は【失敗出力が変異内容を名指しするか】で取る)
+    needle = e.get("red_needle")
+    if needle:
+        if str(needle) not in out:
+            return FAIL, f"赤いが名指しが無い (出力に「{needle}」不在) = 別の理由で偶然赤い疑い"
+        return PASS, f"変異後 exit {rc} (赤) + 名指し「{needle}」確認 = 契約どおり"
+    return PASS, f"変異後 exit {rc} (赤) = 契約どおり (red_needle 未設定=名指し検分なし)"
 
 
 def run_all(registry: Path, repo: Path) -> int:
@@ -220,6 +249,109 @@ def sanity(registry: Path) -> int:
     return 0
 
 
+def scan_mutation_test_candidates(repo: Path):
+    """git 追跡下の「変異testらしき file」を検出し (候補 {relpath: 検出理由}, error) を返す。
+
+    D1 = bats の @test 行が変異を名指し (負規則 COVERAGE_D1_NEGATIVE でデータ変異の意を除く)
+    D2 = selftest 宣言 (COVERAGE_SELFTEST_MARKERS) と変異 keyword の【共起】
+    対象は git ls-files (追跡済) かつ COVERAGE_EXTS の拡張子のみ。内容は worktree を読む
+    (限界: 追跡済で disk に無い file は数えぬ・untracked の変異testは見えぬ — docs に明記)。
+    """
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"git ls-files が走らぬ: {e}"
+    if r.returncode != 0:
+        return None, f"git ls-files 失敗 (exit {r.returncode}): {r.stderr.strip()[:200]}"
+    kw = re.compile(COVERAGE_MUT_KEYWORDS, re.IGNORECASE)
+    st = re.compile(COVERAGE_SELFTEST_MARKERS)
+    neg = re.compile(COVERAGE_D1_NEGATIVE, re.IGNORECASE)
+    cands: dict[str, str] = {}
+    for rel in filter(None, r.stdout.split("\0")):
+        if Path(rel).suffix not in COVERAGE_EXTS:
+            continue
+        p = repo / rel
+        if not p.is_file():
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return None, f"読めぬ追跡 file: {rel} ({e}) — 黙って飛ばさぬ (沈黙禁)"
+        d1 = None
+        for i, line in enumerate(text.splitlines(), 1):
+            if "@test" in line and kw.search(line) and not neg.search(line):
+                d1 = f"D1 (L{i}: @test 行が変異を名指し)"
+                break
+        if d1:
+            cands[rel] = d1
+        elif st.search(text) and kw.search(text):
+            cands[rel] = "D2 (selftest 宣言と変異 keyword の共起)"
+    return cands, None
+
+
+def coverage(registry: Path, repo: Path) -> int:
+    """gate-2 付帯 (cmd_1352b): 変異testらしき file が台帳に登録されておるかの検知層。
+
+    FAIL は「block」でなく「家老へ警告」を意味する (gate_nightly が既存の家老 inbox
+    警告経路へ相乗りする)。免除は coverage_waivers (同じ台帳 file 内・理由必須) のみ =
+    免除は可視 (WAIVED 表示)・黙って外す道は無い。
+    """
+    import yaml
+    if not registry.is_file():
+        print(f"[gate-2 coverage] UNDETERMINED: 台帳が無い: {registry}")
+        return 2
+    try:
+        data = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[gate-2 coverage] UNDETERMINED: 台帳が parse 不能: {e}")
+        return 2
+    if not isinstance(data, dict) or not isinstance(data.get("mutations"), list):
+        print("[gate-2 coverage] UNDETERMINED: 台帳に mutations: リストが無い")
+        return 2
+    entries = [e for e in data["mutations"] if isinstance(e, dict)]
+    wmap: dict[str, str] = {}
+    for w in (data.get("coverage_waivers") or []):
+        if not isinstance(w, dict) or not w.get("path") or not w.get("reason"):
+            print(f"[gate-2 coverage] UNDETERMINED: coverage_waivers に path/reason を欠く entry: {w!r}"
+                  " (曖昧な免除は免除でない)")
+            return 2
+        wmap[str(w["path"])] = str(w["reason"])
+    cands, err = scan_mutation_test_candidates(repo)
+    if err:
+        print(f"[gate-2 coverage] UNDETERMINED: {err}")
+        return 2
+    if COVERAGE_POSITIVE_CONTROL not in cands:
+        print(f"[gate-2 coverage] UNDETERMINED: 陽性対照 {COVERAGE_POSITIVE_CONTROL} が検出されぬ"
+              f" (候補 {len(cands)} 件) = 検出規則の牙が折れておる (0件検出もここへ畳む・真空 PASS 禁)")
+        return 2
+    unregistered: list[str] = []
+    n_waived = 0
+    for rel in sorted(cands):
+        eid = next((e.get("id", "?") for e in entries
+                    if rel in (e.get("paths") or [])
+                    or rel in str(e.get("test", "")) or rel in str(e.get("mutate", ""))), None)
+        if eid:
+            print(f"  ok   REGISTERED    {rel} ← {eid}")
+        elif rel in wmap:
+            n_waived += 1
+            print(f"  免除 [WAIVED]      {rel}: {wmap[rel]}")
+        else:
+            unregistered.append(rel)
+            print(f"  ★NG★ [UNREGISTERED] {rel}: {cands[rel]}")
+    for wp in sorted(set(wmap) - set(cands)):
+        print(f"  注   免除の空撃ち   {wp} (候補に居らぬ = file 削除/規則変更済か。waiver を掃除せよ)")
+    if unregistered:
+        print(f"[gate-2 coverage] FAIL: 候補 {len(cands)} 件中 ★台帳に無い変異test {len(unregistered)} 件★")
+        print("  処方: 「赤を一度確認した」変異を config/mutation_registry.yaml へ登録せよ")
+        print("        (登録の書式は本 file 冒頭 docstring)。登録すべきでない正当な理由が在るなら")
+        print("        coverage_waivers へ【理由つきで】免除を書け (黙って外す道は無い)。")
+        return 1
+    print(f"[gate-2 coverage] PASS: 変異testらしき候補 {len(cands)} 件すべて台帳登録済"
+          f" (免除 {n_waived} 件・免除は可視)")
+    return 0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # selftest — 小さな遊び場 repo + 台帳を組み、runner 自身を subprocess で撃つ。
 # T2 が cmd_1330 W0-2 の実事故 (変異の静かな無効化) の再現である。
@@ -237,9 +369,35 @@ def _entry(eid: str, mutate: str, test: str = "bash check.sh", expect: str = "no
             "mutate": mutate, "test": test, "expect": expect}
 
 
-def _write_reg(path: Path, entries: list) -> None:
+def _write_reg(path: Path, entries: list, waivers: list | None = None) -> None:
     import yaml
-    path.write_text(yaml.safe_dump({"mutations": entries}, allow_unicode=True))
+    data: dict = {"mutations": entries}
+    if waivers is not None:
+        data["coverage_waivers"] = waivers
+    path.write_text(yaml.safe_dump(data, allow_unicode=True))
+
+
+def _mk_git_repo(root: Path, files: dict[str, str]) -> Path:
+    """coverage selftest 用: git 追跡下の小さな repo を組む (add まで・commit 不要)。"""
+    repo = root / "repo"
+    for rel, content in files.items():
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+    for cmd in (["git", "init", "-q"], ["git", "add", "-A"]):
+        subprocess.run(cmd, cwd=repo, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return repo
+
+
+# coverage selftest 素材: 陽性対照 (D2 hit) / 未登録変異test (D1 hit) / データ変異の意 (非候補)
+_COV_CONTROL_BODY = "# fake runner (陽性対照): --selftest 変異試験\n"
+_COV_ROGUE_BATS = '@test "quorum breaks when neutered (mutation proof)" {\n  true\n}\n'
+_COV_DATAMUT_BATS = '@test "previews stale branch without mutation" {\n  true\n}\n'
+
+
+def _cov_entry(eid: str, paths: list[str]):
+    return {"id": eid, "desc": eid, "paths": paths, "mutate": "true", "test": "true"}
 
 
 def _invoke(args: list[str]) -> tuple[int, str]:
@@ -328,6 +486,73 @@ def selftest() -> int:
         rc, out = _invoke(["--sanity", "--registry", str(T / "t1reg.yaml")])
         expect("T9b sanity健全台帳=OK", 0, rc)
 
+        # ── coverage (--coverage) selftests: cmd_1352b 台帳登録検知 ──
+        ctl = COVERAGE_POSITIVE_CONTROL
+
+        # T10: 変異testらしき file が台帳に無い → FAIL + 名指し
+        repo = _mk_git_repo(T / "t10", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats": _COV_ROGUE_BATS})
+        reg = T / "t10reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T10 未登録変異test=FAIL+名指し", 1, rc, "tests/rogue_mutation.bats", out)
+
+        # T11: 台帳が全候補を覆う → PASS
+        repo = _mk_git_repo(T / "t11", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats": _COV_ROGUE_BATS})
+        reg = T / "t11reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-ROGUE", ["tests/rogue_mutation.bats"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T11 全候補登録済=PASS", 0, rc, "REGISTERED", out)
+
+        # T12: ★陽性対照が検出されぬ (0件検出を含む) → UNDETERMINED = 検出規則の死を緑にせぬ★
+        repo = _mk_git_repo(T / "t12", {"tests/rogue_mutation.bats": _COV_ROGUE_BATS})
+        rc, out = _invoke(["--coverage", "--registry", str(T / "t11reg.yaml"), "--repo-root", str(repo)])
+        expect("T12 陽性対照不在=UNDETERMINED", 2, rc, "陽性対照", out)
+
+        # T13: 理由つき免除 → PASS だが WAIVED として可視
+        repo = _mk_git_repo(T / "t13", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats": _COV_ROGUE_BATS})
+        reg = T / "t13reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])],
+                   waivers=[{"path": "tests/rogue_mutation.bats", "reason": "selftest fixture"}])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T13 理由つき免除=PASS+可視", 0, rc, "WAIVED", out)
+
+        # T13b: 理由なし免除 → UNDETERMINED (曖昧な免除は免除でない)
+        reg = T / "t13breg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])],
+                   waivers=[{"path": "tests/rogue_mutation.bats"}])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T13b 理由なし免除=UNDETERMINED", 2, rc, "曖昧な免除", out)
+
+        # T14: "without mutation" (データ変異の意) は候補にせぬ = 誤検知抑止 (D1 負規則)
+        repo = _mk_git_repo(T / "t14", {ctl: _COV_CONTROL_BODY,
+                                        "tests/branchy.bats": _COV_DATAMUT_BATS})
+        reg = T / "t14reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T14 without mutation=非候補 (誤検知せぬ)", 0, rc)
+
+        # T15: red_needle が赤出力に在る → PASS (名指し確認)
+        repo = _mk_playground(T / "t15")
+        reg = T / "t15reg.yaml"
+        e15 = _entry("MUT-T15", "sed -i 's/exit 0/echo NG_GUARD_X; exit 1/' tool.sh")
+        e15["red_needle"] = "NG_GUARD_X"
+        _write_reg(reg, [e15])
+        rc, out = _invoke(["--registry", str(reg), "--repo-root", str(repo)])
+        expect("T15 needle名指し=PASS", 0, rc, "名指し", out)
+
+        # T16: ★赤いが needle 不在 = 別の理由で偶然赤い → FAIL (原理(iii))★
+        repo = _mk_playground(T / "t16")
+        reg = T / "t16reg.yaml"
+        e16 = _entry("MUT-T16", "sed -i 's/exit 0/echo NG_GUARD_X; exit 1/' tool.sh")
+        e16["red_needle"] = "NG_OTHER_GUARD"
+        _write_reg(reg, [e16])
+        rc, out = _invoke(["--registry", str(reg), "--repo-root", str(repo)])
+        expect("T16 needle不在=FAIL (偶然の赤を通さぬ)", 1, rc, "名指しが無い", out)
+
     print("----")
     if ng == 0:
         print(f"[gate-2 selftest] {ok}/{ok} ALL PASS")
@@ -341,12 +566,16 @@ def main() -> int:
     ap.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     ap.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     ap.add_argument("--sanity", action="store_true")
+    ap.add_argument("--coverage", action="store_true",
+                    help="cmd_1352b: 変異testらしき file が台帳に登録されておるかの検知層")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if a.sanity:
         return sanity(a.registry)
+    if a.coverage:
+        return coverage(a.registry, a.repo_root)
     return run_all(a.registry, a.repo_root)
 
 

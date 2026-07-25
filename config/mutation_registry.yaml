@@ -11,6 +11,11 @@
 #   ・mutate/test は scratch コピーの上で走る = repo 実体には触れぬ
 #   ・変異試験を新設した者は「赤を一度確認した」その変異をここへ登録せよ
 #     (登録せねば、次の仕様変更で静かに無効化される — cmd_1330 W0-2 G2 事故の型)
+#   ・登録漏れは機械が見ておる (cmd_1352b): gate_mutation_replay.py --coverage が
+#     「変異testらしき file が台帳に無い」を毎朝検知し家老へ警告する。免除は下の
+#     coverage_waivers へ【理由つきで】書け (黙って外す道は無い)
+#   ・red_needle (任意) = 赤の理由が変異を名指ししておるかの検分 (原理(iii)・cmd_1350
+#     五号の教訓)。値は【実測した失敗出力】から取れ (推測で書くと偽 FAIL で信頼を失う)
 #
 # 書式は scripts/gate_mutation_replay.py 冒頭 docstring を正とする。
 # なぜこの台帳が在るか: docs/content/ops/cmd_1352_silent_pitfall_gates.md
@@ -28,6 +33,7 @@ mutations:
     test: |
       bash scripts/gate_artifact_capture.sh --selftest
     expect: nonzero
+    red_needle: "NG S2b"  # 実測 2026-07-26: 牙折り時は S2b (弾いた.gitignore行の名指し検査) が落ちる
 
   - id: MUT-1352-002
     origin: cmd_1352
@@ -41,6 +47,7 @@ mutations:
     test: |
       bash scripts/gate_artifact_capture.sh --selftest
     expect: nonzero
+    red_needle: "NG S5"  # 実測 2026-07-26: 真空PASS化で S5 (0件宣言=UNDETERMINED) が落ちる
 
   - id: MUT-1352-003
     origin: cmd_1352
@@ -54,6 +61,7 @@ mutations:
     test: |
       python3 scripts/gate_mutation_replay.py --selftest
     expect: nonzero
+    red_needle: "NG T2"  # 実測 2026-07-26: 契約無効化で T2 (静かな無効化の検出) が落ちる
 
   - id: MUT-1352-004
     origin: cmd_1352
@@ -67,3 +75,61 @@ mutations:
     test: |
       bash scripts/gate_artifact_capture.sh --selftest
     expect: nonzero
+    red_needle: "NG S11"  # 実測 2026-07-26: head-mode 捕捉述語折りで S11 (commit済=head-PASS) が落ちる
+
+  - id: MUT-1339-001
+    origin: cmd_1352b
+    desc: |
+      idle_revive 停電型 quorum gate の成立下限 (DEFAULT_QUORUM_MIN_STALLED=3) を 999 へ
+      引き上げると、T-QRM-001 (4体同時 stall → clear 全面抑止+家老警報1通) が赤くなるべき。
+      引き上げても緑なら quorum gate は「全員死んでも個別 clear を撃ち続ける飾り」に堕ちておる
+      (2026-07-25 殿 token 切れ全8体同時沈黙=45分閾値素通りの再発)。
+      ★本 entry は --coverage 検知層の初回実走が「台帳に無い変異test」として名指しした
+      2件のうちの1件の是正である (cmd_1352b)★。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    mutate: |
+      sed -i 's/^DEFAULT_QUORUM_MIN_STALLED = 3/DEFAULT_QUORUM_MIN_STALLED = 999/' scripts/idle_revive_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-QRM-001" tests/unit/test_idle_revive_quorum.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-QRM-001"  # 実測 2026-07-26: 赤が quorum 契約 test を名指しする
+
+  - id: MUT-1339-002
+    origin: cmd_1352b
+    desc: |
+      watcher_supervisor の [LEGACY] warn-once 化の marker 書込 (: > "$marker") を消すと、
+      T-LEG-001 (12周で [LEGACY] 1行のみ) が赤くなるべき (12行 spam へ退行)。
+      消しても緑なら warn-once 契約 (cmd_1339 ③・54行/5分 spam の再発防止) は守られておらぬ。
+      ★MUT-1339-001 と同じく --coverage 検知層の初回実走が名指しした未登録変異testの是正★。
+    paths: [scripts/watcher_supervisor.sh, tests/unit/test_supervisor_legacy_once.bats]
+    mutate: |
+      sed -i '/: > "\$marker"/d' scripts/watcher_supervisor.sh
+    test: |
+      bats --filter "T-LEG-001" tests/unit/test_supervisor_legacy_once.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-LEG-001"  # 実測 2026-07-26: 赤が warn-once 契約 test を名指しする
+
+  - id: MUT-1352-005
+    origin: cmd_1352b
+    desc: |
+      台帳登録検知層 (--coverage) の変異 keyword 正本 (COVERAGE_MUT_KEYWORDS) を
+      決して当たらぬ pattern へ折ると、coverage selftest (T10 未登録の名指し / T11 登録済
+      PASS) が赤くなるべき。折っても緑なら「検知層を潰しても誰も気付かぬ」= 本検知層自身が
+      沈黙する落とし穴になる (検知層の検知)。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^COVERAGE_MUT_KEYWORDS = .*/COVERAGE_MUT_KEYWORDS = r"ZZ_NEVER_MATCH_ZZ"/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T10"  # 実測 2026-07-26: keyword 折りで T10 (未登録の名指し) が exit 2 へ落ちる
+
+# ─────────────────────────────────────────────────────────────────────────────
+# coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
+#   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)
+#   ・免除しても毎朝 [WAIVED] として可視表示される (黙って消える道は無い)
+#   ・他 agent 所有の変異test を見つけた時は、勝手に登録せずここへ理由つきで置き、
+#     所有者へ登録を申し送るのが筋 (他人の test に mutate を書くのは所有者の手番)
+# ─────────────────────────────────────────────────────────────────────────────
+coverage_waivers: []

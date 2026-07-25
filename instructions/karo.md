@@ -1527,6 +1527,22 @@ ash1-5 は default Sonnet medium だが、以下 4 trigger 該当 cmd では Opu
 
 既存 entry の schema 書換は不要 (Chesterton's Fence — 履歴保全、schema v2 は「新規登録の最低要件」)。
 
+### ★採番の機械gate = scripts/cmd_id_alloc.sh (cmd_1333 起源・正規経路)★
+
+2026-07-25 に採番衝突が1日で **6件** 発生した (cmd_1322/1324/1326/1328/1330/1331、うち cmd_1331 は同日2度改番)。本規律 (台帳登録=採番gate) は手順としては在ったが、将軍と家老が別プロセスで同時採番すると「台帳を読んでから書くまでの窓」で衝突すると実証された。ゆえに★cmd 番号の払い出しは以下の script を通すのが正規経路★ — 本規律の機械化であり置換ではない (登録義務・schema v2・自由文エスケープ規律は従来通り):
+
+```bash
+# 起票 = 採番+台帳予約を1コマンドで (flock排他・slim entry v2 追記・ledger_validate 込み)
+NEW_ID=$(bash scripts/cmd_id_alloc.sh --title "短名" --origin karo \
+    --project <repo> --priority high --evidence "1行根拠")
+# 長文 evidence は --evidence-file <path>。参照のみは --peek (★予約なし=正式採番に使うな★)
+```
+
+- 払い出し = **union(active + archives) の max+1** (archive 剪定済番号の再利用なし・欠番穴埋めなし)。
+- **追記のみ・既存 entry 非破壊**。自由文 (title/evidence) は block scalar `|` へ自動整形 = cmd_1255 規律を script が機械的に守る。
+- 追記後 `ledger_validate.py` を自動実行し、FAIL なら自分の追記のみ rollback (fail-closed)。lock は `inbox_write.sh` 同型 (mkdir 協調 + flock) で、`ledger_guard.sh` の検証 lock とも同一 path = 相互排他。
+- ★将軍側も同じ script を通す (CLAUDE.md Shogun Mandatory Rules 9)。双方が同じ払い出し口を通ることで衝突が構造的に消える★。台帳を目視して番号を決める手動採番は禁。
+
 ### status 遷移・evidence 更新の書き手 = 家老
 
 - **status 変更のたび、家老が当該 entry の `status` と `evidence` (最新根拠 1 行) を必ず書換える** (ash 完遂受領時の status 是正 = memory `feedback_ash_status_bookkeeping` と同一線)。evidence を放置すると「最新根拠」が風化し、真 status 突合コストが再発する。

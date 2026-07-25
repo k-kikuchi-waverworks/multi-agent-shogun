@@ -128,6 +128,8 @@ scripts/seo_qc.sh
 # cmd_1255 (2026-07-11): 台帳parse自己検証gate (ledger_guard watcher + 手動検証CLI)
 !scripts/ledger_guard.sh
 !scripts/ledger_validate.py
+# cmd_1333 (2026-07-25): cmd採番の排他払い出しgate (番号衝突根絶)
+!scripts/cmd_id_alloc.sh
 
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)

@@ -2,6 +2,11 @@
 # inbox_write.sh — メールボックスへのメッセージ書き込み（排他ロック付き）
 # Usage: bash scripts/inbox_write.sh <target_agent> <content> <type> <from>
 # Example: bash scripts/inbox_write.sh karo "足軽5号、任務完了" report_received ashigaru5
+#
+# Exit code contract (cmd_1338): 0 = message written & verified on disk / non-0 = NOT written.
+#   Callers MUST NOT ignore a non-zero exit — the message is lost and must be resent.
+# NOTE: overflow整理(50件超過時)は「unread全件 + read末尾30件」を残す仕様。
+#   ★未読が配列先頭側へ並べ替えられ時系列順でなくなる★が、未読を落とさぬための設計 — 変更禁。
 
 set -euo pipefail
 
@@ -181,11 +186,23 @@ except Exception as e:
         else
             STATUS=$?
         fi
+        # Read-back verify (still under lock): python exit 0 でも実在を確かめる。
+        # inbox は最大50件ゆえ grep 1回=軽量。書けたつもり事故の最終網 (cmd_1338)。
+        if [ $STATUS -eq 0 ] && ! grep -qF "id: $MSG_ID" "$INBOX" 2>/dev/null; then
+            echo "[inbox_write] VERIFY FAILED: $MSG_ID not found in $INBOX after write" >&2
+            STATUS=1
+        fi
         _release_lock
         trap - EXIT
-        [ $STATUS -eq 0 ] && exit 0
+        if [ $STATUS -eq 0 ]; then
+            echo "[inbox_write] OK: $MSG_ID -> $TARGET" >&2
+            exit 0
+        fi
         attempt=$((attempt + 1))
-        [ $attempt -lt $max_attempts ] && sleep 1
+        if [ $attempt -lt $max_attempts ]; then
+            echo "[inbox_write] WRITE FAILED for $INBOX (attempt $attempt/$max_attempts), retrying..." >&2
+            sleep 1
+        fi
     else
         # Lock timeout
         attempt=$((attempt + 1))
@@ -198,3 +215,7 @@ except Exception as e:
         fi
     fi
 done
+
+# Retry exhausted = message was NOT written. Never fall through silently (cmd_1338).
+echo "[inbox_write] FATAL: message NOT delivered to $TARGET after $max_attempts attempts (from=$FROM, type=$TYPE, msg_id=$MSG_ID). Message is LOST — sender must resend or escalate." >&2
+exit 1

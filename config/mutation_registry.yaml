@@ -156,6 +156,23 @@ mutations:
     expect: nonzero
     red_needle: "★NG★ U4d"  # 実測 2026-07-26: fallback 折りで U4d (R2 契約) が名指しで落ちる
 
+  - id: MUT-1355-003
+    origin: cmd_1355
+    desc: |
+      inbox_write.sh の venv fallback (軍師束ねQC具申R2) を折る (fallback 分岐を if false 化)
+      と、.venv の無い環境 (fresh clone 相当 = 本 gate の scratch がまさにそれ) での配達 test
+      が赤くなるべき。折っても緑なら「復旧シナリオで番人 (idle_revive/gate_nightly) の警報を
+      鳴らす経路そのものが 3回 retry 後 LOST する」穴が再発する — 検知を直しても届かねば
+      意味が無い (2026-07-26 軍師一号が fresh clone 検分で実測した穴)。
+    paths: [scripts/inbox_write.sh]
+    mutate: |
+      sed -i 's/^if \[ ! -x "\$IW_PYTHON" \]; then$/if false; then/' scripts/inbox_write.sh
+    test: |
+      bash scripts/inbox_write.sh testagent "fresh clone delivery check" info gate_runner
+      grep -q "id: msg_" queue/inbox/testagent.yaml
+    expect: nonzero
+    red_needle: "message NOT delivered"  # 実測 2026-07-26: fallback 無しは 3retry 後 FATAL LOST
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

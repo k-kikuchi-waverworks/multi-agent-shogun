@@ -144,10 +144,24 @@ export IW_TIMESTAMP="$TIMESTAMP"
 export IW_TYPE="$TYPE"
 export IW_CONTENT="$CONTENT"
 
+# cmd_1355 (軍師束ねQC具申R2): fresh clone には .venv が無い — ★警報を「鳴らす経路」自体が
+# 復旧シナリオで落ちると、番人 (idle_revive_scan / gate_nightly) の警報が3回retry後に
+# LOST する★。venv 優先・system python3 fallback。限界の正直明示: system python3 に
+# PyYAML が無い環境では依然失敗する (その場合も下の FATAL が大声で落ちる=無言 LOST はせぬ)。
+IW_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
+if [ ! -x "$IW_PYTHON" ]; then
+    IW_PYTHON="$(command -v python3 || true)"
+    if [ -z "$IW_PYTHON" ]; then
+        echo "[inbox_write] FATAL: python3 が見つからぬ (.venv 不在かつ PATH にも無し) — 配達不能" >&2
+        exit 1
+    fi
+    echo "[inbox_write] WARN: .venv 不在 — system python3 ($IW_PYTHON) へ fallback (cmd_1355)" >&2
+fi
+
 while [ $attempt -lt $max_attempts ]; do
     if _acquire_lock; then
         trap _release_lock EXIT
-        if "$SCRIPT_DIR/.venv/bin/python3" -c '
+        if "$IW_PYTHON" -c '
 import os, sys, yaml
 
 try:

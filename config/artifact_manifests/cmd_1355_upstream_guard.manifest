@@ -2,6 +2,7 @@
 # 文法: scripts/gate_artifact_capture.sh 冒頭コメント参照 (path / dir/ [min=N] / #コメント)
 # fixture (*.txt) は whitelist .gitignore の既定で弾かれる前科の型ゆえ、ここで名指しして守る
 scripts/idle_revive_scan.py
+scripts/inbox_write.sh
 tests/fixtures/upstream_session_limit_pane.txt
 tests/unit/test_idle_revive_quorum.bats
 docs/content/ops/cmd_1355_upstream_outage_guard.md

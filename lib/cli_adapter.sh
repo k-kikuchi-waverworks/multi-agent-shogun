@@ -52,6 +52,9 @@ normalize_opencode_model() {
         gpt-5.4-mini|gpt-5.4|gpt-5.3-codex|gpt-5.3-codex-spark|gpt-5*)
             echo "openai/${model}"
             ;;
+        claude-opus-5)
+            echo "anthropic/claude-opus-5"
+            ;;
         claude-opus-4-8)
             echo "anthropic/claude-opus-4-8"
             ;;
@@ -264,6 +267,11 @@ build_cli_command() {
                 cmd="$cmd --effort $effort"
             fi
             cmd="$cmd $permission_flag"
+            # CLAUDE_EXTRA_FLAGS: 一時的に追加CLI flag(例: --mcp-config)を注入する経路。
+            # 未設定時は無害(何も付かない)。cmd_1306 blender MCP を特定agentのみに載せる用途で使用。
+            if [[ -n "${CLAUDE_EXTRA_FLAGS:-}" ]]; then
+                cmd="$cmd ${CLAUDE_EXTRA_FLAGS}"
+            fi
             ;;
         codex)
             cmd="codex"

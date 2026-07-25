@@ -1212,6 +1212,24 @@ These checks supplement Gunshi's QC. They do **not** replace the Ashigaru → Gu
 **Exception**: If the L4+ task is simple enough (e.g., small code review), an ashigaru can handle it.
 Use Gunshi for tasks that genuinely need deep thinking — don't over-route trivial analysis.
 
+### Model 特性別タスク振り分け原則 (殿裁可 2026-07-15)
+
+**タスクの性質でモデルを選ぶ。「筆=Fable、刀=Opus、馬=Sonnet」。**
+
+| Model | 得意 | 振り分けるタスク | 避けるタスク |
+|-------|------|----------------|-------------|
+| **Fable 5** (筆) | 創作・言葉の質・深い推論・曖昧要求の汲み取り | キャラ台詞/会話生成 (恋会話authoring=Opus比+45.7pp実証)・ニュアンス設計・persona調整・複雑な設計判断・QC/RCA (軍師) | 機械的作業 (牛刀割鶏=枠浪費)。枠が高価で希少ゆえ「Fableで明らかに品質が上がる工程」に絞る |
+| **Opus 4.8** (刀) | correctness・実装・長時間自律安定 | コード実装/リファクタ/デバッグ・データ処理/backfill・「間違えたら壊れる」仕事全般。殿方針=コーディングはOpus基準線 [[feedback_opus_default_for_coding]] | 正解のない言語センス勝負 (Fableに一歩譲る) |
+| **Sonnet 5** (馬) | 速さ×量・定型作業 | 大量単純タスク・分類/要約/整形 (数で押す場面のみ) | 難しい設計判断・微妙なバグ (踏み外しやすい)。現陣ではほぼ出番なし=機械的作業はOpus/medium代替が既定 |
+
+**運用規律:**
+- 実割当は `config/settings.yaml` が正。足軽をFable班/Opus班に分けている時は、**生成系→Fable班、実装系→Opus班** へ寄せる。
+- **足軽の班構成 (Fable/Opus の比率・誰をどちらにするか) は家老裁量で変更可 (殿裁可 2026-07-15)**。タスクキューの性質 (生成系が多い日はFable増等) に合わせ `switch_cli.sh` で組み替えてよい。変更したら dashboard に一言記録。稼働中agentの切替は task完遂の安全区切りで。
+- **effort も model 同様、家老裁量で変更可 (殿裁可 2026-07-15)**。三段の目安 = 思考系/品質の要=xhigh・標準=high・機械的=medium。特に品質クリティカルな創作 (恋会話authoring 等、batch1が量産の型になるもの) は xhigh を惜しむな。一律固定でなく「このtaskに最適か」で毎dispatch選ぶこと。変更は dashboard に一言記録。
+- Fable枠は枯渇しうる (アカウント切替で解放可 = memory `ops_dual_account_fable_release`)。枯渇検知したら全戦力Opus退避し将軍へ報告。
+- Fable必須工程が枠切れ中に発生したら着手せずキューに積み、枠回復後に実行 (2026-07-15 4時待ち運用の一般化)。
+- effort は従来通り家老裁量: 思考系xhigh・標準high・機械的medium。
+
 ## OSS Pull Request Review
 
 External PRs are reinforcements. Treat with respect.
@@ -1382,6 +1400,16 @@ ash 完遂後 `queue/reports/ashigaru{N}_report.yaml` 上書き必須 (status: c
 #### 規律 5: caveats 正直明示 (memory feedback_no_misleading_information)
 
 LoC 見積差異 / scope creep / micro-deviation 等は隠蔽せず正直明示する。雑な要約禁、memory・実装・軍師 plan 検証してから断言する。誤誘導は殿信頼毀損 (殿明言「間違った情報提示しないで」)。
+
+#### 規律 6: R2-1 native-toolchain WSL 禁 (★engine 系 task 発行時 強制注入★・cmd_1274 起源)
+
+**engine (ai-automate-engine 等 Windows-canonical repo) 系の ash/gunshi task を発行する際、constraints に必ず以下を明示注入する** (task 発行時 強制・うっかり漏れの構造的防止):
+
+> ★ping-pong 規律 (R2-1)=engine 配下で WSL から `npm install`/`npm ci`/`npm rebuild`/`vitest`/`npm run test`/`npm run build`/`npm run dev` (native-toolchain 実行) は**絶対禁**=殿 Windows 手番★。WSL 側で許可されるのは **tsc / eslint / design / read / grep / git / DS build (node sd.config.js 等 pure-JS)** のみ。native binary (better-sqlite3/lightningcss/node-pty) は WSL で rebuild すると Windows 版を Linux 版で上書きし殿環境を破壊する (cmd_1274 B0 incident 16:37 + B1 E2E 中 ping-pong 再発の実害)。追加 install/native 検証が要るなら「殿 Windows 手番」と明示し ash は実行しない。
+
+**背景**: cmd_1274 で ash の WSL `npm install` が Windows native binary (lightningcss-win32 / better_sqlite3.node) を Linux 版で上書きし、殿 dev/test を二度破壊した。R2 規律は既に存在したが「task ごとに書き忘れる」余地があったため、本規律 6 で**発行時強制**に格上げする。詳細 incident=`logs/incidents/cmd_1274_wsl_install_ping_pong.md` + `logs/incidents/cmd_1274_pingpong_recurrence_rca.md`。
+
+> ★native compiled module の platform 汚染は `npm install` では直らぬ (RCA 実証・cmd_1274)★: better-sqlite3 等の **node-gyp compiled 単一 module (prebuilds 無)** は、platform 違いの `.node` が居座っても `npm install` が「name@version present」と見て **rebuild を skip** する (optional dep の lightningcss-win32 等は再取得で直るが、compiled module は直らない非対称)。platform 切替/汚染時の fix は **`npm rebuild <pkg>` (例=`npm rebuild better-sqlite3`)** を明示せよ。runbook/手順で「汚染時は npm install」とだけ書くのは誤り。
 
 ### 過去事例
 

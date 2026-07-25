@@ -304,12 +304,16 @@ source lib/agent_registry.sh
 PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
 pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
 [ -n "$pane" ] || exit 0
-tmux capture-pane -t "$pane" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -15
+tmux capture-pane -t "$pane" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -30
 '''
 
 
 def pane_upstream_text(agent):
-    """上流障害検知用に pane 末尾 15 行 (空行除く) を返す。取得不能は空文字。
+    """上流障害検知用に pane 末尾 30 行 (空行除く) を返す。取得不能は空文字。
+
+    幅は cmd_1356 (OBS-4) で 15→30 行: 凍結 fixture の banner 行は末尾から10行目で
+    tail -15 の余裕は5行しか無く、CLI が chrome を数行足すだけで窓の外へ落ちる
+    (軍師二号 実測)。grep 対象が15行増えるだけで費用ゼロ。
 
     エラー banner は prompt 付近 (末尾) に出るため末尾のみ見る — pane 全面を見ると
     agent が編集中のコード本文 (「rate limit」等の語を含みうる) を拾う誤検知が増える。
@@ -364,15 +368,23 @@ def detect_upstream_failure(text):
 #          文言が流れた場合のみ効く)
 # ★R1 の脆さ (正直明示)★: "resets 4:30am" は 12h 表記・分省略・(Asia/Tokyo) が折返しで
 # 別行に落ちる・表示TZ=host TZ の仮定・「検知直後に reset 済みの stale banner」誤読
-# (→翌日へ繰上げ=最大24h遅延、expire が下限を保証) を抱える。ゆえに R2 fallback と
-# OUTAGE_EXPIRE_HOURS を必ず併設する。詳細 caveats は
+# (→翌日へ繰上げ) を抱える。parse 失敗は R2 fallback が引き受け、★parse 成功だが値が
+# 妥当域外 (cmd_1356: 初回検知から MAX_RESETS_ETA_AHEAD_HOURS 超先=stale banner の翌日
+# 誤読・実測23.8h) も使用点の蓋 (resets_eta_implausible) が R2 へ倒す★。
+# OUTAGE_EXPIRE_HOURS は台帳の掃除屋 (通知せぬ) であり「起こされる」保証は R1/R2 の役。
+# 詳細 caveats は
 # docs/content/ops/cmd_1355_upstream_outage_guard.md を正とする。
 UPSTREAM_OUTAGE_STATE_FILE = "upstream_outage.yaml"
 UPSTREAM_ALERT_THROTTLE_FILE = "upstream_alert_throttle"  # detect/resume 共用の最終送信時刻
 DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN = 30  # blackout 警報と同じ流儀 (episode once が主・これは保険)
 RESUME_GRACE_MIN = 3          # resets ETA 経過後の余裕 (時計ずれ・上流反映遅延の吸収)
-FALLBACK_RESUME_MIN = 60      # ETA 不明時: 初回検知からこの分数で点検通知 (R2)
-OUTAGE_EXPIRE_HOURS = 24      # 台帳 episode の消費期限 (stale 台帳が永続する事故の下限保証)
+FALLBACK_RESUME_MIN = 60      # ETA 不明/妥当域外時: 初回検知からこの分数で点検通知 (R2)
+OUTAGE_EXPIRE_HOURS = 24      # 台帳 episode の消費期限 = ★掃除屋 (通知せぬ)★。台帳が腐って
+                              # 永続する事故を畳む下限保証であり「誰かが起こされる」保証では
+                              # ない — 起こすのは R1/R2 (cmd_1356 U7 / MUT-1355-005 が毎朝守る)
+MAX_RESETS_ETA_AHEAD_HOURS = 6  # ★ETA 妥当域の蓋 (cmd_1356)★: rolling 枠の reset は検知から
+                              # 高々 ~5h 先。初回検知からこれ超先の ETA は stale banner の
+                              # 翌日誤読 (実測23.8h) とみなし R1 の根拠にせぬ (R2 へ倒す)
 RESETS_RE = re.compile(
     r"resets\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.IGNORECASE)
 
@@ -382,7 +394,8 @@ def parse_resets_eta(text, now):
 
     解釈不能なら None (R2 fallback が引き受ける)。★検知時点で parse する前提★ =
     「resets 4:30am」は検知時刻から見た次の 4:30 を指す (23時検知→翌 4:30 / 2時検知→当日 4:30)。
-    検知が reset 後にずれ込んだ stale banner は翌日へ繰上がる誤読になる (caveat・expire で下限保証)。
+    検知が reset 後にずれ込んだ stale banner は翌日へ繰上がる誤読になる — parse 自体は
+    生のまま通し、その値は★使用点の妥当域蓋 (resets_eta_implausible・cmd_1356) が R2 へ倒す★。
     """
     if not text:
         return None
@@ -402,6 +415,29 @@ def parse_resets_eta(text, now):
     if eta <= now:
         eta += datetime.timedelta(days=1)
     return eta
+
+
+def resets_eta_implausible(episode, eta):
+    """★ETA 妥当域の蓋 (cmd_1356)★ — 「parse 成功だが値が誤り」(R2 の外の第三状態) を判じる。
+
+    基準は first_detected: rolling 枠の reset は検知から高々 ~5h 先にしか来ぬゆえ、
+    初回検知より MAX_RESETS_ETA_AHEAD_HOURS 超先の ETA は「検知が reset 後にずれ込んだ
+    stale banner の翌日誤読」(実測 23.8h・軍師二号 OBS-1) とみなし R1 の根拠にせぬ。
+
+    ★蓋は値を使う瞬間 (release 判定 / 警報整形) に掛ける★ = 台帳の書き手を問わず効き
+    (旧コードが書いた台帳・手編集にも効く)、記録は生のまま残る = 可笑しな値が台帳と
+    警報に見え続ける (人が気付ける経路を殺さぬ)。parse 時に None 化する形を採らぬのは、
+    凍結 fixture『resets 4:30am』の採否が test 実行時刻で変わり T-QRM-010/nightly が
+    時刻依存になるため (時刻で分岐が変わる test は「緑が何も証明せぬ」族)。
+
+    first_detected が読めぬ台帳は蓋の真偽を判じられぬ → False (eta を信じる) 側に倒す:
+    その台帳では R2 も first_detected を必要とするため、蓋で eta まで捨てると起こす経路が
+    R3 だけになり「誰も起こさぬ」(北極星の死因) に近づく — 蓋の目的と逆行する。
+    """
+    first = parse_iso_to_naive_local(episode.get("first_detected"))
+    if first is None:
+        return False
+    return (eta - first).total_seconds() / 3600.0 > MAX_RESETS_ETA_AHEAD_HOURS
 
 
 def load_outage(state_dir: Path):
@@ -495,6 +531,11 @@ def outage_release_check(episode, agent_states, now):
     台帳に残る (未回復の) agent のみ。呼出元が probe 済みの値を渡す (test 注入可能)。
     """
     eta = parse_iso_to_naive_local(episode.get("resets_eta"))
+    eta_distrusted = None
+    if eta is not None and resets_eta_implausible(episode, eta):
+        # cmd_1356: parse 成功だが妥当域外 (stale banner の翌日誤読=実測23.8h)。
+        # 値は台帳/警報に生のまま残る (人が気付ける) が、R1 の根拠にはせず R2 へ倒す。
+        eta_distrusted, eta = episode.get("resets_eta"), None
     if eta is not None:
         if now >= eta + datetime.timedelta(minutes=RESUME_GRACE_MIN):
             return True, (f"R1: resets ETA {episode['resets_eta']} + "
@@ -503,7 +544,10 @@ def outage_release_check(episode, agent_states, now):
         first = parse_iso_to_naive_local(episode.get("first_detected"))
         if first is not None and now >= first + datetime.timedelta(
                 minutes=FALLBACK_RESUME_MIN):
-            return True, (f"R2: resets 時刻を読めなんだゆえ初回検知 "
+            why = (f"resets ETA {eta_distrusted} は妥当域"
+                   f"({MAX_RESETS_ETA_AHEAD_HOURS}h)超=stale banner 誤読の疑いゆえ信ぜず"
+                   if eta_distrusted else "resets 時刻を読めなんだゆえ")
+            return True, (f"R2: {why}、初回検知 "
                           f"{episode['first_detected']} から {FALLBACK_RESUME_MIN}分で点検通知")
     if agent_states:
         banners = [s for s in agent_states.values() if s.get("upstream_pattern")]
@@ -517,6 +561,11 @@ def format_upstream_detect_alert(episode, throttle_min):
     agents_desc = ", ".join(
         f"{a}(task={e.get('task_id')})" for a, e in sorted(episode["agents"].items()))
     eta = episode.get("resets_eta") or "解釈不能(R2 fallbackで点検通知)"
+    eta_v = parse_iso_to_naive_local(episode.get("resets_eta"))
+    if eta_v is not None and resets_eta_implausible(episode, eta_v):
+        # cmd_1356: 可笑しな値は生のまま印字し (人が気付ける経路を殺さぬ)、機械の扱いを注記
+        eta = (f"{eta} ★妥当域({MAX_RESETS_ETA_AHEAD_HOURS}h)超=stale banner 誤読の疑い"
+               f"ゆえ待たず、初回検知+{FALLBACK_RESUME_MIN}分の R2 点検通知が引き受ける★")
     return (f"⚠上流障害(枠切れ/account系)検知 (idle_revive cmd_1355): 対象への /clear を抑止した"
             f" (context保全・上流障害中の clear は何も直さぬ)。対象: {agents_desc}。"
             f"検知文言『{episode.get('resets_hint', '')}』/ resets ETA={eta}。"
@@ -693,13 +742,62 @@ def selftest_upstream():
          "agents": {"x": {}}}, gone, datetime.datetime(2026, 7, 26, 2, 30))
     if not rel or "R3" not in reason:
         ng.append(f"U5 R3 (文言消失+idle) が効かぬ: rel={rel} reason={reason!r}")
+    # U6: ★ETA 妥当域の蓋 (cmd_1356)★ — 「parse成功だが値が誤り」(stale banner の翌日誤読 =
+    #     軍師二号 OBS-1 実測23.8h) を R1 の根拠にせず R2 (60分点検) が引き受ける。
+    #     両側: 妥当域内 (今夜の正しい形 1.8h) は従来どおり R1。MUT-1355-006 の的。
+    stale = {"first_detected": "2026-07-26T04:45:00",   # 検知04:45 = reset04:30 の後
+             "resets_eta": "2026-07-27T04:30:00",       # → 翌日へ誤読 (23.8h 先)
+             "agents": {"x": {}}}
+    rel, reason = outage_release_check(stale, still, datetime.datetime(2026, 7, 26, 5, 46))
+    if not rel or "R2" not in reason:
+        ng.append(f"U6a stale banner 誤読ETA(23.8h) を R2 が引き受けぬ = 23.8時間の窓が開いた"
+                  f"まま (guard 導入前より遅い): rel={rel} reason={reason!r}")
+    elif "2026-07-27T04:30:00" not in reason:
+        ng.append(f"U6b R2 理由が信じなんだ ETA を名指しせぬ (人が気付ける経路): reason={reason!r}")
+    rel, _ = outage_release_check(stale, still, datetime.datetime(2026, 7, 26, 5, 0))
+    if rel:
+        ng.append("U6c 妥当域外でも初回検知+60分より前に鳴った (早すぎる点検通知)")
+    sane = {"first_detected": "2026-07-26T02:45:00",
+            "resets_eta": "2026-07-26T04:30:00", "agents": {"x": {}}}
+    rel, reason = outage_release_check(sane, still, datetime.datetime(2026, 7, 26, 4, 34))
+    if not rel or "R1" not in reason:
+        ng.append(f"U6d 妥当域内 (今夜の正しい形 1.8h) が蓋に誤って弾かれた: rel={rel} reason={reason!r}")
+    alert = format_upstream_detect_alert(dict(stale, agents={"x": {"task_id": "t"}}), 30)
+    if "2026-07-27T04:30:00" not in alert:
+        ng.append("U6e 検知警報から可笑しな ETA の印字が消えた (人が気付ける経路が死んだ)")
+    elif "妥当域" not in alert:
+        ng.append("U6f 検知警報が妥当域外の注記をせぬ (人は見ても機械の扱いが分からぬ)")
+    # U7: ★expire = 台帳の掃除屋 (cmd_1356・軍師二号 G-M5 SURVIVED の是正)★ — 25h 前の
+    #     episode は close され resume 判定へ進まぬ。通知はせぬ (安全網でなく掃除屋 —
+    #     起こす保証は R1/R2 の役)。probe は monkeypatch し tmux 非接触を保つ。MUT-1355-005 の的。
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        sdir = Path(td) / "state"
+        save_outage(sdir, {"first_detected": "2026-07-25T00:00:00", "resets_eta": None,
+                           "detect_notified_ts": "2026-07-25T00:00:00",
+                           "resume_notified_ts": None,
+                           "agents": {"x": {"detected_ts": "2026-07-25T00:00:00"}}})
+        g = globals()
+        orig_probe = g["outage_probe_agent"]
+        g["outage_probe_agent"] = lambda agent, ps, tdir: (
+            False, {"pane_state": "idle", "upstream_pattern": "session limit"})
+        try:
+            hit = outage_maintain(sdir, {}, Path(td) / "tasks",
+                                  now=datetime.datetime(2026, 7, 26, 1, 0))
+        finally:
+            g["outage_probe_agent"] = orig_probe
+        if hit is not None:
+            ng.append("U7a 25h 超の episode が expire されず resume 判定へ進んだ "
+                      "(OUTAGE_EXPIRE_HOURS が死んでおる = stale 台帳が永続する)")
+        if load_outage(sdir) is not None:
+            ng.append("U7b expire 後も台帳が畳まれておらぬ (掃除屋が働かぬ)")
 
     if ng:
         for line in ng:
             print(f"★NG★ {line}")
         print(f"selftest_upstream: FAIL ({len(ng)}件)")
         return 1
-    print("selftest_upstream: PASS (U1-U5 全て契約どおり)")
+    print("selftest_upstream: PASS (U1-U7 全て契約どおり)")
     return 0
 
 

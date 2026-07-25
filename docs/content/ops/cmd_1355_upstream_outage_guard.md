@@ -65,7 +65,7 @@ ashigaru6 pane (%3) scrollback より 2026-07-26 04:4x 採取。正本 =
 | 条件 | 内容 | 位置づけ |
 |---|---|---|
 | R1 | pane 文言から parse した resets ETA + 3分 grace を経過 | **主判定 (実効)** |
-| R2 | ETA を読めなんだ場合、初回検知から 60分で点検通知 | fallback |
+| R2 | ETA を読めなんだ**または妥当域外 (cmd_1356)** の場合、初回検知から 60分で点検通知 | fallback |
 | R3 | 全対象 pane から限界文言が消え、かつ idle の agent が居る | 補助 |
 
 - **R3 が補助である理由 (家老の見立てを実測で覆した点)**: 家老は「pane から限界文言が
@@ -77,21 +77,39 @@ ashigaru6 pane (%3) scrollback より 2026-07-26 04:4x 採取。正本 =
   - `resets 4:30am` は 12h 表記・分省略 (`resets 1am`) を parse するが、**表示 TZ = host TZ
     (Asia/Tokyo) の仮定**を置いている。TZ 括弧は折返しで別行に落ちるため検証に使えない。
   - 「検知時点から見た次の到来時刻」と解釈する。**検知が reset 後にずれ込んだ stale banner
-    は翌日へ繰上がる誤読**になる (最大24h の遅延)。下限保証として episode は 24h で expire。
+    は翌日へ繰上がる誤読**になる (軍師二号が 23.8時間 を実測・発生窓 = 枠切れがリセットの
+    45分前より後に始まった時)。★cmd_1356 で蓋をした★ = **初回検知から 6時間超先の ETA は
+    「parse 成功だが値が誤り」とみなし R1 の根拠にせず、R2 (60分点検) が引き受ける**
+    (rolling 枠の reset は検知から高々 ~5h 先ゆえ 6h 超は正の値では在り得ぬ)。
+    蓋は**値を使う瞬間** (release 判定/警報整形) に掛ける — 台帳の書き手を問わず効き、
+    台帳と警報には**生の誤読値が印字され続ける** (「家老が目で気付ける」経路を機械化の
+    ついでに殺さない。警報には妥当域外の注記が付く)。この契約は MUT-1355-006 が毎朝守る。
   - 文言の書式が CLI 更新で変われば parse は静かに失敗する — その時は **R2 fallback が
     60分で必ず点検通知を上げる** (parse 失敗で誰も起こさぬ事態にはならない。この契約は
     MUT-1355-002 が毎朝守る)。
+  - **episode の 24h expire は「台帳の掃除屋」であって安全網ではない** — 台帳を畳むだけで
+    **通知は 1通も出さない** (軍師二号 G-E3 実射)。「最悪24hで誰かが起こされる」の保証は
+    expire の功ではなく **R1/R2 の役** である (12時間時計 parse ゆえ R1 の ETA は必ず 24h
+    未満に来る)。旧記述「expire が下限を保証」は『台帳が永久に腐らぬ』ことの保証と読むのが
+    正しく、cmd_1356 で因果を是正した。この契約 (expire が畳む) は MUT-1355-005 が毎朝守る。
 - 通知の spam 抑止: episode 1通が主 + 30分 throttle が保険 (10通 spam の再発禁)。
 
 ## 試験 (すべて「壊せば落ちるか」で検めた)
 
-- `python3 scripts/idle_revive_scan.py --selftest-upstream` — U1-U5 (fixture 検知/良性非検知/
-  ETA parse/解除判定両側)。tmux/queue 非接触ゆえ gate-2 台帳から scratch 実行できる。
+- `python3 scripts/idle_revive_scan.py --selftest-upstream` — U1-U7 (fixture 検知/良性非検知/
+  ETA parse/解除判定両側/★U6=妥当域の蓋 両側+人が気付ける経路の生存/U7=expire は掃除屋★)。
+  tmux/queue 非接触ゆえ gate-2 台帳から scratch 実行できる (U7 の probe は monkeypatch)。
 - `config/mutation_registry.yaml` MUT-1355-001 (pattern 削除→U1b 名指し赤) /
-  MUT-1355-002 (R2 fallback 折り→U4d 名指し赤)。毎朝 06:30 gate_nightly が再走。
-- `tests/unit/test_idle_revive_quorum.bats` T-QRM-010〜013 — 実文言で clear 0本+警報1通、
+  MUT-1355-002 (R2 fallback 折り→U4d 名指し赤) / ★cmd_1356 追加★ = MUT-1355-004
+  (blackout 台帳記録 削除→T-QRM-015 赤 = 軍師二号 G-M3 SURVIVED の是正) / MUT-1355-005
+  (expire 殺し→U7a 赤 = G-M5 SURVIVED の是正) / MUT-1355-006 (妥当域の蓋 殺し→U6a 赤 =
+  23.8h 窓の再開を毎朝見張る)。毎朝 06:30 gate_nightly が再走。
+- `tests/unit/test_idle_revive_quorum.bats` T-QRM-010〜015 — 実文言で clear 0本+警報1通、
   家老 guard 両側、resume 1通+全員回復 close、pattern 外しで**今夜の誤 clear が再現**する
-  scan 級両側実測。
+  scan 級両側実測、★T-QRM-015 (cmd_1356) = blackout (全軍同時枠切れ=殿の典型形) 経路の
+  台帳4体記録+検知警報の相乗り★。
+- pane を見る範囲は末尾 30行 (cmd_1356 OBS-4: banner は末尾から10行目に居り tail -15 の
+  余裕は5行しか無かった — CLI chrome 数行で窓外へ落ちる。拡張は費用ゼロ)。
 - 検分自身の沈黙を1件踏んで塞いだ: fixture には pattern が2つ共存するため、全文一括の
   検分では「片方外し」の変異が空振りする — 行単位の個別検分 (U1b/U1c) へ強化した。
 

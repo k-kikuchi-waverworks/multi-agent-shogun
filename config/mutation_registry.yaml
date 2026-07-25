@@ -173,6 +173,59 @@ mutations:
     expect: nonzero
     red_needle: "message NOT delivered"  # 実測 2026-07-26: fallback 無しは 3retry 後 FATAL LOST
 
+  - id: MUT-1355-004
+    origin: cmd_1356
+    desc: |
+      ★blackout (quorum成立=全軍同時枠切れ) 経路の台帳記録★ (main() blackout 分岐の
+      outage_record call = 当該経路で唯一の書込) を削除すると、T-QRM-015 (blackout 4体 →
+      台帳4体+検知警報の相乗り) が赤くなるべき。消しても緑なら「殿の枠切れの典型形
+      (全軍同時沈黙) では再開通知の入力がゼロ件」= 枠が戻っても誰も起こされぬ
+      2026-07-26 全軍3h停止の後半の再来。軍師二号 G-M3 が「消しても selftest PASS +
+      bats 全緑 (SURVIVED)」と実証した未検査の是正 (cmd_1356 OBS-2)。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    mutate: |
+      sed -i '/outage_record(state_dir, s\["agent"\], pat, b_text,/,/task_id=(b_task or {}).get("task_id"))/d' scripts/idle_revive_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-QRM-015" tests/unit/test_idle_revive_quorum.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-QRM-015"  # 実測 2026-07-26: 台帳記録2行削除 (syntax valid 確認済) で台帳file不在を名指しで落とす
+
+  - id: MUT-1355-005
+    origin: cmd_1356
+    desc: |
+      OUTAGE_EXPIRE_HOURS (台帳 episode の消費期限) を 999999 へ折ると、selftest U7a
+      (25h 超 episode は close され resume 判定へ進まぬ) が赤くなるべき。折っても緑なら
+      stale 台帳が永久に残り「とうに終わった episode の判定が延々続く」腐敗に誰も気付かぬ。
+      ★expire は通知をせぬ掃除屋であり『最悪24hで誰かが起こされる』保証ではない —
+      起こす保証は R1/R2 (MUT-1355-002/006 が守る)★。軍師二号 G-M5 SURVIVED の是正
+      (cmd_1356 OBS-3・docs の「expire=下限保証」の因果も同時に正した)。
+    paths: [scripts/idle_revive_scan.py]
+    mutate: |
+      sed -i 's/^OUTAGE_EXPIRE_HOURS = .*/OUTAGE_EXPIRE_HOURS = 999999/' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U7a"  # 実測 2026-07-26: expire 殺しで U7a/U7b が名指しで落ちる
+
+  - id: MUT-1355-006
+    origin: cmd_1356
+    desc: |
+      ★ETA 妥当域の蓋★ (MAX_RESETS_ETA_AHEAD_HOURS=6・「parse成功だが値が誤り」を使用点で
+      R2 へ倒す cmd_1356 の主目的) を 999999 へ折ると、selftest U6a (stale banner の翌日
+      誤読 23.8h を R2 が初回検知+60分で引き受ける) が赤くなるべき。折っても緑なら
+      「枠切れがリセット45分前より後に始まった夜」(2026-07-26 とほぼ同形・珍しくない) に
+      ★23.8時間 誰も起こされぬ★窓が再び開く = guard 導入前より遅い唯一の点の再来
+      (軍師二号 OBS-1 実測)。蓋は値を黙って直さぬ = 台帳/警報に生の誤読値が残り続ける
+      (U6e が「人が気付ける経路」の生存を守る)。
+    paths: [scripts/idle_revive_scan.py]
+    mutate: |
+      sed -i 's/^MAX_RESETS_ETA_AHEAD_HOURS = .*/MAX_RESETS_ETA_AHEAD_HOURS = 999999/' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U6a"  # 実測 2026-07-26: 蓋殺しで U6a (23.8h窓) / U6f (注記) が名指しで落ちる
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

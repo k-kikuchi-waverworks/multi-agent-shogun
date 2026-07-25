@@ -467,6 +467,35 @@ EOF
     [ "$(_count_record 'idle_revive_escalation_alert')" -eq 1 ]
 }
 
+# ---------------------------------------------------------------------------
+# T-QRM-015 (cmd_1356): ★blackout (quorum成立=全軍同時枠切れ) 経路の台帳記録★
+#   殿の枠切れの典型形は全軍同時沈黙=この経路であり、台帳書込は main() blackout 分岐の
+#   outage_record 1 call のみ (軍師二号 G-M3: 消しても全gate緑=無試験 の是正・OBS-2)。
+#   4体同時 stall + 実 banner → 台帳に4体すべて記録 + 検知警報は blackout 警報へ相乗り
+#   (家老 inbox を2通にせぬ) + 誤 clear 0本。MUT-1355-004 の的。
+# ---------------------------------------------------------------------------
+@test "T-QRM-015 (cmd_1356): blackout path records ALL stalled agents to outage ledger; detect alert piggybacks (no 2nd warning)" {
+    for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do _write_task "$a"; done
+    _write_pane_states ashigaru91:idle ashigaru92:idle ashigaru93:idle ashigaru94:idle
+    _load_real_pane_text
+
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    # 誤 clear 0本 + blackout 警報1通 (上流障害痕跡『session limit』の引用つき)
+    [ "$(_count_record 'clear_command')" -eq 0 ]
+    [ "$(_count_record '停電型')" -eq 1 ]
+    grep -q "session limit" "$INBOX_STUB_RECORD"
+    # ★台帳に4体すべて記録★ = 枠回復時の再開通知の入力 (この1 call に全部ぶら下がる)
+    [ -f "$Q/state/upstream_outage.yaml" ]
+    for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do
+        grep -q "$a" "$Q/state/upstream_outage.yaml"
+    done
+    grep -q "subtask_qrm_ashigaru91" "$Q/state/upstream_outage.yaml"   # task_id も記録
+    # 検知警報は blackout 警報へ相乗り = 個別検知警報 0通 (10通 spam 型の再発禁の全面性)
+    [ "$(_count_record '上流障害(枠切れ/account系)検知')" -eq 0 ]
+    grep -q "相乗り" "$Q/state/upstream_outage.yaml"
+}
+
 @test "T-QRM-008: detect_upstream_failure catches all four advised pattern families, not plain text" {
     run "$VENV_PY" - <<'PY'
 import importlib.util, os

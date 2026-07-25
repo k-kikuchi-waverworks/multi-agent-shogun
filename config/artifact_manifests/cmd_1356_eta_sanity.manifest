@@ -1,0 +1,7 @@
+# cmd_1356 成果物 manifest — ETA 妥当域の蓋 + blackout/expire 変異登録 + tail30 + docs因果是正
+# (cmd_1355 番人の残り火 = 23.8時間 誰も起こされぬ窓 の閉塞。軍師二号 OBS-1〜4 の是正)
+# 文法: scripts/gate_artifact_capture.sh 冒頭コメント参照 (path / dir/ [min=N] / #コメント)
+scripts/idle_revive_scan.py
+tests/unit/test_idle_revive_quorum.bats
+config/mutation_registry.yaml
+docs/content/ops/cmd_1355_upstream_outage_guard.md

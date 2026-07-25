@@ -16,6 +16,10 @@
 #     coverage_waivers へ【理由つきで】書け (黙って外す道は無い)
 #   ・red_needle (任意) = 赤の理由が変異を名指ししておるかの検分 (原理(iii)・cmd_1350
 #     五号の教訓)。値は【実測した失敗出力】から取れ (推測で書くと偽 FAIL で信頼を失う)
+#   ・suspected_by (任意) = ★この変異は誰の疑いを写したものか★ (全軍規律 2026-07-26
+#     「己で作った変異は、己が疑うた場所しか撃たぬ」— 五号の申し出を家老が採った)。
+#     自作の疑いだけの台帳は盲点が残る — 他者の変異を通した場所が見えれば、
+#     ★誰の疑いも通っておらぬ場所★ を数えられる。runner が出所を集計表示する
 #
 # 書式は scripts/gate_mutation_replay.py 冒頭 docstring を正とする。
 # なぜこの台帳が在るか: docs/content/ops/cmd_1352_silent_pitfall_gates.md
@@ -23,6 +27,7 @@
 mutations:
   - id: MUT-1352-001
     origin: cmd_1352
+    suspected_by: ashigaru1
     desc: |
       gate-1 の ignore 検出の牙 (git check-ignore 呼び出し) を折ると、gate-1 selftest の
       S2 (cmd_1349 実事故の再現 = .gitignore が dir add から黙って弾く) が赤くなるべき。
@@ -37,6 +42,7 @@ mutations:
 
   - id: MUT-1352-002
     origin: cmd_1352
+    suspected_by: ashigaru1
     desc: |
       gate-1 の「宣言 0 件 = UNDETERMINED」契約を PASS (exit 0) へ倒すと、
       selftest S5 (0件宣言) が赤くなるべき。倒しても緑なら「空の manifest で緑」
@@ -51,6 +57,7 @@ mutations:
 
   - id: MUT-1352-003
     origin: cmd_1352
+    suspected_by: ashigaru1
     desc: |
       gate-2 runner 自身の「変異後も緑 = FAIL」契約 (GREEN_AFTER_MUTATION_IS_FAIL) を
       False へ倒すと、gate-2 selftest の T2 (静かな無効化の検出) が赤くなるべき。
@@ -65,6 +72,7 @@ mutations:
 
   - id: MUT-1352-004
     origin: cmd_1352
+    suspected_by: ashigaru1
     desc: |
       gate-1 の head mode (--committed = HEAD blob 正) の捕捉述語 (cat-file -e) を折ると、
       selftest S11-S13 (fresh clone 視点の検分) が赤くなるべき。折っても緑なら
@@ -79,6 +87,7 @@ mutations:
 
   - id: MUT-1339-001
     origin: cmd_1352b
+    suspected_by: ashigaru1
     desc: |
       idle_revive 停電型 quorum gate の成立下限 (DEFAULT_QUORUM_MIN_STALLED=3) を 999 へ
       引き上げると、T-QRM-001 (4体同時 stall → clear 全面抑止+家老警報1通) が赤くなるべき。
@@ -97,6 +106,7 @@ mutations:
 
   - id: MUT-1339-002
     origin: cmd_1352b
+    suspected_by: ashigaru1
     desc: |
       watcher_supervisor の [LEGACY] warn-once 化の marker 書込 (: > "$marker") を消すと、
       T-LEG-001 (12周で [LEGACY] 1行のみ) が赤くなるべき (12行 spam へ退行)。
@@ -112,6 +122,7 @@ mutations:
 
   - id: MUT-1352-005
     origin: cmd_1352b
+    suspected_by: ashigaru1
     desc: |
       台帳登録検知層 (--coverage) の変異 keyword 正本 (COVERAGE_MUT_KEYWORDS) を
       決して当たらぬ pattern へ折ると、coverage selftest (T10 未登録の名指し / T11 登録済
@@ -127,6 +138,7 @@ mutations:
 
   - id: MUT-1355-001
     origin: cmd_1355
+    suspected_by: ashigaru1
     desc: |
       idle_revive の上流障害 pattern から "session limit" (2026-07-26 未明に実 pane から
       capture-pane 採取した実文言。tests/fixtures/upstream_session_limit_pane.txt に byte 凍結)
@@ -143,6 +155,7 @@ mutations:
 
   - id: MUT-1355-002
     origin: cmd_1355
+    suspected_by: ashigaru1
     desc: |
       枠復帰の再開通知 (D) の R2 fallback (resets 時刻を読めなんだ時、初回検知から
       FALLBACK_RESUME_MIN 分で家老へ点検通知) を 999999 分へ折ると、selftest U4d が
@@ -158,6 +171,7 @@ mutations:
 
   - id: MUT-1355-003
     origin: cmd_1355
+    suspected_by: gunshi1
     desc: |
       inbox_write.sh の venv fallback (軍師束ねQC具申R2) を折る (fallback 分岐を if false 化)
       と、.venv の無い環境 (fresh clone 相当 = 本 gate の scratch がまさにそれ) での配達 test
@@ -175,6 +189,7 @@ mutations:
 
   - id: MUT-1355-004
     origin: cmd_1356
+    suspected_by: gunshi2
     desc: |
       ★blackout (quorum成立=全軍同時枠切れ) 経路の台帳記録★ (main() blackout 分岐の
       outage_record call = 当該経路で唯一の書込) を削除すると、T-QRM-015 (blackout 4体 →
@@ -193,6 +208,7 @@ mutations:
 
   - id: MUT-1355-005
     origin: cmd_1356
+    suspected_by: gunshi2
     desc: |
       OUTAGE_EXPIRE_HOURS (台帳 episode の消費期限) を 999999 へ折ると、selftest U7a
       (25h 超 episode は close され resume 判定へ進まぬ) が赤くなるべき。折っても緑なら
@@ -210,6 +226,7 @@ mutations:
 
   - id: MUT-1355-006
     origin: cmd_1356
+    suspected_by: gunshi2
     desc: |
       ★ETA 妥当域の蓋★ (MAX_RESETS_ETA_AHEAD_HOURS=6・「parse成功だが値が誤り」を使用点で
       R2 へ倒す cmd_1356 の主目的) を 999999 へ折ると、selftest U6a (stale banner の翌日

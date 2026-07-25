@@ -26,6 +26,10 @@
                                 # 疑いとして FAIL (cmd_1350 五号の教訓 = 実効は【失敗出力が
                                 # 変異内容を名指しするか】で取る。行移動型変異は diff 目視に効かぬ)
       timeout: 180              # 任意 (秒)
+      suspected_by: ashigaru5   # 任意。★この変異は誰の疑いを写したものか★ (全軍規律 2026-07-26
+                                # 「己で作った変異は、己が疑うた場所しか撃たぬ」— 五号の申し出を
+                                # 家老が採った)。自作の疑いだけの台帳は盲点が残る = 他者の変異を
+                                # 通した場所と、誰の疑いも通っておらぬ場所を数えられる形にする
   coverage_positive_control: <relpath>   # 任意 (top-level)。--coverage の陽性対照の差し替え。
                                          # 既定は本 file 自身ゆえ、本 file を持たぬ repo の台帳
                                          # (cmd_1355 backend 延長) では必須になる
@@ -226,7 +230,9 @@ def run_all(registry: Path, repo: Path) -> int:
         with tempfile.TemporaryDirectory(prefix="mutreplay_") as w:
             verdict, why = evaluate_entry(e, repo, Path(w))
         mark = {PASS: "ok  ", FAIL: "★NG★", UNDET: "未定 "}[verdict]
-        print(f"  {mark} {verdict:12s} {eid}: {why}")
+        who = e.get("suspected_by") if isinstance(e, dict) else None
+        tag = f" [疑い:{who}]" if who else ""
+        print(f"  {mark} {verdict:12s} {eid}:{tag} {why}")
         if verdict == PASS:
             n_pass += 1
         elif verdict == FAIL:
@@ -234,6 +240,15 @@ def run_all(registry: Path, repo: Path) -> int:
         else:
             n_undet += 1
     total = n_pass + n_fail + n_undet
+    # ★この台帳は誰の疑いを写したものか★ (全軍規律 2026-07-26): 自作の疑いしか無い台帳は
+    # 「己が疑うた場所」しか撃てておらぬ = 未記名も含め出所を数えて可視化する (強制はせぬ)
+    by_who: dict[str, int] = {}
+    for e in entries:
+        if isinstance(e, dict):
+            k = str(e.get("suspected_by") or "(未記名)")
+            by_who[k] = by_who.get(k, 0) + 1
+    if any(k != "(未記名)" for k in by_who):
+        print("  [疑いの出所] " + " / ".join(f"{k}={v}" for k, v in sorted(by_who.items())))
     if n_fail:
         print(f"[gate-2] FAIL: {total} 件中 ★無効化された変異 {n_fail} 件★ (PASS {n_pass} / UNDETERMINED {n_undet})")
         print("  処方: 名指しされた変異の test を仕様変更へ追随させ、再び赤くなることを確認して台帳を維持せよ。")

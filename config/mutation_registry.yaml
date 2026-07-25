@@ -182,7 +182,7 @@ mutations:
       (全軍同時沈黙) では再開通知の入力がゼロ件」= 枠が戻っても誰も起こされぬ
       2026-07-26 全軍3h停止の後半の再来。軍師二号 G-M3 が「消しても selftest PASS +
       bats 全緑 (SURVIVED)」と実証した未検査の是正 (cmd_1356 OBS-2)。
-    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats, tests/fixtures/upstream_session_limit_pane.txt]
     mutate: |
       sed -i '/outage_record(state_dir, s\["agent"\], pat, b_text,/,/task_id=(b_task or {}).get("task_id"))/d' scripts/idle_revive_scan.py
     test: |
@@ -200,7 +200,7 @@ mutations:
       ★expire は通知をせぬ掃除屋であり『最悪24hで誰かが起こされる』保証ではない —
       起こす保証は R1/R2 (MUT-1355-002/006 が守る)★。軍師二号 G-M5 SURVIVED の是正
       (cmd_1356 OBS-3・docs の「expire=下限保証」の因果も同時に正した)。
-    paths: [scripts/idle_revive_scan.py]
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
     mutate: |
       sed -i 's/^OUTAGE_EXPIRE_HOURS = .*/OUTAGE_EXPIRE_HOURS = 999999/' scripts/idle_revive_scan.py
     test: |
@@ -218,7 +218,7 @@ mutations:
       ★23.8時間 誰も起こされぬ★窓が再び開く = guard 導入前より遅い唯一の点の再来
       (軍師二号 OBS-1 実測)。蓋は値を黙って直さぬ = 台帳/警報に生の誤読値が残り続ける
       (U6e が「人が気付ける経路」の生存を守る)。
-    paths: [scripts/idle_revive_scan.py]
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
     mutate: |
       sed -i 's/^MAX_RESETS_ETA_AHEAD_HOURS = .*/MAX_RESETS_ETA_AHEAD_HOURS = 999999/' scripts/idle_revive_scan.py
     test: |

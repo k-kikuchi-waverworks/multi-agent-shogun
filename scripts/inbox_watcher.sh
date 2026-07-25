@@ -47,6 +47,20 @@ if [ "${__INBOX_WATCHER_TESTING__:-}" != "1" ]; then
         exit 1
     fi
 
+    # ── cmd_1339 ②: lifetime lock 契約 = agent 毎 watcher 単一化 ──
+    # 従来の単一化は「supervisor の pgrep dedup (実は -Ef 死にコード)」と
+    # 「start lock fd9 の偶然相続」に依存していた。watcher 自身が明示的に
+    # 生涯 lock を保持することで、誰が起動しても二重側は自主退場する。
+    # 二重 watcher = 二重 nudge / 二重 /clear の実害源 (2026-07-25 実測 10体)。
+    # shellcheck source=lib/proc_lock.sh
+    . "$SCRIPT_DIR/scripts/lib/proc_lock.sh"
+    # shellcheck source=lib/pane_gate.sh
+    . "$SCRIPT_DIR/scripts/lib/pane_gate.sh"
+    if ! proc_lock_acquire "inbox_watcher_${AGENT_ID}" 209 "agent=${AGENT_ID} pane=${PANE_TARGET} cli=${CLI_TYPE}"; then
+        echo "[$(date)] DUPLICATE: inbox_watcher for ${AGENT_ID} already running ($(proc_lock_read_meta "inbox_watcher_${AGENT_ID}")) — exiting" >&2
+        exit 0
+    fi
+
     # Initialize inbox if not exists
     if [ ! -f "$INBOX" ]; then
         mkdir -p "$(dirname "$INBOX")"
@@ -97,6 +111,14 @@ if [ "${__INBOX_WATCHER_TESTING__:-}" != "1" ]; then
     fi
     echo "[$(date)] File watch backend: $WATCH_BACKEND" >&2
 fi
+
+# ─── cmd_1339 shared libs (testing mode でも読込 — 純関数定義のみで副作用なし) ───
+_IW_LIB_ROOT="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+[ -f "$_IW_LIB_ROOT/scripts/lib/proc_lock.sh" ] && . "$_IW_LIB_ROOT/scripts/lib/proc_lock.sh"
+[ -f "$_IW_LIB_ROOT/scripts/lib/pane_gate.sh" ] && . "$_IW_LIB_ROOT/scripts/lib/pane_gate.sh"
+# lib 不在の異常環境では gate 開放 (従来挙動) — 定義済みなら触らない
+type pane_gate_in_use >/dev/null 2>&1 || pane_gate_in_use() { return 1; }
+type proc_lock_write_meta >/dev/null 2>&1 || proc_lock_write_meta() { return 0; }
 
 # ─── timeout command compatibility wrapper (macOS support) ───
 if ! command -v timeout &>/dev/null; then
@@ -163,6 +185,38 @@ acquire_inbox_lock() {
 
 release_inbox_lock() {
     rmdir "${LOCKFILE}.d" 2>/dev/null || true
+}
+
+# ── cmd_1339 (g)(h)(i): 配達直前の宛先 pane 再解決 + 実体検証 ──
+# nudge の誤配は軽症 (起こされた agent は自分の inbox を読むだけ) だが、
+# ★clear_command / 指示文の誤配は他人の session を吹き飛ばす★ (2026-07-25
+# 18:19/18:20 軍師一号×足軽六号 交差配達事故)。この非対称ゆえ、送信前に必ず
+# @agent_id 正本で宛先を確定する:
+#   1. @agent_id で自 agent の実 pane を再解決 → 変わっていれば追随 (自己是正 (i))。
+#      pane 再作成で index が変わっても、watcher の kill/再起動なしで正しい宛先へ戻る
+#      (2026-07-25 19:25 の再交差は家老の手動 kill で初めて直った=人手を要した)。
+#   2. 解決できぬ場合は現宛先の @agent_id を検証し、本人でなければ★送らず警告★
+#      (誤爆で session を吹き飛ばすより止まる方がまし=将軍明示 (h))。
+# @agent_id 未運用の tmux server (OSS 素の環境) では gate 開放 (後方互換)。
+ensure_delivery_pane() {
+    if ! pane_gate_in_use; then
+        return 0  # @agent_id 未運用環境 — 従来挙動
+    fi
+    local resolved=""
+    if resolved=$(pane_gate_resolve_by_agent_id "$AGENT_ID"); then
+        if [ "$resolved" != "$PANE_TARGET" ]; then
+            echo "[$(date)] [REWIRE] $AGENT_ID: delivery pane $PANE_TARGET → $resolved (@agent_id 正本へ自己是正)" >&2
+            PANE_TARGET="$resolved"
+            proc_lock_write_meta "inbox_watcher_${AGENT_ID}" \
+                "pid=$$ rewired=$(date '+%Y-%m-%dT%H:%M:%S') agent=${AGENT_ID} pane=${PANE_TARGET} cli=${CLI_TYPE}" 2>/dev/null || true
+        fi
+        return 0
+    fi
+    if pane_gate_verify "$AGENT_ID" "$PANE_TARGET"; then
+        return 0
+    fi
+    echo "[$(date)] [BLOCK-DELIVERY] $AGENT_ID: 宛先 pane 解決不能 — @agent_id=$AGENT_ID の pane が見つからず、現宛先 $PANE_TARGET の実体は '$(pane_gate_agent_id_of "$PANE_TARGET" 2>/dev/null || echo "<unset>")'。誤爆防止のため送信せず (次 cycle で再試行・supervisor drift 検知層が家老へ警告する)" >&2
+    return 1
 }
 
 # ─── Context reset tracking ───
@@ -513,6 +567,15 @@ PY
 # 実行時にtmux paneの @agent_cli を再確認し、ドリフト時はpane値を優先する。
 send_cli_command() {
     local cmd="$1"
+
+    # cmd_1339 (h): CLI command (/clear・/model) は破壊的 — ★配達直前★に宛先実体を
+    # @agent_id で再確定する。不一致・解決不能なら送らない (誤爆で他人の session を
+    # 吹き飛ばすより止まる方がまし)。
+    if ! ensure_delivery_pane; then
+        echo "[$(date)] [SKIP] $AGENT_ID: destination pane unresolved — CLI command not sent ($cmd)" >&2
+        return 1
+    fi
+
     local effective_cli
     effective_cli=$(get_effective_cli_type)
 
@@ -726,6 +789,12 @@ send_startup_prompt() {
 # CLI mapping: claude→/clear, codex→/new, opencode→/new, copilot→/clear, kimi→/clear, antigravity→/clear
 
 send_context_reset() {
+    # cmd_1339 (h): context reset (/clear 系) は破壊的 — 配達直前に宛先実体を再確定。
+    if ! ensure_delivery_pane; then
+        echo "[$(date)] [SKIP] $AGENT_ID: destination pane unresolved — context reset not sent" >&2
+        return 1
+    fi
+
     local effective_cli
     effective_cli=$(get_effective_cli_type)
 
@@ -1057,6 +1126,13 @@ send_wakeup_with_escape() {
 process_unread() {
     local trigger="${1:-event}"
 
+    # cmd_1339 (g)(h)(i): cycle 冒頭で宛先 pane を @agent_id 正本へ再解決。
+    # pane 再作成で index が変わっても自己是正し、解決不能なら本 cycle の送信を
+    # 全て見送る (messages は未読のまま残り次 cycle で再試行)。
+    if ! ensure_delivery_pane; then
+        return 0
+    fi
+
     # summary-first: unread_count fast-path (Phase 2/3 optimization)
     # unread_count fast-path lets us skip expensive full reads when idle.
     local fast_info
@@ -1180,11 +1256,19 @@ for s in data.get('specials', []):
                 # Stall alert: notify karo once per stall event so it can re-dispatch.
                 # Watcher-driven (F004: karo polling forbidden). Throttled to 1 per event.
                 if [ "${STALL_NOTIFIED:-0}" -eq 0 ] && [[ "$AGENT_ID" == ashigaru* ]]; then
-                    STALL_NOTIFIED=1
-                    bash "${SCRIPT_DIR}/scripts/inbox_write.sh" karo \
+                    # cmd_1339 (足軽二号 cmd_1338 からの申し送り): inbox_write の失敗を
+                    # 『2>/dev/null || true』で握り潰さない。失敗時は latch (STALL_NOTIFIED)
+                    # を立てず次 cycle で再送し、FATAL を watcher log に残す (配達失敗が
+                    # 無言のまま=『気付けない』構造の一角)。inbox_write.sh は cmd_1338 で
+                    # retry 全敗時に exit 1 + FATAL 行を出す契約になっている。
+                    if bash "${SCRIPT_DIR}/scripts/inbox_write.sh" karo \
                         "${AGENT_ID} dispatch stall: ${normal_count}件未読 ${stall_age}s 未処理。idle flag強制作成済。再dispatch/確認要。" \
-                        stall_alert inbox_watcher 2>/dev/null || true
-                    echo "[$(date)] stall_alert sent to karo for $AGENT_ID (${stall_age}s, ${normal_count} unread)" >&2
+                        stall_alert inbox_watcher >&2; then
+                        STALL_NOTIFIED=1
+                        echo "[$(date)] stall_alert sent to karo for $AGENT_ID (${stall_age}s, ${normal_count} unread)" >&2
+                    else
+                        echo "[$(date)] FATAL: stall_alert inbox_write FAILED for $AGENT_ID — will retry next cycle (karo は本 stall にまだ気付いておらぬ)" >&2
+                    fi
                 fi
                 # Fall through to normal nudge/escalation below
             else
@@ -1355,7 +1439,10 @@ while true; do
         fi
     else
         # Linux: inotifywait (original behavior)
-        inotifywait -q -t "$INOTIFY_TIMEOUT" -e modify -e close_write "$INBOX" 2>/dev/null
+        # 209>&- : lifetime lock fd を長寿命の子へ相続させない (cmd_1339)。
+        # 相続すると watcher kill 後も inotifywait が lock を最大30s保持し、
+        # supervisor の再起動 (lock probe) が遅れる実測があった。
+        inotifywait -q -t "$INOTIFY_TIMEOUT" -e modify -e close_write "$INBOX" 2>/dev/null 209>&-
         rc=$?
     fi
     set -e

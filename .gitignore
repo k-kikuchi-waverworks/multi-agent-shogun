@@ -134,10 +134,16 @@ scripts/seo_qc.sh
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)
 !scripts/idle_revive_scan.py
+# cmd_1339 (2026-07-25): cron wrapper も追跡 (watcher_supervisor 生存監視④を担う。
+# 従来 whitelist 漏れで未追跡だった)
+!scripts/idle_revive_scan.sh
 
 # cmd_652 (2026-05-16): scripts/lib/ helper (settings.yaml 動的読込)
 !scripts/lib/
 !scripts/lib/agent_list.sh
+# cmd_1339 (2026-07-25): lifetime lock 契約 + pane 解決正本 lib
+!scripts/lib/proc_lock.sh
+!scripts/lib/pane_gate.sh
 
 
 # SayTask (sample template only, not actual data)

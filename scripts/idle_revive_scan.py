@@ -144,6 +144,94 @@ def get_pane_states(repo_root: Path):
 
 
 # ─────────────────────────────────────────────────────────────
+# cmd_1339 (e)(f): /clear は破壊的操作 — 単発 pane 再probe + 文脈材料
+# ─────────────────────────────────────────────────────────────
+# ★非対称の明示★: nudge の誤配・誤発火は軽症 (起こされた agent は自分の inbox を
+# 読むだけ) だが、/clear の誤発火は稼働中の session context を殺す。2026-07-25
+# 19:21 に thinking 中の足軽四号へ誤 /clear が 3 連発した (52列 pane で status bar
+# の『esc to interrupt』が切詰められ、queued 行が spinner 判定を汚した=
+# lib/agent_status.sh 側で根治済)。本層はそれに加え、scan 時点と発行時点の
+# TOCTOU を閉じる: ★発行直前にその agent の pane を再 probe し、busy へ転じて
+# いれば発行しない★。閾値 (stall_min 等) は触らない=機構の修理であって
+# 感度の推測調整ではない。
+
+_SINGLE_AGENT_STATE_BASH = r'''
+set -uo pipefail
+cd "$1"
+agent="$2"
+source lib/agent_registry.sh
+source lib/agent_status.sh
+PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
+pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
+if [ -z "$pane" ]; then echo "absent"; exit 0; fi
+agent_is_busy_check "$pane" "" && rc=0 || rc=$?
+case $rc in 0) echo busy ;; 1) echo idle ;; *) echo absent ;; esac
+'''
+
+
+def probe_agent_state(agent):
+    """単一 agent の pane 状態を今この瞬間に再 probe する ('busy'|'idle'|'absent'|'unknown')。
+
+    pane 解決は agent_registry (cmd_1339 で @agent_id 第一正本化済) 経由 —
+    pane 番号のずれで別 agent の pane を読む誤 probe を構造的に避ける。
+    """
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", _SINGLE_AGENT_STATE_BASH, "_", str(REPO_ROOT), agent],
+            capture_output=True, text=True, timeout=30,
+        )
+        lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+        v = lines[-1] if lines else ""
+        return v if v in ("busy", "idle", "absent") else "unknown"
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+_PANE_TAIL_BASH = r'''
+set -uo pipefail
+cd "$1"
+agent="$2"
+source lib/agent_registry.sh
+PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
+pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
+[ -n "$pane" ] || exit 0
+tmux capture-pane -t "$pane" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -2
+'''
+
+
+def agent_context_note(agent, reports_dir):
+    """(f) 家老が『誤検知か本当の固着か』を判断できる材料を 1 行で返す。
+
+    内容 = 対象 pane の末尾 2 行 (空白圧縮・160 字上限) + report YAML の最終更新
+    経過分。警報だけ渡されても家老は pane を実査するまで判断できぬ、という
+    2026-07-25 の実戦不便 (足軽四号誤 clear の検分) への直接回答。
+    """
+    tail = ""
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", _PANE_TAIL_BASH, "_", str(REPO_ROOT), agent],
+            capture_output=True, text=True, timeout=30,
+        )
+        lines = [" ".join(l.split()) for l in proc.stdout.splitlines() if l.strip()]
+        tail = " / ".join(lines)
+        if len(tail) > 160:
+            tail = tail[-160:]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if not tail:
+        tail = "取得不能"
+    age = "不明"
+    try:
+        rp = reports_dir / f"{agent}_report.yaml"
+        if rp.is_file():
+            age_min = (datetime.datetime.now().timestamp() - rp.stat().st_mtime) / 60.0
+            age = f"{round(age_min, 1)}分前"
+    except OSError:
+        pass
+    return f"直前pane末尾『{tail}』/ report最終更新={age}"
+
+
+# ─────────────────────────────────────────────────────────────
 # YAML helpers (stall_watchdog_scan.py と同型)
 # ─────────────────────────────────────────────────────────────
 def parse_task(path: Path):
@@ -587,29 +675,36 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
 # ─────────────────────────────────────────────────────────────
 # revive 発行
 # ─────────────────────────────────────────────────────────────
-def format_clear_body(hit):
+def format_clear_body(hit, context=""):
+    ctx = f"{context} " if context else ""
     return (f"idle固着検知({hit['idle_min']}分 出力停止・spinner無・task {hit['task_id']} 未完)。"
+            f"{ctx}"
             f"/clear で session reset → task YAML 再読で自走再開せよ。"
             f"(idle_revive_scan cmd_1154)")
 
 
-def format_escalation_alert(hit):
+def format_escalation_alert(hit, context=""):
+    ctx = f" 判断材料: {context}" if context else ""
     return (f"🚨 clear-loop 断ち切り: {hit['agent']} を連続 {hit['consecutive']}回 "
             f"clear しても復帰せず (task {hit['task_id']}, {hit['parent_cmd']})。"
-            f"自動 revive を停止した。手動確認要。(idle_revive_scan cmd_1154)")
+            f"自動 revive を停止した。手動確認要。{ctx}"
+            f"(idle_revive_scan cmd_1154)")
 
 
-def format_karo_clear_body(hit):
+def format_karo_clear_body(hit, context=""):
+    ctx = f"{context} " if context else ""
     return (f"家老degrade検知(dashboard {hit['idle_min']}分 stale + active task 存在)。"
+            f"{ctx}"
             f"/clear で session reset → SessionStart hook で persona/戦国口調/state 復旧 → "
             f"CLAUDE.md Session Start で queue YAML から dashboard 再構築せよ"
             f"(state は YAML 永続ゆえ非破壊)。(idle_revive_scan cmd_1154)")
 
 
-def format_karo_escalation_alert(hit):
+def format_karo_escalation_alert(hit, context=""):
+    ctx = f" 判断材料: {context}" if context else ""
     return (f"🚨 家老 clear-loop 断ち切り: karo を連続 {hit['consecutive']}回 clear しても "
             f"dashboard staleness({hit['idle_min']}分)解消せず。自動 revive を停止した。"
-            f"家老 session を手動確認要。(idle_revive_scan cmd_1154)")
+            f"家老 session を手動確認要。{ctx}(idle_revive_scan cmd_1154)")
 
 
 def send_inbox(target, body, msg_type, from_agent):
@@ -708,7 +803,24 @@ def main(argv=None):
     for r in results:
         is_karo = (r["agent"] == KARO_STATE_KEY)
         if r["action"] == "revive":
-            body = format_karo_clear_body(r) if is_karo else format_clear_body(r)
+            # cmd_1339 (e): /clear は★破壊的操作★ — 発行直前に対象 pane を再 probe し、
+            # busy/absent/unknown へ転じていれば発行しない (scan→発行の TOCTOU 封鎖)。
+            # 判定不能 (unknown) も発行しない = 破壊的操作は疑わしきは止める側に倒す。
+            state_now = probe_agent_state(r["agent"])
+            if state_now != "idle":
+                print(f"[idle_revive] SKIP(発行直前gate): {r['agent']} は再probeで "
+                      f"{state_now} — 破壊的 /clear を発行せず (cmd_1339 (e))",
+                      file=sys.stderr)
+                # state を進めない (rate limit / consecutive を消費させない)
+                if r["agent"] in clear_log:
+                    new_clear_log[r["agent"]] = clear_log[r["agent"]]
+                else:
+                    new_clear_log.pop(r["agent"], None)
+                continue
+            # cmd_1339 (f): 家老が後から誤検知/真stall を検分できる文脈を本文へ添付
+            context = agent_context_note(r["agent"], reports_dir)
+            body = (format_karo_clear_body(r, context) if is_karo
+                    else format_clear_body(r, context))
             proc = send_inbox(r["agent"], body, "clear_command", "idle_revive_scan")
             if proc.returncode != 0:
                 print(f"[idle_revive] ERROR: clear_command 発行失敗 {r['agent']}: "
@@ -728,10 +840,12 @@ def main(argv=None):
         elif r["action"] == "escalation_stop":
             # karo degrade の escalation は shogun へ(karo 自身が復帰不能ゆえ)。
             # 足軽/軍師の escalation は従来どおり karo へ。
+            # cmd_1339 (f): 警報に対象 agent の直前文脈 (pane末尾/report mtime) を添付
+            context = agent_context_note(r["agent"], reports_dir)
             if is_karo:
-                target, body = "shogun", format_karo_escalation_alert(r)
+                target, body = "shogun", format_karo_escalation_alert(r, context)
             else:
-                target, body = "karo", format_escalation_alert(r)
+                target, body = "karo", format_escalation_alert(r, context)
             proc = send_inbox(target, body,
                               "idle_revive_escalation_alert", "idle_revive_scan")
             if proc.returncode != 0:

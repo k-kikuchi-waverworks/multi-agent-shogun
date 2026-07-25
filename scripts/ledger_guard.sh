@@ -271,8 +271,9 @@ main_loop() {
     while true; do
         # 台帳ディレクトリ単位で監視(Edit の atomic rename=tmp→rename も moved_to で拾う)。
         # 30s timeout で inotify 不発(WSL2)の安全網。
+        # 207>&- : lifetime lock fd を子へ相続させない (cmd_1339)
         inotifywait -q -t 30 -e close_write,moved_to,create \
-            "$(dirname "$LEDGER_FILE")" >/dev/null 2>&1 || true
+            "$(dirname "$LEDGER_FILE")" >/dev/null 2>&1 207>&- || true
 
         # 対象ファイルが直近で変わっていなければ何もしない(dir内の別file変更を無視)
         [ -f "$LEDGER_FILE" ] || continue
@@ -287,5 +288,13 @@ main_loop() {
 # ─── Entry point(testing guard) ───
 if [ "${__LEDGER_GUARD_TESTING__:-}" != "1" ]; then
     set -uo pipefail
+    # cmd_1339: lifetime lock 契約 — 二重起動側は自主退場 (pgrep 可視性に非依存)。
+    # 2026-07-25 に supervisor 再起動で ledger_guard も二重起動した実害の再発防止。
+    # shellcheck source=lib/proc_lock.sh
+    . "$SCRIPT_DIR/scripts/lib/proc_lock.sh"
+    if ! proc_lock_acquire "ledger_guard" 207 "ledger_guard ledger=$LEDGER_FILE"; then
+        ledger_log "DUPLICATE: ledger_guard 既に稼働中 ($(proc_lock_read_meta ledger_guard)) — 本 instance は退場"
+        exit 0
+    fi
     main_loop
 fi

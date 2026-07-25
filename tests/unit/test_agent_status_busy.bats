@@ -196,3 +196,63 @@ _run_busy_check() {
     '
     [ "$status" -eq 1 ]
 }
+
+# ═══════════════════════════════════════════════════════════════
+# cmd_1339 (d): queued-messages 誤 idle 判定 (2026-07-25 19:21 足軽四号 実戦incident)
+# 52列 pane では status bar の 'esc to interrupt' が切詰められ、queue に積まれた
+# メッセージ行 (❯ /clear 等) が入力 box 直上に描画されるため、live spinner check は
+# 『box 直上の最初の非空行が spinner でない』→ idle と誤判定した。thinking 中の
+# 足軽へ誤 /clear が 3 連発し、誤 /clear 自身が queue に積まれて誤判定を強化する
+# 自己増幅 loop となった。fix = 『❯ Press up to edit queued messages』は queue が
+# 積まれている=処理中にのみ描画される契約級 busy 証拠として先に判定する。
+# ═══════════════════════════════════════════════════════════════
+
+@test "T-QUEUE-001: ash4 19:21型 frame (truncated bar + queued rows) → busy" {
+    printf '%s\n' \
+        '✻ 実測を取得中… (8m 12s · thinking)' \
+        '' \
+        '  ❯ /clear' \
+        '  ❯ inbox3' \
+        '────────────────────────────────────────────────────' \
+        '❯ Press up to edit queued messages' \
+        '────────────────────────────────────────────────────' \
+        '  ⏵⏵ bypass permissions on (shift+tab to cycle) · …' > "$MOCK_CAPTURE_FILE"
+    _run_busy_check
+    [ "$status" -eq 0 ]
+}
+
+@test "T-QUEUE-002: 同 frame は live_spinner_check 単体では idle=旧経路の死角の証明" {
+    # 検知層の死角を固定化する証明: queued 行が box 直上を占めるため、旧来の
+    # spinner-walk はこの frame を必ず idle と読む (queued check を潰すと見逃す)。
+    run bash -c '
+        source "'"$LIB"'"
+        capture="$(printf "%s\n" \
+            "✻ 実測を取得中… (8m 12s · thinking)" \
+            "" \
+            "  ❯ /clear" \
+            "  ❯ inbox3" \
+            "────────────────" \
+            "❯ Press up to edit queued messages" \
+            "────────────────" \
+            "  ⏵⏵ bypass permissions on · …")"
+        claude_code_live_spinner_check "$capture"
+    '
+    [ "$status" -eq 1 ]
+}
+
+@test "T-QUEUE-003: queued 文言が bottom5 の外 (transcript 内) にある idle pane → idle" {
+    printf '%s\n' \
+        '● 昨日の queued messages の件は済んだ。' \
+        '  Press up to edit queued messages と表示される仕様である。' \
+        '' \
+        '' \
+        '' \
+        '● 済んだ。' \
+        '' \
+        '────────────────────────────────────────────────────' \
+        '❯ ' \
+        '────────────────────────────────────────────────────' \
+        '  ⏵⏵ bypass permissions on (shift+tab to cycle)' > "$MOCK_CAPTURE_FILE"
+    _run_busy_check
+    [ "$status" -eq 1 ]
+}

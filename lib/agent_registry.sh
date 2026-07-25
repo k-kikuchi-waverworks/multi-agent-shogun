@@ -99,6 +99,20 @@ agent_registry_multiagent_agents() {
 agent_registry_multiagent_pane_for_agent() {
     local wanted="$1"
     local pane_base="${2:-0}"
+
+    # cmd_1339 (g): ★@agent_id を第一正本に格上げ★。settings 順序による index 導出は
+    # 実 pane 配置がずれた瞬間に沈黙して壊れる (2026-07-25 交差配達事故 / idle_revive の
+    # busy probe が別 pane を読み thinking 中の agent へ誤 /clear した事故の共通根)。
+    # index 規約は @agent_id 不在環境 (旧構成) の fallback に格下げ。
+    # scripts/lib/pane_gate.sh pane_gate_resolve_by_agent_id と同一 idiom。
+    local found=""
+    found=$(tmux list-panes -a -F "#{session_name}:#{window_name}.#{pane_index} #{@agent_id}" 2>/dev/null \
+        | awk -v a="$wanted" '$2 == a { print $1; exit }') || true
+    if [ -n "$found" ]; then
+        printf '%s\n' "$found"
+        return 0
+    fi
+
     local idx=0
     local agent
 

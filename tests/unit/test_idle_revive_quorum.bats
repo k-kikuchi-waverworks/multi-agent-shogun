@@ -73,14 +73,22 @@ _write_pane_states() {
 # つきで非 dry-run 実行する。fixture agent の pane は実在しないため、probe を
 # 固定しないと発行直前 gate (cmd_1339 (e)) が absent 判定で clear を握ってしまい、
 # quorum の有無による差が観測できない。
+# cmd_1355 追加注入口:
+#   STRIP_PATTERNS=1     → 追加 pattern (session limit / /usage-credits) を外して実行
+#                          (「pattern を外すと検知が落ちる」の scan 級 両側実測用)
+#   FAKE_PROBE_STATE     → probe_agent_state の固定値 (default idle)
 _run_main_py() {
     "$VENV_PY" - "$@" <<'PY'
 import importlib.util, os, sys
 spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
 irs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(irs)
-irs.probe_agent_state = lambda agent: "idle"
+irs.probe_agent_state = lambda agent: os.environ.get("FAKE_PROBE_STATE", "idle")
 irs.pane_upstream_text = lambda agent: os.environ.get("FAKE_PANE_TEXT", "")
+if os.environ.get("STRIP_PATTERNS") == "1":
+    irs.UPSTREAM_FAILURE_PATTERNS = tuple(
+        p for p in irs.UPSTREAM_FAILURE_PATTERNS
+        if p not in ("session limit", "/usage-credits"))
 argv = ["--queue-root", os.environ["Q"],
         "--pane-state-file", os.environ["TEST_TMPDIR"] + "/pane_state.yaml",
         "--stall-min", "15"] + sys.argv[1:]
@@ -288,6 +296,144 @@ PY
 # ---------------------------------------------------------------------------
 # detect_upstream_failure 単体: 具申4種 (usage limit/credit/auth/rate limit) を全て検知
 # ---------------------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════
+# cmd_1355: 実 pane 文言 (2026-07-26 全軍3h停止) の検知・台帳・再開通知
+# fixture = tests/fixtures/upstream_session_limit_pane.txt (capture-pane 採取・byte 凍結)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_load_real_pane_text() {
+    export FAKE_PANE_TEXT="$(cat "$PROJECT_ROOT/tests/fixtures/upstream_session_limit_pane.txt")"
+}
+
+# ---------------------------------------------------------------------------
+# T-QRM-010: 実文言で /clear 抑止 + 台帳記録 + 家老へ検知警報ちょうど1通 (episode once)
+# ---------------------------------------------------------------------------
+@test "T-QRM-010 (cmd_1355): real session-limit banner suppresses clear, records ledger, alerts karo exactly once" {
+    for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do _write_task "$a"; done
+    # 1体のみ stall = quorum 不成立 → 個別経路の挙動を観測 (今夜の実態: 対象が少数でも起きる)
+    _write_pane_states ashigaru91:idle ashigaru92:busy ashigaru93:busy ashigaru94:busy
+    _load_real_pane_text
+
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    # /clear は 1本も出ない (実文言 "session limit" が gate に掛かる)
+    [ "$(_count_record 'clear_command')" -eq 0 ]
+    echo "$output" | grep -q "上流障害gate"
+    # 台帳へ記録された (agent + pattern + 検知文言 + resets ETA)
+    [ -f "$Q/state/upstream_outage.yaml" ]
+    grep -q "ashigaru91" "$Q/state/upstream_outage.yaml"
+    grep -q "session limit" "$Q/state/upstream_outage.yaml"
+    grep -q "resets_eta: '2" "$Q/state/upstream_outage.yaml"   # parse 成功 (非 null)
+    grep -q "subtask_qrm_ashigaru91" "$Q/state/upstream_outage.yaml"  # task_id 記録
+    # 家老へ検知警報ちょうど1通
+    [ "$(_count_record '上流障害(枠切れ/account系)検知')" -eq 1 ]
+    # 2回目 scan でも再警報しない (episode 1通 + throttle)
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record '上流障害(枠切れ/account系)検知')" -eq 1 ]
+    [ "$(_count_record 'clear_command')" -eq 0 ]
+    # 再開通知はまだ出ない (resets ETA は検知時点から見て未来ゆえ)
+    [ "$(_count_record '再開せよ')" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# T-QRM-011: ★家老 clear にも同じ guard★ (2026-07-26 01:57 家老被弾の再発防止・両側)
+# ---------------------------------------------------------------------------
+@test "T-QRM-011 (cmd_1355): karo degrade clear is suppressed by upstream banner; benign text re-enables (both sides)" {
+    _write_task ashigaru91
+    _write_pane_states ashigaru91:busy
+    echo "# dashboard" > "$TEST_TMPDIR/dashboard.md"
+    touch -d '60 minutes ago' "$TEST_TMPDIR/dashboard.md"
+
+    # Side A: 家老 pane に実 banner → karo /clear は出ない + 台帳に karo が載る
+    _load_real_pane_text
+    run _run_main_py --dashboard-path "$TEST_TMPDIR/dashboard.md"
+    [ "$status" -eq 0 ]
+    [ "$(_count_record '^karo|clear_command|')" -eq 0 ]
+    echo "$output" | grep -q "SKIP(上流障害gate): karo"
+    grep -q "karo" "$Q/state/upstream_outage.yaml"
+
+    # Side B: banner が無ければ従来どおり karo clear が出る (guard が文言を見ている証明)
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/upstream_outage.yaml" "$Q/state/upstream_alert_throttle" "$Q/state/clear_log.yaml"
+    FAKE_PANE_TEXT="normal tool output, nothing suspicious here" \
+        run _run_main_py --dashboard-path "$TEST_TMPDIR/dashboard.md"
+    [ "$status" -eq 0 ]
+    [ "$(_count_record '^karo|clear_command|')" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# T-QRM-012: ★枠が戻った時に誰が起こすのか★ — resets ETA 経過で家老へ再開通知1通のみ。
+#            banner が pane に残存したままでも鳴る (banner は枠回復後も消えぬと実測済)。
+#            全員実働へ戻れば通知なしで episode close。
+# ---------------------------------------------------------------------------
+@test "T-QRM-012 (cmd_1355): resume notice fires once after resets ETA even with banner still on pane; closes silently when all recover" {
+    _write_task ashigaru91
+    _write_pane_states ashigaru91:idle
+    _load_real_pane_text
+
+    _seed_ledger() {
+        mkdir -p "$Q/state"
+        cat > "$Q/state/upstream_outage.yaml" <<EOF
+episode:
+  first_detected: '$(date -d '2 hours ago' +%Y-%m-%dT%H:%M:%S)'
+  resets_hint: "You've hit your session limit · resets 4:30am"
+  resets_eta: '$(date -d '10 minutes ago' +%Y-%m-%dT%H:%M:%S)'
+  detect_notified_ts: '$(date -d '2 hours ago' +%Y-%m-%dT%H:%M:%S)'
+  resume_notified_ts: null
+  agents:
+    ashigaru91:
+      detected_ts: '$(date -d '2 hours ago' +%Y-%m-%dT%H:%M:%S)'
+      pattern: session limit
+      task_id: subtask_qrm_ashigaru91
+      excerpt: "You've hit your session limit · resets 4:30am"
+EOF
+    }
+    _seed_ledger
+
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    # 再開通知がちょうど1通 (R1: ETA+grace 経過。banner 残存でも鳴る)
+    [ "$(_count_record '再開せよ')" -eq 1 ]
+    grep -q "resume_notified_ts: '2" "$Q/state/upstream_outage.yaml"
+    grep -q "R1" "$INBOX_STUB_RECORD"
+    # 2回目 scan で重複しない (1 episode 1通)
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record '再開せよ')" -eq 1 ]
+
+    # 全員実働へ戻った場合: 通知なしで episode close (起こす相手が居らぬ)
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/upstream_outage.yaml" "$Q/state/upstream_alert_throttle"
+    _seed_ledger
+    _write_pane_states ashigaru91:busy
+    FAKE_PROBE_STATE=busy run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record '再開せよ')" -eq 0 ]
+    [ ! -f "$Q/state/upstream_outage.yaml" ]
+    echo "$output" | grep -q "episode close"
+}
+
+# ---------------------------------------------------------------------------
+# T-QRM-013: 変異の scan 級 両側実測 — 追加 pattern を外すと今夜の誤 clear が再現する
+#            (= pattern が「偶然でなく契約として」誤 clear を止めている証明)
+# ---------------------------------------------------------------------------
+@test "T-QRM-013 (cmd_1355): stripping the added patterns reproduces tonight's wrong clear (mutation both sides at scan level)" {
+    for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do _write_task "$a"; done
+    _write_pane_states ashigaru91:idle ashigaru92:busy ashigaru93:busy ashigaru94:busy
+    _load_real_pane_text
+
+    # pattern 有り → 抑止 (T-QRM-010 と同じ側)
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record 'clear_command')" -eq 0 ]
+
+    # pattern を外す → 実 banner が素通りし /clear が撃たれる = 2026-07-26 未明の再現
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/upstream_outage.yaml" "$Q/state/upstream_alert_throttle" "$Q/state/clear_log.yaml"
+    STRIP_PATTERNS=1 run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record 'clear_command')" -eq 1 ]
+    grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
+}
+
 @test "T-QRM-008: detect_upstream_failure catches all four advised pattern families, not plain text" {
     run "$VENV_PY" - <<'PY'
 import importlib.util, os

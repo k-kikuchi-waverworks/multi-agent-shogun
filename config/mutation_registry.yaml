@@ -125,6 +125,37 @@ mutations:
     expect: nonzero
     red_needle: "NG T10"  # 実測 2026-07-26: keyword 折りで T10 (未登録の名指し) が exit 2 へ落ちる
 
+  - id: MUT-1355-001
+    origin: cmd_1355
+    desc: |
+      idle_revive の上流障害 pattern から "session limit" (2026-07-26 未明に実 pane から
+      capture-pane 採取した実文言。tests/fixtures/upstream_session_limit_pane.txt に byte 凍結)
+      を外すと、selftest U1b (banner 行単独の検知) が赤くなるべき。外しても緑なら
+      枠切れ沈黙が再び idle 固着と誤判定され、治らぬ傷に /clear を撃つ夜 (全軍3h停止・
+      軍師二人へ各3連射) が再来する。U1c が対の pattern "/usage-credits" を同様に守る。
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
+    mutate: |
+      sed -i '/"session limit",/d' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U1b"  # 実測 2026-07-26: pattern 削除で U1b が banner 行を名指しで落とす
+
+  - id: MUT-1355-002
+    origin: cmd_1355
+    desc: |
+      枠復帰の再開通知 (D) の R2 fallback (resets 時刻を読めなんだ時、初回検知から
+      FALLBACK_RESUME_MIN 分で家老へ点検通知) を 999999 分へ折ると、selftest U4d が
+      赤くなるべき。折っても緑なら「resets を parse できぬ episode は誰も起こさぬ」=
+      2026-07-26 の『枠が 4:30 に戻った後、誰も起こさなかった』の再来経路が開く。
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
+    mutate: |
+      sed -i 's/^FALLBACK_RESUME_MIN = .*/FALLBACK_RESUME_MIN = 999999/' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U4d"  # 実測 2026-07-26: fallback 折りで U4d (R2 契約) が名指しで落ちる
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

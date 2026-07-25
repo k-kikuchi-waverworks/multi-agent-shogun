@@ -1,0 +1,11 @@
+  Ran 1 shell command
+  ⎿  You've hit your session limit · resets 4:30am
+     (Asia/Tokyo)
+     /usage-credits to finish what you’re working
+     on.
+✻ Worked for 3m 46s
+             new task? /clear to save 145.1k tokens
+────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · …

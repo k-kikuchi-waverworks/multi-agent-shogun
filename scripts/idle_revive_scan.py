@@ -53,12 +53,19 @@
 #   auth / rate limit) を検知したら個別にも抑止 — 上流障害中の /clear は context を
 #   失うだけで何も直さないため。
 #
+# ★上流障害 台帳 + 枠復帰の再開通知★ (cmd_1355・2026-07-26 全軍3h停止の再発防止):
+#   上流障害 (session limit 等) で /clear を抑止した agent は queue/state/upstream_outage.yaml
+#   へ記録され、episode 初回に家老へ検知警報1通、解除条件 (resets ETA 経過等) 成立で
+#   家老へ「再開せよ」1通が上がる。詳細 = UPSTREAM_OUTAGE_STATE_FILE 周辺 comment と
+#   docs/content/ops/cmd_1355_upstream_outage_guard.md。
+#
 # Usage:
 #   python3 scripts/idle_revive_scan.py [--dry-run] [--stall-min N] [--min-interval-min N]
 #     [--max-consecutive N] [--karo-stale-min N] [--karo-min-interval-min N]
 #     [--no-karo-check] [--dashboard-path PATH] [--pane-state-file PATH]
 #     [--quorum-min-stalled N] [--quorum-ratio F] [--no-quorum-gate]
-#     [--blackout-throttle-min N] [--json] [--queue-root PATH]
+#     [--blackout-throttle-min N] [--upstream-alert-throttle-min N]
+#     [--selftest-upstream] [--json] [--queue-root PATH]
 #
 # On hit (非 dry-run): `inbox_write.sh {agent} "<本文>" clear_command idle_revive_scan` を発行。
 # --dry-run: 判定結果を stdout に出すのみ(実 clear 発行 0)。smoke / 動作検証用。
@@ -69,6 +76,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -123,6 +131,16 @@ UPSTREAM_FAILURE_PATTERNS = (
     "oauth token has expired",
     "please run /login",
     "overloaded",               # overloaded_error (上流容量・clear で直らない)
+    # ── cmd_1355: 2026-07-26 未明の実 pane 文言 (推測でなく capture-pane 採取) ──
+    # 実バイト列 (ashigaru6 pane %3 scrollback・tests/fixtures/upstream_session_limit_pane.txt に凍結):
+    #   「  ⎿  You've hit your session limit · resets 4:30am」(· = C2 B7)
+    #   「     /usage-credits to finish what you’re working」(’ = E2 80 99)
+    # この文言が pattern に無かったため枠切れ沈黙が idle 固着と誤判定され、軍師一号/二号へ
+    # 各3回・家老へ3回の誤 /clear が撃たれた (誤 clear が pane の証拠文言ごと消した)。
+    # ★pattern は折返し (pane幅52) を跨がぬ短句のみ★ — "resets 4:30am (asia/tokyo)" の様な
+    # 長句は物理行を跨いで割れるため足さない。
+    "session limit",            # You've hit your session limit · resets 4:30am (Asia/Tokyo)
+    "/usage-credits",           # /usage-credits to finish what you’re working on. (CLI 誘導行)
 )
 
 
@@ -320,6 +338,369 @@ def detect_upstream_failure(text):
         if pat in low:
             return pat
     return None
+
+
+# ─────────────────────────────────────────────────────────────
+# cmd_1355: 上流障害の台帳 + ★枠が戻った時に誰が起こすのか★
+# ─────────────────────────────────────────────────────────────
+# 2026-07-26 未明の実害の後半 = 「枠が 4:30 に戻った後、誰も起こさなかった」(全軍 3h 停止の
+# 大半)。上流障害で沈黙した agent は枠が回復しても自分では再開しない — pane の限界文言も
+# 消えずに残り続ける (実測: 04:4x 時点でも ashigaru6 pane に 4:30am の banner が残存)。
+# ゆえに:
+#   (1) 上流障害で /clear を抑止した agent を queue/state/upstream_outage.yaml へ記録
+#       (誤 clear が pane の証拠文言を消す実害があったゆえ、pane でなく台帳を正とする =
+#        原理(ii)「操作でなく状態の変化を証拠に」の台帳版)
+#   (2) episode 初回検知時に家老へ warning 1通 (throttle 付き。10通 spam 型の再発禁)
+#   (3) 解除条件成立で家老へ「再開せよ」を 1 episode に 1通だけ上げる。配達層
+#       (inbox_write → watcher nudge/escalation) が再送を担うゆえ 1通で足る —
+#       家老自身が枠切れ中でも、枠回復後の nudge でこの 1通が家老を起こす。
+#
+# ★解除条件 (優先順)★:
+#   R1: resets ETA (pane 文言から parse) + grace を経過   ← 主判定 (実効)
+#   R2: ETA を読めなんだ場合、初回検知から FALLBACK_RESUME_MIN 経過
+#   R3: 台帳の全 agent の pane から上流障害文言が消え、かつ ≥1 体が idle
+#       ← 家老の見立て (task YAML) の主判定候補だったが、★banner は枠回復後も pane に
+#          残り続けると実測された★ため補助へ降格 (自然には成立しない。/clear や再開で
+#          文言が流れた場合のみ効く)
+# ★R1 の脆さ (正直明示)★: "resets 4:30am" は 12h 表記・分省略・(Asia/Tokyo) が折返しで
+# 別行に落ちる・表示TZ=host TZ の仮定・「検知直後に reset 済みの stale banner」誤読
+# (→翌日へ繰上げ=最大24h遅延、expire が下限を保証) を抱える。ゆえに R2 fallback と
+# OUTAGE_EXPIRE_HOURS を必ず併設する。詳細 caveats は
+# docs/content/ops/cmd_1355_upstream_outage_guard.md を正とする。
+UPSTREAM_OUTAGE_STATE_FILE = "upstream_outage.yaml"
+UPSTREAM_ALERT_THROTTLE_FILE = "upstream_alert_throttle"  # detect/resume 共用の最終送信時刻
+DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN = 30  # blackout 警報と同じ流儀 (episode once が主・これは保険)
+RESUME_GRACE_MIN = 3          # resets ETA 経過後の余裕 (時計ずれ・上流反映遅延の吸収)
+FALLBACK_RESUME_MIN = 60      # ETA 不明時: 初回検知からこの分数で点検通知 (R2)
+OUTAGE_EXPIRE_HOURS = 24      # 台帳 episode の消費期限 (stale 台帳が永続する事故の下限保証)
+RESETS_RE = re.compile(
+    r"resets\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.IGNORECASE)
+
+
+def parse_resets_eta(text, now):
+    """pane 文言の resets 時刻 (例 'resets 4:30am') を次回到来の naive local datetime へ。
+
+    解釈不能なら None (R2 fallback が引き受ける)。★検知時点で parse する前提★ =
+    「resets 4:30am」は検知時刻から見た次の 4:30 を指す (23時検知→翌 4:30 / 2時検知→当日 4:30)。
+    検知が reset 後にずれ込んだ stale banner は翌日へ繰上がる誤読になる (caveat・expire で下限保証)。
+    """
+    if not text:
+        return None
+    m = RESETS_RE.search(text)
+    if not m:
+        return None
+    hour = int(m.group(1))
+    minute = int(m.group(2) or 0)
+    ampm = (m.group(3) or "").lower()
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    eta = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if eta <= now:
+        eta += datetime.timedelta(days=1)
+    return eta
+
+
+def load_outage(state_dir: Path):
+    p = state_dir / UPSTREAM_OUTAGE_STATE_FILE
+    if not p.is_file():
+        return None
+    try:
+        with p.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except (yaml.YAMLError, OSError) as e:
+        print(f"[idle_revive] WARN: outage 台帳 parse 失敗: {p}: {e}", file=sys.stderr)
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("episode"), dict):
+        return None
+    return data["episode"]
+
+
+def save_outage(state_dir: Path, episode):
+    state_dir.mkdir(parents=True, exist_ok=True)
+    p = state_dir / UPSTREAM_OUTAGE_STATE_FILE
+    if episode is None:
+        try:
+            p.unlink()
+        except FileNotFoundError:
+            pass
+        return
+    doc = {
+        "# managed by": "scripts/idle_revive_scan.py (cmd_1355)",
+        "episode": episode,
+    }
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
+    tmp.replace(p)
+
+
+def _excerpt_line(text, pattern):
+    """pattern を含む最初の物理行を空白圧縮 120 字以内で返す (台帳の証拠引用)。"""
+    for line in (text or "").splitlines():
+        if pattern in line.lower():
+            s = " ".join(line.split())
+            return s[:120]
+    return ""
+
+
+def outage_record(state_dir: Path, agent, pattern, text, task_id=None, now=None):
+    """上流障害で抑止した agent を台帳へ記録する。
+
+    戻り値 = (episode, episode_created, agent_added)。既存 entry は上書きしない
+    (最初の検知時刻・文言を保全 — 誤 clear が pane 証拠を消した実害への備え)。
+    """
+    if now is None:
+        now = datetime.datetime.now()
+    episode = load_outage(state_dir)
+    created = False
+    if episode is None:
+        episode = {
+            "first_detected": now.isoformat(timespec="seconds"),
+            "resets_hint": _excerpt_line(text, pattern),
+            "resets_eta": None,
+            "detect_notified_ts": None,
+            "resume_notified_ts": None,
+            "agents": {},
+        }
+        created = True
+    if not isinstance(episode.get("agents"), dict):
+        episode["agents"] = {}
+    if episode.get("resets_eta") is None:
+        eta = parse_resets_eta(text, now)
+        if eta is not None:
+            episode["resets_eta"] = eta.isoformat(timespec="seconds")
+            if not episode.get("resets_hint"):
+                episode["resets_hint"] = _excerpt_line(text, pattern)
+    added = False
+    if agent not in episode["agents"]:
+        episode["agents"][agent] = {
+            "detected_ts": now.isoformat(timespec="seconds"),
+            "pattern": pattern,
+            "task_id": task_id,
+            "excerpt": _excerpt_line(text, pattern),
+        }
+        added = True
+    save_outage(state_dir, episode)
+    return episode, created, added
+
+
+def outage_release_check(episode, agent_states, now):
+    """解除条件 R1/R2/R3 の判定。(release_bool, reason_str) を返す純関数。
+
+    agent_states = {agent: {"pane_state": .., "upstream_pattern": pat|None}} —
+    台帳に残る (未回復の) agent のみ。呼出元が probe 済みの値を渡す (test 注入可能)。
+    """
+    eta = parse_iso_to_naive_local(episode.get("resets_eta"))
+    if eta is not None:
+        if now >= eta + datetime.timedelta(minutes=RESUME_GRACE_MIN):
+            return True, (f"R1: resets ETA {episode['resets_eta']} + "
+                          f"{RESUME_GRACE_MIN}分 grace を経過")
+    else:
+        first = parse_iso_to_naive_local(episode.get("first_detected"))
+        if first is not None and now >= first + datetime.timedelta(
+                minutes=FALLBACK_RESUME_MIN):
+            return True, (f"R2: resets 時刻を読めなんだゆえ初回検知 "
+                          f"{episode['first_detected']} から {FALLBACK_RESUME_MIN}分で点検通知")
+    if agent_states:
+        banners = [s for s in agent_states.values() if s.get("upstream_pattern")]
+        any_idle = any(s.get("pane_state") == "idle" for s in agent_states.values())
+        if not banners and any_idle:
+            return True, "R3: 全対象 pane から上流障害文言が消え、かつ idle の agent が居る"
+    return False, ""
+
+
+def format_upstream_detect_alert(episode, throttle_min):
+    agents_desc = ", ".join(
+        f"{a}(task={e.get('task_id')})" for a, e in sorted(episode["agents"].items()))
+    eta = episode.get("resets_eta") or "解釈不能(R2 fallbackで点検通知)"
+    return (f"⚠上流障害(枠切れ/account系)検知 (idle_revive cmd_1355): 対象への /clear を抑止した"
+            f" (context保全・上流障害中の clear は何も直さぬ)。対象: {agents_desc}。"
+            f"検知文言『{episode.get('resets_hint', '')}』/ resets ETA={eta}。"
+            f"★枠回復の見込み時刻に再開通知を別途1通上げる★ — それまで対象への再dispatchは"
+            f"無駄弾になる。本警報は 1 episode 1通 (+{throttle_min}分 throttle)。")
+
+
+def format_upstream_resume_alert(episode, reason):
+    agents_desc = ", ".join(
+        f"{a}(task={e.get('task_id')}, 沈黙開始={e.get('detected_ts')})"
+        for a, e in sorted(episode["agents"].items()))
+    return (f"🔔上流障害の解除見込み — ★再開せよ★ (idle_revive cmd_1355): 判定={reason}。"
+            f"上流障害で沈黙したまま残る agent: {agents_desc}。"
+            f"各 agent は枠が戻っても自分では再開せぬ (2026-07-26 全軍3h停止の後半の死因)。"
+            f"inbox nudge または task 再確認で起こされたし。"
+            f"本通知は 1 episode に 1通のみ。台帳=queue/state/{UPSTREAM_OUTAGE_STATE_FILE}")
+
+
+def upstream_alert_throttled(state_dir: Path, throttle_min, now):
+    p = state_dir / UPSTREAM_ALERT_THROTTLE_FILE
+    try:
+        last = parse_iso_to_naive_local(p.read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+    if last is None:
+        return False
+    return (now - last).total_seconds() / 60.0 < throttle_min
+
+
+def upstream_alert_mark(state_dir: Path, now):
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / UPSTREAM_ALERT_THROTTLE_FILE).write_text(
+        now.isoformat(timespec="seconds") + "\n", encoding="utf-8")
+
+
+def outage_probe_agent(agent, pane_states, tasks_dir: Path):
+    """台帳 agent の現況を採る: (recovered_bool, state_dict)。
+
+    recovered = pane が busy (実働再開) / task が active でなくなった (完遂・再割当)。
+    pane_states に無い agent (karo 等) は probe_agent_state で単発 probe。
+    """
+    state = pane_states.get(agent)
+    if state is None:
+        state = probe_agent_state(agent)
+    if state == "busy":
+        return True, {"pane_state": state, "upstream_pattern": None}
+    task_path = tasks_dir / f"{agent}.yaml"
+    if agent != KARO_STATE_KEY and task_path.is_file():
+        t = parse_task(task_path)
+        if t and t.get("status") not in ACTIVE_STATUSES:
+            return True, {"pane_state": state, "upstream_pattern": None}
+    pat = detect_upstream_failure(pane_upstream_text(agent))
+    return False, {"pane_state": state, "upstream_pattern": pat}
+
+
+def outage_maintain(state_dir: Path, pane_states, tasks_dir: Path, now=None):
+    """台帳の保守 + 解除判定。毎 scan (非 dry-run) 呼ばれる。
+
+    戻り値 = None | {"action": "upstream_resume", "episode":.., "reason":..}。
+    副作用: 回復 agent の剪定・全回復/expire での episode close (save)。
+    resume 通知の送信と resume_notified_ts の永続化は呼出元 (main) が担う —
+    送信失敗時に「通知済」と誤記しないため (cmd_1338 流儀: 失敗を握り潰さない)。
+    """
+    if now is None:
+        now = datetime.datetime.now()
+    episode = load_outage(state_dir)
+    if episode is None:
+        return None
+    first = parse_iso_to_naive_local(episode.get("first_detected"))
+    if first is not None and (now - first).total_seconds() / 3600.0 >= OUTAGE_EXPIRE_HOURS:
+        print(f"[idle_revive] outage 台帳 expire ({OUTAGE_EXPIRE_HOURS}h 超過) — episode close",
+              file=sys.stderr)
+        save_outage(state_dir, None)
+        return None
+    agents = episode.get("agents") or {}
+    remaining = {}
+    agent_states = {}
+    for agent in sorted(agents):
+        recovered, st = outage_probe_agent(agent, pane_states, tasks_dir)
+        if recovered:
+            print(f"[idle_revive] outage 台帳: {agent} 回復 (実働/task更新) — 剪定",
+                  file=sys.stderr)
+            continue
+        remaining[agent] = agents[agent]
+        agent_states[agent] = st
+    if not remaining:
+        # 全員回復 = 上流障害は終わった。通知不要 (起こす相手が居らぬ)。
+        print("[idle_revive] outage 台帳: 全 agent 回復 — episode close (通知不要)",
+              file=sys.stderr)
+        save_outage(state_dir, None)
+        return None
+    if remaining != agents:
+        episode = dict(episode)
+        episode["agents"] = remaining
+        save_outage(state_dir, episode)
+    if episode.get("resume_notified_ts"):
+        return None  # 1 episode 1通 — 既に上げた。あとは家老の手番。
+    release, reason = outage_release_check(episode, agent_states, now)
+    if not release:
+        return None
+    return {"action": "upstream_resume", "episode": episode, "reason": reason}
+
+
+# ─────────────────────────────────────────────────────────────
+# cmd_1355: 変異試験用 selftest (bats/tmux 非依存・gate-2 台帳から scratch 実行される)
+# ─────────────────────────────────────────────────────────────
+def selftest_upstream():
+    """実 pane 文言 fixture と (D) 解除判定の契約を検分する。exit 0=PASS / 1=FAIL。
+
+    gate-2 (config/mutation_registry.yaml MUT-1355-*) がこの selftest を変異後に走らせ、
+    「pattern を1つ外す / 解除条件を折る」と★名指しで★赤くなることを毎朝確かめる。
+    """
+    ng = []
+    fixture = REPO_ROOT / "tests" / "fixtures" / "upstream_session_limit_pane.txt"
+
+    # U1: 実 pane 文言 (2026-07-26 採取・byte 凍結) を検知できること。
+    # ★行単位で個別に検める★ — fixture 全文には pattern が2つ (session limit /
+    # /usage-credits) 共存するため、全文一括の検分では「片方の pattern を外す」変異が
+    # もう片方の hit に隠れて空振りする (検分自身の沈黙。書いた直後に自分で踏みかけた)。
+    try:
+        real = fixture.read_text(encoding="utf-8")
+    except OSError as e:
+        real = ""
+        ng.append(f"U0 fixture 読めず: {e}")
+    if detect_upstream_failure(real) is None:
+        ng.append("U1a 実pane文言(全文)を検知できぬ — "
+                  "UPSTREAM_FAILURE_PATTERNS から実文言 pattern が消えておる")
+    banner = next((l for l in real.splitlines() if "session limit" in l.lower()), "")
+    if not banner or detect_upstream_failure(banner) is None:
+        ng.append("U1b banner行『You've hit your session limit …』を単独で検知できぬ — "
+                  "pattern \"session limit\" が消えておる")
+    credits = next((l for l in real.splitlines() if "/usage-credits" in l.lower()), "")
+    if not credits or detect_upstream_failure(credits) is None:
+        ng.append("U1c 誘導行『/usage-credits to finish …』を単独で検知できぬ — "
+                  "pattern \"/usage-credits\" が消えておる")
+    # U2: 良性文言 (status bar / 通常出力) を誤検知しないこと (過剰抑止の防止)
+    for benign in ("⏵⏵ bypass permissions on (shift+tab to cycle) · ←",
+                   "Read 2 files, ran 9 shell commands",
+                   "writing tests for the scanner"):
+        if detect_upstream_failure(benign) is not None:
+            ng.append(f"U2 良性文言を誤検知: {benign!r}")
+    # U3: resets ETA parse (当日到来 / 翌日繰上げ / 解釈不能)
+    base = datetime.datetime(2026, 7, 26, 2, 0, 0)
+    eta = parse_resets_eta("You've hit your session limit · resets 4:30am", base)
+    if eta != datetime.datetime(2026, 7, 26, 4, 30):
+        ng.append(f"U3a 当日 4:30 を導けぬ: {eta}")
+    eta = parse_resets_eta("resets 1am", datetime.datetime(2026, 7, 26, 23, 0))
+    if eta != datetime.datetime(2026, 7, 27, 1, 0):
+        ng.append(f"U3b 翌日繰上げが効かぬ: {eta}")
+    if parse_resets_eta("no such marker here", base) is not None:
+        ng.append("U3c 解釈不能を None にできぬ")
+    # U4: 解除判定 R1/R2 (両側: 未到来では鳴らず・到来/超過で鳴る)
+    ep = {"first_detected": "2026-07-26T02:00:00", "resets_eta": "2026-07-26T04:30:00",
+          "agents": {"x": {}}}
+    still = {"x": {"pane_state": "idle", "upstream_pattern": "session limit"}}
+    rel, _ = outage_release_check(ep, still, datetime.datetime(2026, 7, 26, 4, 0))
+    if rel:
+        ng.append("U4a ETA 未到来なのに解除された (早すぎる再開通知)")
+    rel, reason = outage_release_check(ep, still, datetime.datetime(2026, 7, 26, 4, 34))
+    if not rel or "R1" not in reason:
+        ng.append(f"U4b ETA+grace 経過でも解除されぬ: rel={rel} reason={reason!r}")
+    ep_noeta = {"first_detected": "2026-07-26T02:00:00", "resets_eta": None,
+                "agents": {"x": {}}}
+    rel, _ = outage_release_check(ep_noeta, still, datetime.datetime(2026, 7, 26, 2, 30))
+    if rel:
+        ng.append("U4c ETA不明・30分では鳴らぬはずが解除された")
+    rel, reason = outage_release_check(ep_noeta, still, datetime.datetime(2026, 7, 26, 3, 1))
+    if not rel or "R2" not in reason:
+        ng.append(f"U4d ETA不明の fallback (R2) が効かぬ: rel={rel} reason={reason!r}")
+    # U5: R3 (補助) — 全 pane から文言が消え idle が居れば解除
+    gone = {"x": {"pane_state": "idle", "upstream_pattern": None}}
+    rel, reason = outage_release_check(
+        {"first_detected": "2026-07-26T02:00:00", "resets_eta": "2026-07-26T09:00:00",
+         "agents": {"x": {}}}, gone, datetime.datetime(2026, 7, 26, 2, 30))
+    if not rel or "R3" not in reason:
+        ng.append(f"U5 R3 (文言消失+idle) が効かぬ: rel={rel} reason={reason!r}")
+
+    if ng:
+        for line in ng:
+            print(f"★NG★ {line}")
+        print(f"selftest_upstream: FAIL ({len(ng)}件)")
+        return 1
+    print("selftest_upstream: PASS (U1-U5 全て契約どおり)")
+    return 0
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1028,10 +1409,20 @@ def main(argv=None):
                     help="cmd_1339: 停電型 quorum gate を無効化 (個別判定のみ)。変異試験用。")
     ap.add_argument("--blackout-throttle-min", type=int, default=DEFAULT_BLACKOUT_THROTTLE_MIN,
                     help=f"cmd_1339: 停電型 warning の最小間隔分 (default {DEFAULT_BLACKOUT_THROTTLE_MIN})。")
+    ap.add_argument("--upstream-alert-throttle-min", type=int,
+                    default=DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN,
+                    help=f"cmd_1355: 上流障害の検知/再開通知の最小間隔分 (episode 1通が主・"
+                         f"これは保険。default {DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN})。")
+    ap.add_argument("--selftest-upstream", action="store_true",
+                    help="cmd_1355: 実 pane 文言 fixture と再開判定契約の selftest "
+                         "(tmux/queue 非接触・gate-2 変異試験の的)。")
     ap.add_argument("--json", action="store_true", help="結果を JSON で出力。")
     ap.add_argument("--queue-root", type=Path, default=None,
                     help="queue root 上書き(tasks/ reports/ state/ を含む)。主にテスト用。")
     args = ap.parse_args(argv)
+
+    if args.selftest_upstream:
+        return selftest_upstream()
 
     if args.queue_root is not None:
         tasks_dir = args.queue_root / "tasks"
@@ -1109,16 +1500,22 @@ def main(argv=None):
         if r["action"] == "blackout_alert":
             # 停電型: 家老へ warning 1通のみ (30分 throttle・supervisor不在警告と同型)。
             now = datetime.datetime.now()
+            # 各 pane 末尾の上流障害痕跡 (token/usage limit 等) を警報へ引用 (runbook §5)。
+            # cmd_1355: ★throttle 判定より前に★台帳へ記録する — 警報が throttle で
+            # 出ない cycle でも、抑止された agent の記録 (再開通知の入力) は落とさない。
+            upstream_notes = []
+            for s in r.get("_stalled", [])[:10]:
+                b_text = pane_upstream_text(s["agent"])
+                pat = detect_upstream_failure(b_text)
+                if pat:
+                    upstream_notes.append(f"{s['agent']}=『{pat}』")
+                    b_task = parse_task(tasks_dir / f"{s['agent']}.yaml")
+                    outage_record(state_dir, s["agent"], pat, b_text,
+                                  task_id=(b_task or {}).get("task_id"))
             if blackout_throttled(state_dir, args.blackout_throttle_min, now):
                 print("[idle_revive] BLACKOUT警報 throttle 中 (前回から "
                       f"{args.blackout_throttle_min}分未満) — 再警報せず", file=sys.stderr)
                 continue
-            # 各 pane 末尾の上流障害痕跡 (token/usage limit 等) を警報へ引用 (runbook §5)
-            upstream_notes = []
-            for s in r.get("_stalled", [])[:10]:
-                pat = detect_upstream_failure(pane_upstream_text(s["agent"]))
-                if pat:
-                    upstream_notes.append(f"{s['agent']}=『{pat}』")
             body = format_blackout_alert(r, upstream_notes, args.blackout_throttle_min)
             proc = send_inbox("karo", body, "warning", "idle_revive_scan")
             if proc.returncode != 0:
@@ -1147,11 +1544,17 @@ def main(argv=None):
             # cmd_1339 quorum補強 (軍師一号具申): pane 末尾に上流障害文字列 (usage limit /
             # credit / auth / rate limit) が見えたら発行しない — 上流障害中の /clear は
             # context を失うだけで何も直さない。state 非消費 = 障害解消後は従来判定。
-            upstream_hit = detect_upstream_failure(pane_upstream_text(r["agent"]))
+            upstream_text = pane_upstream_text(r["agent"])
+            upstream_hit = detect_upstream_failure(upstream_text)
             if upstream_hit:
                 print(f"[idle_revive] SKIP(上流障害gate): {r['agent']} pane に"
                       f"『{upstream_hit}』検知 — 上流障害中の /clear は context を失うだけ"
                       f"ゆえ発行せず (cmd_1339 quorum補強)", file=sys.stderr)
+                # cmd_1355: 抑止した事実を台帳へ (pane 文言は誤 clear や scroll で消える
+                # 揮発証拠ゆえ、抑止の瞬間に永続化する)。枠回復時の再開通知 (下の
+                # outage_maintain) の入力になる。
+                outage_record(state_dir, r["agent"], upstream_hit, upstream_text,
+                              task_id=r.get("task_id"))
                 if r["agent"] in clear_log:
                     new_clear_log[r["agent"]] = clear_log[r["agent"]]
                 else:
@@ -1178,6 +1581,23 @@ def main(argv=None):
                 new_clear_log[r["agent"]] = r["_new_state"]
                 state_dirty = True
         elif r["action"] == "escalation_stop":
+            # cmd_1355: escalation にも上流障害 gate — 枠切れ agent への「復帰せず」警報は
+            # 誤診 (固着でなく上流障害) であり、2026-07-26 未明はこの型の警報が家老 inbox に
+            # 10通積もった。検知したら台帳へ記録し警報は出さない (episode 初回の
+            # 上流障害警報が下で 1通だけ出る)。state 非消費 = 次 scan でも再評価。
+            esc_text = pane_upstream_text(r["agent"])
+            esc_hit = detect_upstream_failure(esc_text)
+            if esc_hit:
+                print(f"[idle_revive] SKIP(上流障害gate/escalation): {r['agent']} pane に"
+                      f"『{esc_hit}』検知 — 固着でなく上流障害ゆえ escalation 警報を出さぬ "
+                      f"(cmd_1355)", file=sys.stderr)
+                outage_record(state_dir, r["agent"], esc_hit, esc_text,
+                              task_id=r.get("task_id"))
+                if r["agent"] in clear_log:
+                    new_clear_log[r["agent"]] = clear_log[r["agent"]]
+                else:
+                    new_clear_log.pop(r["agent"], None)
+                continue
             # karo degrade の escalation は shogun へ(karo 自身が復帰不能ゆえ)。
             # 足軽/軍師の escalation は従来どおり karo へ。
             # cmd_1339 (f): 警報に対象 agent の直前文脈 (pane末尾/report mtime) を添付
@@ -1204,6 +1624,46 @@ def main(argv=None):
         except OSError as e:
             print(f"[idle_revive] ERROR: clear_log 書込失敗: {e}", file=sys.stderr)
             exit_code = 1
+
+    # ── cmd_1355: 上流障害 episode の家老警報 (初回1通) + ★枠復帰時の再開通知★ ──
+    now = datetime.datetime.now()
+    episode = load_outage(state_dir)
+    if episode is not None and not episode.get("detect_notified_ts"):
+        # episode 初回の検知警報。停電型 blackout 警報が同 cycle で出ておれば重ねない
+        # (家老 inbox 10通 spam の再発禁) — blackout 警報が上流痕跡を既に運んでおる。
+        if blackout is not None:
+            episode["detect_notified_ts"] = now.isoformat(timespec="seconds") + " (blackout警報へ相乗り)"
+            save_outage(state_dir, episode)
+        elif upstream_alert_throttled(state_dir, args.upstream_alert_throttle_min, now):
+            print("[idle_revive] 上流障害検知警報 throttle 中 — 次 scan で再試行", file=sys.stderr)
+        else:
+            body = format_upstream_detect_alert(episode, args.upstream_alert_throttle_min)
+            proc = send_inbox("karo", body, "warning", "idle_revive_scan")
+            if proc.returncode != 0:
+                # cmd_1338 流儀: 失敗を「通知済」と誤記しない (次 scan で再試行)。
+                print(f"[idle_revive] ERROR: 上流障害検知警報の inbox_write 失敗: "
+                      f"{proc.stderr.strip()}", file=sys.stderr)
+                exit_code = 1
+            else:
+                episode["detect_notified_ts"] = now.isoformat(timespec="seconds")
+                save_outage(state_dir, episode)
+                upstream_alert_mark(state_dir, now)
+
+    resume_hit = outage_maintain(state_dir, pane_states, tasks_dir, now)
+    if resume_hit is not None:
+        ep = resume_hit["episode"]
+        body = format_upstream_resume_alert(ep, resume_hit["reason"])
+        proc = send_inbox("karo", body, "warning", "idle_revive_scan")
+        if proc.returncode != 0:
+            print(f"[idle_revive] ERROR: 再開通知の inbox_write 失敗 (次 scan で再試行): "
+                  f"{proc.stderr.strip()}", file=sys.stderr)
+            exit_code = 1
+        else:
+            ep["resume_notified_ts"] = now.isoformat(timespec="seconds")
+            save_outage(state_dir, ep)
+            upstream_alert_mark(state_dir, now)
+            print(f"[idle_revive] 再開通知を家老へ発行 ({resume_hit['reason']})",
+                  file=sys.stderr)
 
     return exit_code
 

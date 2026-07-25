@@ -242,6 +242,9 @@ tests/specs/osato_lms_*
 !tests/*.sh
 !tests/fixtures/
 !tests/fixtures/*.yaml
+# cmd_1355: 実 pane 採取の raw fixture (*.txt は whitelist 外ゆえ明示許可。
+# 名指しせねば gate-1 が [IGNORED] で赤くする — 2026-07-26 に本 file 自身で実測済)
+!tests/fixtures/upstream_session_limit_pane.txt
 !tests/unit/
 !tests/unit/*.bats
 !tests/integration/

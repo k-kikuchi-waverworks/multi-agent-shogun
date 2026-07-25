@@ -26,6 +26,9 @@
                                 # 疑いとして FAIL (cmd_1350 五号の教訓 = 実効は【失敗出力が
                                 # 変異内容を名指しするか】で取る。行移動型変異は diff 目視に効かぬ)
       timeout: 180              # 任意 (秒)
+  coverage_positive_control: <relpath>   # 任意 (top-level)。--coverage の陽性対照の差し替え。
+                                         # 既定は本 file 自身ゆえ、本 file を持たぬ repo の台帳
+                                         # (cmd_1355 backend 延長) では必須になる
 
 判定 (三値 — 0件/未判定を緑にせぬ):
   PASS         = baseline 緑 かつ 変異後に赤 (契約どおり・red_needle があれば名指しまで確認)
@@ -75,8 +78,14 @@ COVERAGE_EXTS = {".sh", ".bash", ".py", ".bats"}  # 実行可能な test の宿�
 COVERAGE_MUT_KEYWORDS = r"変異試験|変異を当て|わざと壊|壊して赤|壊せば落ち|mutation"
 COVERAGE_SELFTEST_MARKERS = r"--selftest|def selftest|selftest\(\)"
 COVERAGE_D1_NEGATIVE = r"(?:without|no|not)\s+mutation"  # データ変異の意 ("without mutation" 等) を除く
-# 陽性対照: 本 file 自身 (selftest T2 = 変異試験を永続内蔵)。これが検出されねば検出規則の
-# 牙が折れておる = 0件検出もここへ畳んで UNDETERMINED (真空 PASS 禁・対照を必ず置く流儀)
+# D3 (cmd_1355 backend 台帳延長): pytest 型の変異test (backend の test_cmd_1350_* 等) は
+# bats でも selftest 宣言でもないゆえ D1/D2 の網に掛からぬ = backend を見ても常に 0 件だった。
+# 実測 2026-07-26: この規則で backend 7 件 / shogun 0 件 (既存運用の誤検知増はゼロ)。
+COVERAGE_D3_PYTEST_DEF = r"(?m)^\s*def test_\w+"
+# 陽性対照: 既定は本 file 自身 (selftest T2 = 変異試験を永続内蔵)。これが検出されねば検出規則の
+# 牙が折れておる = 0件検出もここへ畳んで UNDETERMINED (真空 PASS 禁・対照を必ず置く流儀)。
+# ★他 repo の台帳 (cmd_1355 backend 延長) では本 file が存在せぬため、台帳側 top-level key
+# `coverage_positive_control:` で対照を差し替えられる (出所は台帳 = 1つ)★
 COVERAGE_POSITIVE_CONTROL = "scripts/gate_mutation_replay.py"
 
 PASS, FAIL, UNDET = "PASS", "FAIL", "UNDETERMINED"
@@ -161,11 +170,15 @@ def evaluate_entry(e, repo: Path, work: Path):
             return UNDET, err
 
     # ① baseline: 変異前に test は緑であること (赤なら検出力を測れぬ)
-    rc, _ = run_sh(e["test"], base, timeout)
+    rc, out = run_sh(e["test"], base, timeout)
     if rc is None:
         return UNDET, "baseline test が timeout"
     if rc != 0:
-        return UNDET, f"baseline が赤 (exit {rc}) = 変異前から落ちており検出力を測れぬ"
+        # 尻尾を添える: repo 跨ぎ entry (cmd_1355) では「venv 不在」「rubric 不在」等の
+        # 空振り理由がここに出る。exit code だけでは家老が原因へ辿れぬ
+        tail = " / ".join(out.strip().splitlines()[-2:])[:200] if out.strip() else ""
+        return UNDET, f"baseline が赤 (exit {rc}) = 変異前から落ちており検出力を測れぬ" + (
+            f" | {tail}" if tail else "")
 
     # ② mutate をコピーへ当てる
     rc, out = run_sh(e["mutate"], mut, timeout)
@@ -254,6 +267,7 @@ def scan_mutation_test_candidates(repo: Path):
 
     D1 = bats の @test 行が変異を名指し (負規則 COVERAGE_D1_NEGATIVE でデータ変異の意を除く)
     D2 = selftest 宣言 (COVERAGE_SELFTEST_MARKERS) と変異 keyword の【共起】
+    D3 = pytest 型 test 定義 (def test_) と変異 keyword の【共起】(.py のみ・cmd_1355)
     対象は git ls-files (追跡済) かつ COVERAGE_EXTS の拡張子のみ。内容は worktree を読む
     (限界: 追跡済で disk に無い file は数えぬ・untracked の変異testは見えぬ — docs に明記)。
     """
@@ -267,6 +281,7 @@ def scan_mutation_test_candidates(repo: Path):
     kw = re.compile(COVERAGE_MUT_KEYWORDS, re.IGNORECASE)
     st = re.compile(COVERAGE_SELFTEST_MARKERS)
     neg = re.compile(COVERAGE_D1_NEGATIVE, re.IGNORECASE)
+    pyt = re.compile(COVERAGE_D3_PYTEST_DEF)
     cands: dict[str, str] = {}
     for rel in filter(None, r.stdout.split("\0")):
         if Path(rel).suffix not in COVERAGE_EXTS:
@@ -287,6 +302,8 @@ def scan_mutation_test_candidates(repo: Path):
             cands[rel] = d1
         elif st.search(text) and kw.search(text):
             cands[rel] = "D2 (selftest 宣言と変異 keyword の共起)"
+        elif Path(rel).suffix == ".py" and pyt.search(text) and kw.search(text):
+            cands[rel] = "D3 (pytest test と変異 keyword の共起)"
     return cands, None
 
 
@@ -321,8 +338,10 @@ def coverage(registry: Path, repo: Path) -> int:
     if err:
         print(f"[gate-2 coverage] UNDETERMINED: {err}")
         return 2
-    if COVERAGE_POSITIVE_CONTROL not in cands:
-        print(f"[gate-2 coverage] UNDETERMINED: 陽性対照 {COVERAGE_POSITIVE_CONTROL} が検出されぬ"
+    # 陽性対照は台帳側 key で差し替え可 (cmd_1355: backend 等、本 file を持たぬ repo の台帳延長)
+    control = str(data.get("coverage_positive_control") or COVERAGE_POSITIVE_CONTROL)
+    if control not in cands:
+        print(f"[gate-2 coverage] UNDETERMINED: 陽性対照 {control} が検出されぬ"
               f" (候補 {len(cands)} 件) = 検出規則の牙が折れておる (0件検出もここへ畳む・真空 PASS 禁)")
         return 2
     unregistered: list[str] = []
@@ -369,11 +388,14 @@ def _entry(eid: str, mutate: str, test: str = "bash check.sh", expect: str = "no
             "mutate": mutate, "test": test, "expect": expect}
 
 
-def _write_reg(path: Path, entries: list, waivers: list | None = None) -> None:
+def _write_reg(path: Path, entries: list, waivers: list | None = None,
+               control: str | None = None) -> None:
     import yaml
     data: dict = {"mutations": entries}
     if waivers is not None:
         data["coverage_waivers"] = waivers
+    if control is not None:
+        data["coverage_positive_control"] = control
     path.write_text(yaml.safe_dump(data, allow_unicode=True))
 
 
@@ -394,6 +416,8 @@ def _mk_git_repo(root: Path, files: dict[str, str]) -> Path:
 _COV_CONTROL_BODY = "# fake runner (陽性対照): --selftest 変異試験\n"
 _COV_ROGUE_BATS = '@test "quorum breaks when neutered (mutation proof)" {\n  true\n}\n'
 _COV_DATAMUT_BATS = '@test "previews stale branch without mutation" {\n  true\n}\n'
+# D3 素材 (cmd_1355): pytest 型 = bats でも selftest 宣言でもない変異test
+_COV_ROGUE_PY = "# 変異試験: 順序を壊せば赤くなることを検める\ndef test_order_mutation_detected():\n    pass\n"
 
 
 def _cov_entry(eid: str, paths: list[str]):
@@ -534,6 +558,24 @@ def selftest() -> int:
         _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])])
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
         expect("T14 without mutation=非候補 (誤検知せぬ)", 0, rc)
+
+        # T17: ★D3 = pytest 型の変異test も検出する (cmd_1355 backend 台帳延長)★
+        #      backend の test_cmd_1350_* は bats でも selftest 宣言でもないゆえ、
+        #      この規則が折れると backend を見ても常に 0 件 = 延長全体が真空になる
+        repo = _mk_git_repo(T / "t17", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_pytest.py": _COV_ROGUE_PY})
+        reg = T / "t17reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T17 pytest型変異test=D3検出+FAIL名指し", 1, rc, "tests/rogue_pytest.py", out)
+
+        # T18: ★陽性対照は台帳 key で差し替え可 = runner を持たぬ repo でも対照が立つ★
+        repo = _mk_git_repo(T / "t18", {"tests/rogue_pytest.py": _COV_ROGUE_PY})
+        reg = T / "t18reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-PY", ["tests/rogue_pytest.py"])],
+                   control="tests/rogue_pytest.py")
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T18 台帳側陽性対照=PASS", 0, rc, "REGISTERED", out)
 
         # T15: red_needle が赤出力に在る → PASS (名指し確認)
         repo = _mk_playground(T / "t15")

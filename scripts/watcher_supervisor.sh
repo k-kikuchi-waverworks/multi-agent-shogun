@@ -68,11 +68,48 @@ start_watcher_if_missing() {
     ) 9>"$lockfile"
 }
 
-ashigaru_pane() {
-    # 命名規約: ashigaru{N} → multiagent:agents.{N}
+resolve_pane_by_agent_id() {
+    # ★cmd_1339 (2026-07-25) 起源=@agent_id を pane 解決の第一正本にする★
+    # 背景: 実 pane 配置が 0.6=gunshi1 / 0.7=ashigaru6 とずれた状態で、
+    #       「ashigaru{N} → agents.{N}」の命名規約 hardcode により watcher が交差配達した。
+    #       plain nudge は「起こす相手が違うだけ(各agentは自分のinboxを読む)」ゆえ軽症だが、
+    #       ★clear_command は /clear + 指示文を pane へ直接送るため、別agentのsessionを吹き飛ばし
+    #       他人の task 指示を渡す★ (2026-07-25 18:19/18:20 に軍師一号と足軽六号で実発生)。
+    # ⇒ 各 CLI session は SessionStart hook が読む @agent_id で自己識別するゆえ、@agent_id が正本。
+    #    見つからねば従来規約へ fallback (回帰非破壊)。
     local agent="$1"
+    local found=""
+    found=$(tmux list-panes -a -F "#{session_name}:#{window_name}.#{pane_index} #{@agent_id}" 2>/dev/null \
+        | awk -v a="$agent" '$2 == a { print $1; exit }' || true)
+    if [ -n "$found" ]; then
+        echo "$found"
+        return 0
+    fi
+    return 1
+}
+
+ashigaru_pane() {
+    # ★@agent_id 優先 → 見つからねば命名規約 ashigaru{N} → multiagent:agents.{N} へ fallback★
+    local agent="$1"
+    local resolved=""
+    if resolved=$(resolve_pane_by_agent_id "$agent"); then
+        echo "$resolved"
+        return 0
+    fi
     local idx="${agent#ashigaru}"
     echo "multiagent:agents.${idx}"
+}
+
+gunshi_pane_resolved() {
+    # ★gunshi も @agent_id 優先。settings.yaml の pane: field は fallback★
+    # (settings.yaml は 2026-07-25 時点で gunshi1=agents.7 と記載されていたが実体は agents.6 であった)
+    local agent="$1"
+    local resolved=""
+    if resolved=$(resolve_pane_by_agent_id "$agent"); then
+        echo "$resolved"
+        return 0
+    fi
+    get_agent_pane "$agent"
 }
 
 # cmd_1255 (2026-07-11): 台帳(shogun_to_karo.yaml)parse自己検証gate=ledger_guard watcher。
@@ -106,7 +143,7 @@ while true; do
     # cmd_652 (2026-05-16): active gunshi list を settings.yaml から動的取得 (deprecated 除外)
     while IFS= read -r gun; do
         [ -n "$gun" ] || continue
-        local_pane=$(get_agent_pane "$gun")
+        local_pane=$(gunshi_pane_resolved "$gun")   # cmd_1339: @agent_id 優先・settings.yaml は fallback
         [ -n "$local_pane" ] || continue  # pane 未設定 gunshi はスキップ
         start_watcher_if_missing "$gun" "$local_pane" "logs/inbox_watcher_${gun}.log"
     done < <(get_active_gunshi_agents)

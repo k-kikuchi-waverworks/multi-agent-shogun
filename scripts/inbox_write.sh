@@ -11,10 +11,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="$1"
-CONTENT="$2"
-TYPE="$3"
-FROM="$4"
+# ${N:-} defaults: set -u の下で引数不足時も Usage 分岐へ到達させる (即死させない)
+TARGET="${1:-}"
+CONTENT="${2:-}"
+TYPE="${3:-}"
+FROM="${4:-}"
 
 # Deprecated gunshi redirect (write-layer): gunshi/gunshi_a/gunshi_b → active gunshi (Round-robin)
 # Ensures ashigaru reports land in active gunshi1/2 inboxes regardless of caller using deprecated name.
@@ -131,57 +132,71 @@ _release_lock() {
 attempt=0
 max_attempts=3
 
+# External inputs (content/from/type) and paths MUST NOT be interpolated into the
+# python source: a body containing a backslash (e.g. a Windows path C:\Users\...)
+# becomes a truncated \UXXXXXXXX escape → SyntaxError → all retries fail (cmd_1345),
+# and a body containing ''' escapes the string literal entirely. Pass everything
+# via environment variables; the python source below is a fixed single-quoted string.
+export IW_INBOX="$INBOX"
+export IW_MSG_ID="$MSG_ID"
+export IW_FROM="$FROM"
+export IW_TIMESTAMP="$TIMESTAMP"
+export IW_TYPE="$TYPE"
+export IW_CONTENT="$CONTENT"
+
 while [ $attempt -lt $max_attempts ]; do
     if _acquire_lock; then
         trap _release_lock EXIT
-        if "$SCRIPT_DIR/.venv/bin/python3" -c "
-import yaml, sys
+        if "$SCRIPT_DIR/.venv/bin/python3" -c '
+import os, sys, yaml
 
 try:
+    inbox = os.environ["IW_INBOX"]
+
     # Load existing inbox
-    with open('$INBOX') as f:
+    with open(inbox) as f:
         data = yaml.safe_load(f)
 
     # Initialize if needed
     if not data:
         data = {}
-    if not data.get('messages'):
-        data['messages'] = []
+    if not data.get("messages"):
+        data["messages"] = []
 
     # Add new message
     new_msg = {
-        'id': '$MSG_ID',
-        'from': '$FROM',
-        'timestamp': '$TIMESTAMP',
-        'type': '$TYPE',
-        'content': '''$CONTENT''',
-        'read': False
+        "id": os.environ["IW_MSG_ID"],
+        "from": os.environ["IW_FROM"],
+        "timestamp": os.environ["IW_TIMESTAMP"],
+        "type": os.environ["IW_TYPE"],
+        "content": os.environ["IW_CONTENT"],
+        "read": False
     }
-    data['messages'].append(new_msg)
+    data["messages"].append(new_msg)
 
     # Overflow protection: keep max 50 messages
-    if len(data['messages']) > 50:
-        msgs = data['messages']
-        unread = [m for m in msgs if not m.get('read', False)]
-        read = [m for m in msgs if m.get('read', False)]
+    if len(data["messages"]) > 50:
+        msgs = data["messages"]
+        unread = [m for m in msgs if not m.get("read", False)]
+        read = [m for m in msgs if m.get("read", False)]
         # Keep all unread + newest 30 read messages
-        data['messages'] = unread + read[-30:]
+        data["messages"] = unread + read[-30:]
 
     # Atomic write: tmp file + rename (prevents partial reads)
-    import tempfile, os
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname('$INBOX'), suffix='.tmp')
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(inbox), suffix=".tmp")
     try:
-        with os.fdopen(tmp_fd, 'w') as f:
+        with os.fdopen(tmp_fd, "w") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True, indent=2)
-        os.replace(tmp_path, '$INBOX')
+        os.replace(tmp_path, inbox)
     except:
         os.unlink(tmp_path)
         raise
 
 except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
+    print(f"ERROR: {e}", file=sys.stderr)
     sys.exit(1)
-"; then
+'; then
             STATUS=0
         else
             STATUS=$?

@@ -464,3 +464,75 @@ PYFAIL
 
     [ ! -d "$TEST_INBOX_DIR/test_agent.yaml.lock.d" ]
 }
+
+# =============================================================================
+# T-015〜T-020: 本文エスケープ根治 (cmd_1345)
+# 本文/from/type を python source へ補間しない構造の検証。
+# 期待値は環境変数で検証用 python へ渡す（テスト側が同じエスケープ穴を踏まぬため）。
+# =============================================================================
+
+# helper: inbox YAML を yaml.safe_load し、最後の message の content/from/type が
+# 環境変数 EXPECTED_CONTENT / EXPECTED_FROM / EXPECTED_TYPE と byte 等価か検証する
+_assert_roundtrip() {
+    EXPECTED_CONTENT="$1" EXPECTED_FROM="$2" EXPECTED_TYPE="$3" "$VENV_PYTHON" -c "
+import os, sys, yaml
+with open('$TEST_INBOX_DIR/test_agent.yaml') as f:
+    data = yaml.safe_load(f)
+msg = data['messages'][-1]
+for field, env_key in (('content', 'EXPECTED_CONTENT'), ('from', 'EXPECTED_FROM'), ('type', 'EXPECTED_TYPE')):
+    got = msg[field]
+    exp = os.environ[env_key]
+    assert isinstance(got, str), f'{field} is not str: {type(got)}'
+    assert got.encode('utf-8') == exp.encode('utf-8'), \
+        f'{field} not byte-equal:\ngot={got!r}\nexp={exp!r}'
+print('roundtrip byte-equal: PASS')
+"
+}
+
+@test "T-015: backslash content (Windows real path) → byte-exact roundtrip" {
+    CONTENT='スクショは C:\Users\k-kikuchi\Pictures\Screenshots\shot.png と D:\backup\aituber-project-ml に保存した'
+    run bash "$TEST_INBOX_WRITE" "test_agent" "$CONTENT" "report_completed" "other_sender"
+    [ "$status" -eq 0 ]
+    _assert_roundtrip "$CONTENT" "other_sender" "report_completed"
+}
+
+@test "T-016: quotes (single/double/triple-quote breakout) → byte-exact roundtrip" {
+    # ''' は旧実装で python 文字列リテラルを脱出できた注入ベクタ
+    CONTENT="引用符混在: \"double\" と 'single' と '''triple''' と \\\"escaped\\\""
+    run bash "$TEST_INBOX_WRITE" "test_agent" "$CONTENT" "test_type" "other_sender"
+    [ "$status" -eq 0 ]
+    _assert_roundtrip "$CONTENT" "other_sender" "test_type"
+}
+
+@test "T-017: control characters (newline/tab) → byte-exact roundtrip" {
+    CONTENT=$'1行目\n\t2行目はタブ始まり\n3行目\ttab中間'
+    run bash "$TEST_INBOX_WRITE" "test_agent" "$CONTENT" "test_type" "other_sender"
+    [ "$status" -eq 0 ]
+    _assert_roundtrip "$CONTENT" "other_sender" "test_type"
+}
+
+@test "T-018: YAML-dangerous leading chars (- ? & * { [ 'key: val') → byte-exact roundtrip" {
+    # cmd_1255 規律: YAML 構文的に危険な先頭文字・半角コロン+空白
+    for CONTENT in '- リスト風先頭' '? マップキー風' '&anchor 参照風' '*alias 参照風' '{flow: map}' '[flow, seq]' 'key: value 半角コロン空白' ': 先頭コロン'; do
+        run bash "$TEST_INBOX_WRITE" "test_agent" "$CONTENT" "test_type" "other_sender"
+        [ "$status" -eq 0 ]
+        _assert_roundtrip "$CONTENT" "other_sender" "test_type"
+    done
+}
+
+@test "T-019: Japanese + emoji (non-regression) → byte-exact roundtrip" {
+    CONTENT='任務完了でござる🎉 恋LoRA学習✅ 進捗80%🔥 「鉤括弧」も〜波線も'
+    run bash "$TEST_INBOX_WRITE" "test_agent" "$CONTENT" "report_completed" "other_sender"
+    [ "$status" -eq 0 ]
+    _assert_roundtrip "$CONTENT" "other_sender" "report_completed"
+}
+
+@test "T-020: backslash/quotes in from and type args → byte-exact roundtrip" {
+    # 外部入力は本文だけではない — from/type も同じ経路で守られることの証明
+    CONTENT='本文は普通'
+    FROM_ARG='sender\with\backslash'
+    TYPE_ARG="type'with\"quotes"
+    run bash "$TEST_INBOX_WRITE" "test_agent" "$CONTENT" "$TYPE_ARG" "$FROM_ARG"
+    [ "$status" -eq 0 ]
+    _assert_roundtrip "$CONTENT" "$FROM_ARG" "$TYPE_ARG"
+}

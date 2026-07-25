@@ -1557,7 +1557,7 @@ ash1-5 は default Sonnet medium だが、以下 4 trigger 該当 cmd では Opu
 
 ### ★採番の機械gate = scripts/cmd_id_alloc.sh (cmd_1333 起源・正規経路)★
 
-2026-07-25 に採番衝突が1日で **6件** 発生した (cmd_1322/1324/1326/1328/1330/1331、うち cmd_1331 は同日2度改番)。本規律 (台帳登録=採番gate) は手順としては在ったが、将軍と家老が別プロセスで同時採番すると「台帳を読んでから書くまでの窓」で衝突すると実証された。ゆえに★cmd 番号の払い出しは以下の script を通すのが正規経路★ — 本規律の機械化であり置換ではない (登録義務・schema v2・自由文エスケープ規律は従来通り):
+2026-07-25 に採番衝突が1日で **8件** 発生した (cmd_1322/1324/1326/1328/1330/1331 の6件 + cmd_1331 の同日2度目改番 + 18:08 家老自身の手動 append による cmd_1334 = 規律 commit 097df37 着弾の41秒後 — 明文化単独では止まらぬことの同日実証)。本規律 (台帳登録=採番gate) は手順としては在ったが、将軍と家老が別プロセスで同時採番すると「台帳を読んでから書くまでの窓」で衝突すると実証された。ゆえに★cmd 番号の払い出しは以下の script を通すのが正規経路★ — 本規律の機械化であり置換ではない (登録義務・schema v2・自由文エスケープ規律は従来通り):
 
 ```bash
 # 起票 = 採番+台帳予約を1コマンドで (flock排他・slim entry v2 追記・ledger_validate 込み)
@@ -1570,7 +1570,9 @@ NEW_ID=$(bash scripts/cmd_id_alloc.sh --title "短名" --origin karo \
 - **追記のみ・既存 entry 非破壊**。自由文 (title/evidence) は block scalar `|` へ自動整形 = cmd_1255 規律を script が機械的に守る。
 - 追記後 `ledger_validate.py` を自動実行し、FAIL なら自分の追記のみ rollback (fail-closed)。lock は `inbox_write.sh` 同型 (mkdir 協調 + flock) で、`ledger_guard.sh` の検証 lock とも同一 path = 相互排他。
 - ★将軍側も同じ script を通す (CLAUDE.md Shogun Mandatory Rules 9)。双方が同じ払い出し口を通ることで衝突が構造的に消える★。台帳を目視して番号を決める手動採番は禁。
-- **緊急の手書き起票・改番の充当先番号も `--claim` で払い出せ** (`bash scripts/cmd_id_alloc.sh --claim --origin karo` = 番号のみ払い出し・台帳へは書かない。entry 本文は手書きしてよい)。★gate非経由の手動追記は ledger_guard の検知層 (cmd_1336) が払い出しjournal (`queue/.cmd_id_alloc.journal`) と突合して検知し、是正手順つき警告が家老inboxへ届く★。警告が来たら手順に従い即改番せよ (2026-07-25 18:08 家老自身の手動appendが本日7件目の衝突を起こした実害への構造対策)。
+- **緊急の手書き起票・改番の充当先番号も `--claim` で払い出せ** (`bash scripts/cmd_id_alloc.sh --claim --origin karo` = 番号のみ払い出し・台帳へは書かない。entry 本文は手書きしてよい)。★gate非経由の手動追記は ledger_guard の検知層 (cmd_1336) が払い出しjournal (`queue/.cmd_id_alloc.journal`) と突合して検知し、是正手順つき警告が家老inboxへ届く★。警告が来たら手順に従い即改番せよ (2026-07-25 18:08 家老自身の手動appendが本日8件目の衝突を起こした実害への構造対策)。
+- **焼却番号の扱い (cmd_1341 明文化)**: 一度払い出された番号は★台帳に載らなくても再利用されない★。reserve の validate FAIL rollback 時・claim 後に entry を書かなかった時、その番号は journal + 耐久mirror (`queue/archive/alloc_journal_mirror.yaml`) に残り「焼却」される (欠番として飛ぶ)。★欠番を手で埋めるな★ — 欠番の穴埋め禁は履歴の連続性保全であり、mirror は archive 配下 = 剪定規律により削除されない領域ゆえ、journal が失われても焼却は保たれる (B-N3 封鎖)。
+- **entry への追記は一意な key 名で (cmd_1341 — 家老19:22実害の是正)**: 同一 entry へ `karo_progress:` 等の同名 key を繰り返し追記すると ★YAML 後勝ちで先の記録が黙って消える★ (cmd_1322×2/cmd_1328×2/cmd_1329×3/cmd_1330×2 で実発生)。追記は `karo_progress_2:` / `karo_progress_20260725:` のように★一意な key 名★で行え。ledger_validate.py は重複 key を FAIL にする (cmd_1341) ため、同名 key を書くと ledger_guard が rollback を撃つ。なお是正時の一括置換は入れ子構造 (cmd_645 の子entry等) を壊した前例あり — targeted Edit で1箇所ずつ直せ。
 
 ### status 遷移・evidence 更新の書き手 = 家老
 

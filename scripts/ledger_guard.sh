@@ -52,6 +52,9 @@ INBOX_WRITE="${LEDGER_GUARD_INBOX_WRITE:-$SCRIPT_DIR/scripts/inbox_write.sh}"
 # BASELINE        = 検知層導入時点の最大id (それ以前の既存entryはgrandfather=誤警告しない)
 # WARNED          = 警告済みid (同一idへの警告は一度のみ=家老spam防止)
 ALLOC_JOURNAL="${ALLOC_JOURNAL:-$QUEUE_DIR/.cmd_id_alloc.journal}"
+# cmd_1341 (B-N3): 耐久mirror (cmd_id_alloc.sh が払い出しと同時に併記)。journal 喪失時の
+# 誤検知(S1)防止 = gate経由の払い出しは mirror にも残るゆえ、どちらかに在れば journaled 扱い
+ALLOC_MIRROR="${ALLOC_JOURNAL_MIRROR:-$QUEUE_DIR/archive/alloc_journal_mirror.yaml}"
 MANUAL_ALLOC_BASELINE="${MANUAL_ALLOC_BASELINE:-$QUEUE_DIR/.ledger_guard_manual_baseline}"
 MANUAL_ALLOC_WARNED="${MANUAL_ALLOC_WARNED:-$QUEUE_DIR/.ledger_guard_warned_ids}"
 MANUAL_ALLOC_DETECT="${MANUAL_ALLOC_DETECT:-1}"
@@ -88,7 +91,8 @@ emit_karo_warning() {
 # 検知できないもの (正直な明示):
 #   - baseline 以前の番号での手動追記 (導入時grandfather帯。番号は既使用ゆえ新規衝突は起きない)
 #   - suffix付きid (cmd_123b 等) / archive file への直接追記 / 番号を変えない本文編集
-#   - journal を消されると gate経由分も S1 誤検知しうる (journal は queue/ 配下・通常触らない)
+#   - journal を消されると gate経由分も S1 誤検知しうる → cmd_1341 で緩和: 耐久mirror
+#     (queue/archive/alloc_journal_mirror.yaml) も突合先。両方消えた場合のみ誤検知が残る
 #
 # ★台帳へは一切書かない・戻り値は常に0 = rollback/quarantine 経路に関与しない★
 # (検知の誤爆で正常な台帳が巻き戻るのが最悪の結果、ゆえ構造的に切り離す)
@@ -168,8 +172,9 @@ detect_manual_alloc() {
         reason=""
         if printf '%s\n' "$dups" | grep -qx "$id"; then
             reason="台帳内id重複=衝突"
-        elif ! { [ -f "$ALLOC_JOURNAL" ] && cut -f1 "$ALLOC_JOURNAL" 2>/dev/null | grep -qx "$id"; }; then
-            reason="gate非経由(払い出しjournal記録なし)"
+        elif ! { [ -f "$ALLOC_JOURNAL" ] && cut -f1 "$ALLOC_JOURNAL" 2>/dev/null | grep -qx "$id"; } \
+            && ! { [ -f "$ALLOC_MIRROR" ] && grep -qE "^- id: ${id}([^0-9]|\$)" "$ALLOC_MIRROR" 2>/dev/null; }; then
+            reason="gate非経由(払い出しjournal/mirror記録なし)"
         fi
         [ -n "$reason" ] || continue
         findings="${findings}${id}=${reason} / "

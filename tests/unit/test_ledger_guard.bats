@@ -224,6 +224,39 @@ write_valid_ledger() {
 }
 
 # ───────────────────────────────────────────────────────────
+# cmd_1341: id一意性 + entry内重複key検知
+# (★これらのtestは検査を外すと必ずFAILする=検査が空回りしていない恒久証明★)
+# ───────────────────────────────────────────────────────────
+@test "validator CLI (cmd_1341): duplicate entry id FAILs (B-N1 採番衝突検知)" {
+    printf 'commands:\n- id: cmd_a1\n  status: pending\n- id: cmd_a2\n  status: done\n- id: cmd_a1\n  status: done\n' > "$LEDGER_FILE"
+    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
+    assert_failure
+    assert_output --partial "duplicate entry id"
+}
+
+@test "validator CLI (cmd_1341): duplicate mapping key within entry FAILs (後勝ちの黙殺検知)" {
+    printf 'commands:\n- id: cmd_a1\n  karo_progress: first\n  karo_progress: second\n' > "$LEDGER_FILE"
+    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
+    assert_failure
+    assert_output --partial "duplicate mapping key"
+}
+
+@test "validator CLI (cmd_1341): duplicate key in NESTED mapping also FAILs" {
+    printf 'commands:\n- id: cmd_a1\n  status: pending\n  detail:\n    note: x\n    note: y\n' > "$LEDGER_FILE"
+    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
+    assert_failure
+    assert_output --partial "duplicate mapping key"
+}
+
+@test "validator CLI (cmd_1341): legacy cmd_id duplicates remain PERMITTED (参照fieldゆえ対象外)" {
+    # 実台帳に cmd_640×2 (cmd_id同士) と cmd_611 (id∩cmd_id) が正当に実在する。
+    # これを FAIL にすると ledger_guard が false rollback を撃つ (schema緩和根拠と同じ)。
+    printf 'commands:\n- id: cmd_640\n  status: done\n- cmd_id: cmd_640\n  type: progress_update\n- cmd_id: cmd_640\n  type: progress_update\n' > "$LEDGER_FILE"
+    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
+    assert_success
+}
+
+# ───────────────────────────────────────────────────────────
 # (4) e2e: 実watcher (inotifywait+debounce+flock) で事故再現
 # ───────────────────────────────────────────────────────────
 @test "(4) e2e: live watcher detects corruption via inotify+debounce → auto rollback" {

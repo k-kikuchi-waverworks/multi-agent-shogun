@@ -22,7 +22,7 @@
 #   参照 (予約なし。窓は開いたままゆえ正式採番には使うな):
 #     bash scripts/cmd_id_alloc.sh --peek
 #
-# 払い出し記録 = journal (cmd_1336 手動起票検知の突合先):
+# 払い出し記録 = journal + archive mirror (cmd_1336 / cmd_1341):
 #   - reserve / claim の払い出しは queue/.cmd_id_alloc.journal へ1行追記される
 #     (形式: cmd_N<TAB>timestamp<TAB>origin=X<TAB>mode=reserve|claim)。
 #   - compute_next_id / assert_id_unused は journal も走査する
@@ -30,6 +30,12 @@
 #   - journal 追記は台帳 append より先 (台帳に現れる id は必ず journal 済 =
 #     ledger_guard 検知層が script 経由の払い出しを誤検知しない順序保証)。
 #     reserve の validate FAIL rollback 時も journal 行は残す (番号焼却=安全側)。
+#   - ★cmd_1341 (B-N3): 番号の耐久性は journal 一枚に乗せない★。払い出しと同時に
+#     queue/archive/alloc_journal_mirror.yaml へ「- id: cmd_N」行を併記する。
+#     archive は compute_next_id / assert_id_unused の union 走査対象ゆえ、
+#     ★journal が失われても mirror が番号の再払い出しを防ぐ★ (journal 削除→同番号
+#     再払い出しの実証済み穴の封鎖)。journal は「速度 + 検知層突合の cache」であり
+#     耐久の正本は mirror (archive = 剪定規律により削除されない領域)。
 #
 # 採番規則:
 #   - 正本 = queue/shogun_to_karo.yaml + queue/archive/ 配下 *.yaml (再帰走査)。
@@ -65,6 +71,8 @@ PYTHON="${LEDGER_PYTHON:-$SCRIPT_DIR/.venv/bin/python3}"
 
 # cmd_1336: 払い出し記録 (ledger_guard 手動起票検知の突合先。queue/ は git 管理外)
 ALLOC_JOURNAL="${ALLOC_JOURNAL:-$SCRIPT_DIR/queue/.cmd_id_alloc.journal}"
+# cmd_1341 (B-N3): 耐久mirror。archive 配下 = union走査対象ゆえ journal 喪失でも番号不再利用
+ALLOC_MIRROR="${ALLOC_JOURNAL_MIRROR:-$ARCHIVE_DIR/alloc_journal_mirror.yaml}"
 
 LOCKFILE="${LEDGER_FILE}.lock"
 LOCK_DIR="${LOCKFILE}.d"
@@ -158,12 +166,18 @@ assert_id_unused() {
     [ -z "$hits" ]
 }
 
-# ─── cmd_1336: 払い出し記録の追記。記録できぬ番号は払い出さない (fail-closed) ───
+# ─── cmd_1336/cmd_1341: 払い出し記録の追記。記録できぬ番号は払い出さない (fail-closed) ───
 journal_record() {
     local id="$1" mode="$2"
     printf '%s\t%s\torigin=%s\tmode=%s\n' "$id" "$TIMESTAMP" "$ORIGIN" "$mode" \
         >> "$ALLOC_JOURNAL" \
         || die "journal 追記失敗 ($ALLOC_JOURNAL)。記録できぬ番号は払い出さない (fail-closed)"
+    # cmd_1341 (B-N3): 耐久mirror へ併記。「- id: cmd_N」形式 = compute_next_id /
+    # assert_id_unused の ID_LINE_RE に合致するゆえ、journal が消えても番号は焼却済のまま。
+    printf -- '- id: %s  # %s origin=%s mode=%s (alloc mirror)\n' \
+        "$id" "$TIMESTAMP" "$ORIGIN" "$mode" \
+        >> "$ALLOC_MIRROR" \
+        || die "alloc mirror 追記失敗 ($ALLOC_MIRROR)。記録できぬ番号は払い出さない (fail-closed)"
 }
 
 # ─── block scalar 整形: 全行に4space indent (空行は素通し) ───
@@ -307,6 +321,21 @@ fi
 SNAP="$(mktemp "${TMPDIR:-/tmp}/cmd_id_alloc_snap.XXXXXX")"
 cleanup_snap() { rm -f "$SNAP" 2>/dev/null || true; }
 
+# cmd_1341 (B-N2): rollback 前に現状版を quarantine (ledger_guard.sh と同じ流儀 =
+# queue/archive/corrupt_shogun_to_karo_<ts>.yaml へ非破壊退避)。
+# snapshot→validate の窓 (~0.2s) に gate 非経由の書き手 (家老の Edit 等) が追記して
+# いた場合、cp "$SNAP" はその追記ごと消す。quarantine が在れば中身を復元できる。
+quarantine_before_rollback() {
+    local ts quar
+    ts="$(date '+%Y%m%d%H%M%S')_$$"
+    quar="$ARCHIVE_DIR/corrupt_shogun_to_karo_${ts}.yaml"
+    if cp "$LEDGER_FILE" "$quar" 2>/dev/null; then
+        log "quarantine: rollback前の台帳を退避 → $quar (他者の並行追記が在れば其処から復元できる)"
+    else
+        log "WARN: quarantine copy failed ($quar) — rollback は続行する"
+    fi
+}
+
 cp -p "$LEDGER_FILE" "$SNAP" 2>/dev/null || cp "$LEDGER_FILE" "$SNAP"
 SNAP_SIZE="$(stat -c%s "$SNAP" 2>/dev/null || wc -c < "$SNAP")"
 
@@ -330,16 +359,18 @@ fi
 
 # 自己検証①: 既存部分が1byteも変わっていないこと (追記のみ保証)
 if ! cmp -s -n "$SNAP_SIZE" "$SNAP" "$LEDGER_FILE"; then
+    quarantine_before_rollback
     cp "$SNAP" "$LEDGER_FILE"
     cleanup_snap
-    die "追記のはずが既存部分が変化した — rollback した (異常。手で調査せよ)"
+    die "追記のはずが既存部分が変化した — rollback した (quarantine に退避済。手で調査せよ)"
 fi
 
 # 自己検証②: 台帳全体が parse+schema PASS すること (ledger_guard と同じ validator)
 if ! "$PYTHON" "$VALIDATOR" "$LEDGER_FILE"; then
+    quarantine_before_rollback
     cp "$SNAP" "$LEDGER_FILE"
     cleanup_snap
-    die "追記後の ledger_validate FAIL — 自分の追記を rollback した。入力の自由文を確認せよ"
+    die "追記後の ledger_validate FAIL — 自分の追記を rollback した (quarantine に退避済)。入力の自由文を確認せよ"
 fi
 
 cleanup_snap

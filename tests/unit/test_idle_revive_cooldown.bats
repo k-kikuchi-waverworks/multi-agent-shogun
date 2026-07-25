@@ -60,7 +60,13 @@ spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
 irs = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(irs)
 Q = Path(os.environ["Q"])
-NOW = datetime.datetime(2026, 7, 14, 16, 0, 0)
+# cmd_1339: 固定 NOW (2026-07-14) は fixture の実 mtime (touch -d '2 hours ago') と
+# 乖離して暦が進むと腐る (idle_min が負になり scan 対象外) = 日付爆弾だった。
+# 実時刻基準 + 相対 helper へ是正 (2026-07-26 に 5/7 が沈黙赤で発見)。
+NOW = datetime.datetime.now().replace(microsecond=0)
+def iso_ago(minutes):
+    return (NOW - datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds")
+NOW_ISO = NOW.isoformat(timespec="seconds")
 def run_scan(pane_state, entry, **kw):
     results, log = irs.scan(
         Q / "tasks", Q / "reports", Q.parent, {"ashigaru9": pane_state},
@@ -76,8 +82,8 @@ PY
     _write_task ashigaru9 subtask_x assigned
     run _run_scan_py <<PY
 $(_py_prelude)
-entry = {"last_clear_ts": "2026-07-14T15:00:00", "consecutive": 3,
-         "last_task_id": "subtask_x", "last_alert_ts": "2026-07-14T15:50:00"}
+entry = {"last_clear_ts": iso_ago(60), "consecutive": 3,
+         "last_task_id": "subtask_x", "last_alert_ts": iso_ago(10)}
 results, log = run_scan("idle", entry)
 assert len(results) == 1, results
 r = results[0]
@@ -95,12 +101,12 @@ PY
     _write_task ashigaru9 subtask_x assigned
     run _run_scan_py <<PY
 $(_py_prelude)
-entry = {"last_clear_ts": "2026-07-14T15:00:00", "consecutive": 3,
-         "last_task_id": "subtask_x", "last_alert_ts": "2026-07-14T15:20:00"}
+entry = {"last_clear_ts": iso_ago(60), "consecutive": 3,
+         "last_task_id": "subtask_x", "last_alert_ts": iso_ago(40)}
 results, log = run_scan("idle", entry)
 r = results[0]
 assert r["action"] == "escalation_stop", r
-assert r["_new_state"]["last_alert_ts"] == "2026-07-14T16:00:00", r
+assert r["_new_state"]["last_alert_ts"] == NOW_ISO, r
 assert r["_new_state"]["consecutive"] == 3, r
 print("OK", r["action"])
 PY
@@ -114,12 +120,12 @@ PY
     _write_task ashigaru9 subtask_x assigned
     run _run_scan_py <<PY
 $(_py_prelude)
-entry = {"last_clear_ts": "2026-07-14T15:00:00", "consecutive": 3,
+entry = {"last_clear_ts": iso_ago(60), "consecutive": 3,
          "last_task_id": "subtask_x"}
 results, log = run_scan("idle", entry)
 r = results[0]
 assert r["action"] == "escalation_stop", r
-assert r["_new_state"]["last_alert_ts"] == "2026-07-14T16:00:00", r
+assert r["_new_state"]["last_alert_ts"] == NOW_ISO, r
 print("OK", r["action"])
 PY
     [ "$status" -eq 0 ]
@@ -132,8 +138,8 @@ PY
     _write_task ashigaru9 subtask_x assigned
     run _run_scan_py <<PY
 $(_py_prelude)
-entry = {"last_clear_ts": "2026-07-14T15:00:00", "consecutive": 3,
-         "last_task_id": "subtask_x", "last_alert_ts": "2026-07-14T15:50:00"}
+entry = {"last_clear_ts": iso_ago(60), "consecutive": 3,
+         "last_task_id": "subtask_x", "last_alert_ts": iso_ago(10)}
 results, log = run_scan("busy", entry)
 assert results == [], results
 e = log["ashigaru9"]
@@ -151,8 +157,8 @@ PY
     _write_task ashigaru9 subtask_x assigned
     run _run_scan_py <<PY
 $(_py_prelude)
-entry = {"last_clear_ts": "2026-07-14T15:00:00", "consecutive": 3,
-         "last_task_id": "subtask_x", "last_alert_ts": "2026-07-14T15:50:00"}
+entry = {"last_clear_ts": iso_ago(60), "consecutive": 3,
+         "last_task_id": "subtask_x", "last_alert_ts": iso_ago(10)}
 results, log = run_scan("idle", entry, alert_cooldown_min=5)
 r = results[0]
 assert r["action"] == "escalation_stop", r
@@ -172,19 +178,19 @@ PY
     run _run_scan_py <<PY
 $(_py_prelude)
 dash = Q.parent / "dashboard.md"
-entry = {"last_clear_ts": "2026-07-14T15:00:00", "consecutive": 3,
-         "last_task_id": "karo_degrade", "last_alert_ts": "2026-07-14T15:50:00"}
+entry = {"last_clear_ts": iso_ago(60), "consecutive": 3,
+         "last_task_id": "karo_degrade", "last_alert_ts": iso_ago(10)}
 hit, log = irs.scan_karo_degrade(
     dash, Q / "tasks", Q / "reports", {"karo": entry},
     karo_stale_min=20, karo_min_interval_min=20, max_consecutive=3, now=NOW)
 assert hit is not None and hit["action"] == "alert_cooldown", hit
 # 期限切れなら escalation_stop + ts 更新
-entry2 = dict(entry); entry2["last_alert_ts"] = "2026-07-14T15:20:00"
+entry2 = dict(entry); entry2["last_alert_ts"] = iso_ago(40)
 hit2, _ = irs.scan_karo_degrade(
     dash, Q / "tasks", Q / "reports", {"karo": entry2},
     karo_stale_min=20, karo_min_interval_min=20, max_consecutive=3, now=NOW)
 assert hit2["action"] == "escalation_stop", hit2
-assert hit2["_new_state"]["last_alert_ts"] == "2026-07-14T16:00:00", hit2
+assert hit2["_new_state"]["last_alert_ts"] == NOW_ISO, hit2
 print("OK karo cooldown")
 PY
     [ "$status" -eq 0 ]

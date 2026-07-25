@@ -1,6 +1,8 @@
 # cmd_1339 契約版の有効化 runbook + 停電型誤clear抑制設計
 
 作成: 2026-07-25 足軽一号 (subtask_1339_contract_activation_readiness)
+更新: 2026-07-26 足軽一号 (subtask_1339_quorum_gate_and_threshold) — §4 閾値45適用済 /
+§5 quorum gate ★実装済★ / §5b 家老労働証跡gate追加 / §7-1 [LEGACY] warn-once 修正済
 演習証跡: scratchpad `cl1339_activation_rehearsal/` (phaseA/B/C_result.txt)
 
 ## 0. 現在地 (2026-07-25 23:10 実測) — 下命時点から状況が変わっている
@@ -39,6 +41,13 @@ self-watch と誤認して SKIP しうる (`agent_has_self_watch` は pgrep で�
 30s tick で自己回復 = 最悪 +60s の遅延のみ。
 
 ## 2. 手順書: ledger_guard 契約版有効化 (残る唯一の未適用・★実施は家老の号令★)
+
+★preflight の答 (2026-07-26 機械確認済): ledger_guard (1274378) は supervisor の自動再起動
+【対象】である★ — 稼働中 supervisor は 5s 毎に start_ledger_guard_if_missing を試行しており、
+現在は pgrep fallback が旧 instance (1274378) を見つけて起動を控えているだけ ([LEGACY] log が
+その実況)。lock は非保持 (meta は演習残骸 pid=20101・flock 解放済を機械確認)。
+⇒ ★家老が殿へ頼むのは『kill 1274378』の1行のみ。≤5s で supervisor が契約版を自動起動し、
+手動起動・他操作は一切不要 ([LEGACY] spam も同時に止まる)★。
 
 **所要: 1分以内。止まる機能: 窓 (実測0.6s) の間の台帳リアルタイム検証のみ。**
 新instanceが起動時に現台帳を検証するため窓中の破損も捕捉される (ただし起動時FAILは
@@ -80,37 +89,68 @@ kill 1274378        # 直コマンドが permission層で拒否される場合�
 
 ## 4. idle_revive 閾値 (--stall-min) を戻す条件
 
-現行: crontab `--stall-min 90` (script default=15・本日 15→45→90 と拡大)。
+★2026-07-26 00:0x: 90→**45** 適用済 (家老裁定①・crontab 実測確認済)★。
 90 は「殿token切れ58分を閾値で跨ぐ」ための暫定 = ★停電型を閾値で解こうとした形であり正道でない★
-(task YAML の言う通り「閾値では解けぬ」— 何分にしても真の固着発見がその分遅れる)。
+だった。§5 の quorum gate 実装 (2026-07-26・同時適用) が停電型を構造で塞ぐため 45 へ戻した。
+適用の実証: 同一 fixture (60分沈黙) が `--stall-min 90` で素通り / `--stall-min 45` で検知
+(cron 実経路 = idle_revive_scan.sh wrapper 経由で機械確認)。
 
 | 段階 | 条件 (観測可能な事実) | 措置 |
 |---|---|---|
-| 今すぐ可 | 契約版 idle_revive (busy再probe gate/queued=busy契約/警報文脈添付) が本番有効 = 済 | 90→**45** へ戻す (家老1行: crontab -e) |
-| §5 実装後 | 停電型抑制が入り、全体同時沈黙で clear が撃たれない構造になった時 | 45→**15** (script default) へ |
-| 観測条件 | 45運用で48h、logs/idle_revive_scan.log に「busyへ転じたため発行せず」以外の誤clear 0件 | 15復帰の裏付け |
+| ~~今すぐ可~~ 済 | 契約版 idle_revive (busy再probe gate/queued=busy契約/警報文脈添付) が本番有効 | 90→**45** ★2026-07-26 適用済★ |
+| §5 実装後 | ★§5 実装済 (2026-07-26)★。残る条件=下の観測条件のみ | 45→**15** (script default) へ |
+| 観測条件 | **45運用で48h (起点 2026-07-26 00:00)、logs/idle_revive_scan.log に「busyへ転じたため発行せず」「上流障害gate」「BLACKOUT抑止」以外の誤clear 0件** | 15復帰の裏付け。観測方法: `grep -E 'clear_command 発行|SKIP|BLACKOUT' logs/idle_revive_scan.log` を家老が点検し、発行された clear の対象 agent の当時の実態 (pane/report) と突合 |
 
 戻した後に誤clearが1件でも出たら、閾値を弄る前に「なぜ検知が実態を見ていないか」を
-実データで特定する (本日の教訓: 推測で閾値をいじるな)。
+実データで特定する (2026-07-25 の教訓: 推測で閾値をいじるな)。
 
-## 5. 停電型 (全体同時沈黙) を誤clearしない道 = ★在る。設計のみ・実装は家老裁定後★
+## 5. 停電型 (全体同時沈黙) を誤clearしない道 = ★実装済 (2026-07-26・家老裁定②GO)★
 
 実例 (2026-07-25 19:51-20:45): 殿のsessionトークン切れで**全8体が同時沈黙**。45分閾値を素通りし
 誤clearが発生。「1体だけ止まっている」(agent固有の固着) と「全員止まっている」(系の上流障害) は別物 —
 独立障害がN体同時に起きる確率は無視できるため、後者でagentをclearしても何も直らず context だけ失う。
+さらに ★22:38 に 9 session 一斉再起動が実際に発生★ = 前提が「起こりうる」から「今日起きた」へ。
 
-設計 (idle_revive_scan.py への追加・±40行程度):
-- **quorum gate**: per-agent判定の前に全対象agentのstall判定を集計し、
-  「stall条件を満たす割合 ≥ 75% かつ 対象数 ≥ 3」なら**停電型**と判定:
-  - 全agentへの clear_command 発行を全面抑止 (dry-runと同じ経路で判定logのみ残す)
-  - 家老へ warning 1通のみ (`type: warning`・30分throttle・§既存 supervisor不在警告と同型):
-    「全体同時沈黙を検知。agent個別の固着ではなく上流 (トークン切れ/API障害/tmux server喪失) を疑え。
-    clearは撃っていない。」+ 各pane末尾の文脈 (token/usage limit 文字列があれば引用)
-- **復帰判定**: いずれかのagentの出力mtimeが動いた時点で quorum 不成立に戻り通常監視へ (状態file
-  `queue/state/blackout_suppress` はthrottle専用・判定は毎回再計算 = 復帰漏れしない)
-- **個別検知を殺さない枷**: quorum は「taskを持つ scan対象」で数える。対象が1-2体の時は
-  quorum 不成立 = 従来の個別判定のまま (少数運用時に全面抑止が常時発動する誤設計を避ける)
-- 副次効果: tmux server消失 (本日22:3x型) も「全pane absent」として同じ網に掛かる
+実装 (scripts/idle_revive_scan.py・cron がディスクから毎回 exec するため ★commit 不要で既に本番有効★):
+- **quorum gate**: 同一 scan cycle の stall 判定を集計し「★同時 stall ≥3体 かつ scan対象の≥75%★」で
+  **停電型**と判定 (`--quorum-min-stalled 3` / `--quorum-ratio 0.75` / 無効化 `--no-quorum-gate`):
+  - 個別 clear_command / escalation を全面抑止 (log に BLACKOUT抑止 と明示・★家老 degrade clear も抑止★)
+  - 家老へ warning 1通のみ (`type: warning`・30分 throttle `--blackout-throttle-min`):
+    上流障害 (token/credit/auth/API/tmux server喪失) を疑えという文面 + 対象一覧 +
+    各 pane 末尾の上流障害文字列の引用 (あれば)
+  - ★state 非消費★: rate limit / consecutive を進めない = 復帰後は従来判定が即座に働く
+- **分母/分子の定義**: 分母 = active task を持つ scan 対象 (★busy 含む = busy は系が健全である証拠★)。
+  分子 = idle+出力停止、または absent+出力停止 (tmux server 消失 22:3x 型も同じ網)
+- **復帰判定**: 毎 scan ゼロから再計算 (状態file `queue/state/blackout_suppress` は警報throttle専用)
+  = いずれかの agent の出力 mtime が動けば次 scan で自動復帰・復帰漏れしない
+- **個別検知を殺さない枷**: 同時 stall 1〜2体では不成立 = 従来の個別判定のまま。
+  大編成で 3体 stall しても busy 多数なら割合 <75% で不成立 (変異試験 T-QRM-005 で実証)
+- **上流障害文字列 gate (軍師一号具申の補強)**: 発行直前に pane 末尾15行から
+  usage limit / rate limit / credit balance / authentication_error / oauth token has expired /
+  please run /login / overloaded を検知したら個別にも抑止 (quorum 不成立でも効く)。
+  ★境界: 一時的な API 5xx は含めない = /clear+再読で直る型まで抑止すると真の固着を見逃す★
+- 変異試験: tests/unit/test_idle_revive_quorum.bats (T-QRM-001〜009 = task YAML の (a)(b)(c)(d) 全網羅)
+
+## 5b. 家老の生死判定に用いる証拠の一覧 (2026-07-25 23:39 家老誤clear 実データより)
+
+23:39:07、家老は 21分間で task 4本を dispatch していた (queue/tasks updated_at が実証) のに、
+dashboard.md の鮮度だけで「死」と判定され誤clearされた。★dashboard mtime は家老の成果物の
+一つにすぎない代理変数★ — quorum は「全体が死んだ時」の網であり、この「1体だけ誤って死と
+判定される」型には別条項が要る (将軍下命・家老回付)。実装済の証拠一覧:
+
+| 証拠 | 実体 | 意味 |
+|---|---|---|
+| K1 | dashboard.md mtime | 従来 signal (staleness の一次判定・単独では殺せない) |
+| K2 | queue/tasks/*.yaml mtime | task dispatch/更新 = 家老の労働 |
+| K3 | queue/inbox/*.yaml 内 from:karo の timestamp | メッセージ送信 = 家老の労働 |
+| K4 | queue/shogun_to_karo.yaml mtime | 台帳 progress 追記 = 家老の労働 |
+
+K2/K3/K4 のいずれかが window (karo_stale_min=20分) 内なら家老生存 = /clear を撃たない
+(log に「karo生存証跡」と明示)。★queue/reports/*.yaml は足軽/軍師の労働ゆえ含めない★
+(含めると 2026-07-01 型の真の degrade = 現場は動くが家老だけ固まる、を見逃す)。
+caveat: K2 は足軽が自 task YAML を書換えた場合も更新される = その窓だけ真の degrade 検知が
+遅れるが、誤clear 実績 (07-25 だけで家老3件) と真 degrade 実績 (07-01 の1件) の非対称から
+「疑わしきは撃たない」側に倒した。変異試験 T-QRM-009 (両側)。
 
 ## 6. 残置プロセスの始末 (⑥・家老実施可の材料)
 
@@ -129,15 +169,37 @@ rm -rf /tmp/cl1339a /tmp/cl1339b
 ```
 権限の正体: 前回の「kill権限拒否」は OS の EPERM ではなく **Claude Code permission層が
 直コマンドの `kill` 文字列を拒否**したもの (今回 `kill -0` をscript内から実行し権限あり実測)。
-拒否されたら上記をscript fileに書いて `bash script.sh` で実行すればよい。
+★2026-07-26 追記: `tmux kill-server` (socket経由) も同 permission 層で拒否された。
+家老裁定③により script 包みでの迂回は【禁】ゆえ足軽一号は実行を止めた =
+★残置 2 server は存命のまま。上記 2 行 (`env -u TMUX TMUX_TMPDIR=/tmp/cl1339a tmux kill-server` /
+同 cl1339b) + `rm -rf /tmp/cl1339a /tmp/cl1339b` は権限を持つ者 (家老 or 殿) の手番★。
+実在・隔離socket・本番非該当 (本番=/tmp/tmux-1000/default) は 07-26 00:0x に再確認済み。
 
 ## 7. 残欠陥 / 申し送り (今回演習で実測した契約版の粗)
 
-1. **[LEGACY] log の warn-once漏れ**: supervisor は旧instance検知を5s毎にlogし続ける
-   (実測 10行/30s ≈ 15K行/日)。§2 実施で実害は消えるが、warn-once化の1行修正を次回更新に同梱推奨。
+1. **[LEGACY] log の warn-once漏れ**: ★修正済 (2026-07-26・legacy_note_once/clear =
+   episode 単位 warn-once・変異試験 tests/unit/test_supervisor_legacy_once.bats で
+   before 12行/60s相当 → after 1行/episode を機械実証)★。
+   ★但し配備 caveat: 稼働中 supervisor は旧 inode をメモリ実行中のため、本番の spam が
+   止まるのは (a) §2 実施 (ledger_guard kill で検知対象自体が消滅 = 即時) または
+   (b) 次回 supervisor 再起動 (新コードで warn-once 有効) のいずれか早い方★。
+   配備は §3 の rename 契約に従い cp→edit→mv で実施済 (in-place 編集非実施)。
 2. **pgrep の越境可視性**: supervisor/self-watch の pgrep はシステム全体を見るため、別checkout・
    隔離演習・同名scriptを本番instanceと誤認しうる (演習で実測)。lock契約が主判定ゆえ実害は
    移行期の網のみだが、複数checkout同時運用は避けよ。
 3. 隔離演習を行う者への注意 (今回の実測から): `$TMUX` を unset しないと TMUX_TMPDIR より優先される /
    `IDLE_FLAG_DIR` (default /tmp) は本番と共有される / agent名が本番と同名だと self-watch pgrep が
    本番の inotifywait を拾う — いずれも隔離時に env/名前を分けること。
+   ★追補 (2026-07-26 実測): `SHOGUN_LOCK_DIR` も隔離必須★ — 07-25 の演習 instance (pid 20101・
+   tmp ledger) が本番 lock dir の `ledger_guard.lock` meta を上書きしていた (プロセス死亡済で
+   flock は解放済 = 実害なしだが、meta の pid を信じる者を誤導する)。演習では
+   `SHOGUN_LOCK_DIR=$(mktemp -d)` を必ず与えること。次の契約版 ledger_guard 起動時に
+   proc_lock_acquire が正しい meta へ上書きするため本件の残骸は自然解消する。
+4. **旧 test_watcher_supervisor.bats は stale**: T-WS-002/003/004 が cmd_1339 契約化以前の
+   構造 (旧 lockfile path 等) を前提としており本 fix と無関係に赤 (before/after 同一を確認済)。
+   contract 版の supervisor 検証は test_supervisor_legacy_once.bats ほか cmd_1339 系 bats が実体。
+   旧 file の改修は別途 (勝手に大改修せず申し送り)。
+5. **idle_revive cooldown bats の日付爆弾は是正済 (2026-07-26)**: 固定 NOW=2026-07-14 が実 mtime と
+   乖離し暦進行で 5/7 が沈黙赤化していた (HEAD 版でも同一失敗を機械確認 = 本 fix 由来でない)。
+   相対時刻 fixture へ是正し 7/7 復緑。「緑が腐る」も「赤が沈黙する」も同根 =
+   [[feedback_green_tests_that_prove_nothing]] の別の顔。

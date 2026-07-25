@@ -37,6 +37,25 @@ sup_log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2
 }
 
+# ── cmd_1339 ③: [LEGACY] は状態でありイベントではない — episode につき 1 行のみ ──
+# main loop (5s毎) から毎回 log すると実測 54行/5分 ≈ 15.5K行/日 の spam になる
+# (2026-07-25 実測)。marker file で「旧 instance 生存」episode の初回のみ log し、
+# 解消 (契約 lock 世代へ移行 or 消滅=start 実行) で marker を消して次の episode に備える。
+# marker は file ベース: 呼出元 start_*_if_missing は subshell 内ゆえ shell 変数では
+# 親 loop へ持ち越せない。
+legacy_note_once() {
+    local name="$1"; shift
+    local marker="$SHOGUN_LOCK_DIR/legacy_noted_${name}"
+    [ -e "$marker" ] && return 0
+    sup_log "[LEGACY] $* (本行は episode につき一度のみ・解消まで再出力せぬ)"
+    : > "$marker" 2>/dev/null || true
+}
+
+legacy_note_clear() {
+    local marker="$SHOGUN_LOCK_DIR/legacy_noted_${1}"
+    [ -e "$marker" ] && rm -f "$marker" 2>/dev/null || true
+}
+
 # ── cmd_1339 ②: supervisor lifetime lock (二重 supervisor 防止 + 生存 beacon) ──
 if [ "${__WATCHER_SUPERVISOR_TESTING__:-}" != "1" ]; then
     if ! proc_lock_acquire "watcher_supervisor" 208 "watcher_supervisor"; then
@@ -86,6 +105,7 @@ start_watcher_if_missing() {
         # 自己一致に依存しない。watcher 側が lock を取れなければ自主退場するため、
         # ここの判定と start の間の TOCTOU も実害にならない (二重側が自滅する)。
         if proc_lock_is_held "inbox_watcher_${agent}"; then
+            legacy_note_clear "$agent"   # 契約 lock 世代へ移行済 = legacy episode 解消
             return 0
         fi
 
@@ -94,9 +114,10 @@ start_watcher_if_missing() {
         # 注意: pgrep -f は「pattern 文字列を cmdline に含む別プロセス」(例: 手動 grep)
         # にも当たりうる=自己一致 hazard。契約は上の lock probe であり、これは移行期の網。
         if pgrep -f "scripts/inbox_watcher\.sh ${agent} " >/dev/null 2>&1; then
-            sup_log "[LEGACY] ${agent}: lifetime lock 無しの旧 watcher が生存 — 起動せず (次回出陣で契約 lock 世代へ移行)"
+            legacy_note_once "$agent" "${agent}: lifetime lock 無しの旧 watcher が生存 — 起動せず (次回出陣で契約 lock 世代へ移行)"
             return 0
         fi
+        legacy_note_clear "$agent"   # 旧 instance 消滅 = episode 終了 (次回検知は再度 log)
 
         cli=$(tmux show-options -p -t "$pane" -v @agent_cli 2>/dev/null || echo "codex")
 
@@ -149,12 +170,14 @@ start_ledger_guard_if_missing() {
     (
         flock -n 9 || return 0
         if proc_lock_is_held "ledger_guard"; then
+            legacy_note_clear "ledger_guard"   # 契約 lock 世代へ移行済 = episode 解消
             return 0
         fi
         if pgrep -f "scripts/ledger_guard\.sh" >/dev/null 2>&1; then
-            sup_log "[LEGACY] ledger_guard: lifetime lock 無しの旧 instance が生存 — 起動せず"
+            legacy_note_once "ledger_guard" "ledger_guard: lifetime lock 無しの旧 instance が生存 — 起動せず"
             return 0
         fi
+        legacy_note_clear "ledger_guard"   # 旧 instance 消滅 = episode 終了
         nohup bash scripts/ledger_guard.sh >> "logs/ledger_guard.log" 2>&1 9>&- 208>&- &
         sup_log "[START] ledger_guard started PID=$!"
     ) 9>"$start_lock"

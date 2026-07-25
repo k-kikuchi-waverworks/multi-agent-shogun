@@ -30,15 +30,35 @@
 #     (iii) 乖離 corroboration = task/report YAML の mtime が dashboard mtime より新しい
 #          (= 現場は進んだのに家老の記録が追随せず。mtime のみ・prose 非scrape)
 #   hit → karo へ clear_command(rate limit --karo-min-interval-min, default 20 分)。
+#   ★cmd_1339 労働証跡 gate★: dashboard mtime は代理変数 — 家老の実労働 (task YAML
+#   書込 K2 / from:karo inbox 送信 K3 / 台帳追記 K4) が window 内なら clear しない
+#   (証拠一覧は scan_karo_degrade 直前の comment block 参照)。
 #   SessionStart hook が persona/state を復旧、CLAUDE.md Session Start が queue YAML から
 #   dashboard を再構築するゆえ state 損失ゼロ(非破壊)。karo 連続 escalation は shogun へ。
 #   backstop の定期 self-clear は karo.md 規律側(docs Task D)。本 script は primary(reactive)。
+#
+# ★停電型 (相関沈黙) quorum gate★ (cmd_1339・runbook §5):
+#   2026-07-25 19:51-20:45 殿 token 切れで全8体が同時沈黙 → 閾値を素通りして誤 clear。
+#   「1体だけ止まっている」(agent 固有の固着) と「全員止まっている」(系の上流障害) は
+#   別物 — 独立障害が N 体同時に起きる確率は無視できるため、相関沈黙は共通原因の証拠。
+#   同一 scan cycle で stall 条件成立が ≥ quorum_min_stalled (3) 体かつ scan 対象の
+#   ≥ quorum_ratio (75%) なら系イベントと判定し:
+#     - 個別 clear (revive/escalation) を全面抑止 (家老 degrade clear も含む)
+#     - 家老へ warning 1通のみ (queue/state/blackout_suppress で 30分 throttle)
+#     - rate limit / consecutive は消費しない = 復帰後は即座に従来判定へ戻る
+#   分母 = active task を持つ scan 対象 (busy 含む=busy は系が健全である証拠)。
+#   分子 = idle+出力停止、または absent+出力停止 (tmux server 消失型も同じ網)。
+#   対象が 1〜2 体では不成立 = 個別検知は殺さない。
+#   補強 (軍師一号具申): 発行直前に pane 本文の上流障害文字列 (usage limit / credit /
+#   auth / rate limit) を検知したら個別にも抑止 — 上流障害中の /clear は context を
+#   失うだけで何も直さないため。
 #
 # Usage:
 #   python3 scripts/idle_revive_scan.py [--dry-run] [--stall-min N] [--min-interval-min N]
 #     [--max-consecutive N] [--karo-stale-min N] [--karo-min-interval-min N]
 #     [--no-karo-check] [--dashboard-path PATH] [--pane-state-file PATH]
-#     [--json] [--queue-root PATH]
+#     [--quorum-min-stalled N] [--quorum-ratio F] [--no-quorum-gate]
+#     [--blackout-throttle-min N] [--json] [--queue-root PATH]
 #
 # On hit (非 dry-run): `inbox_write.sh {agent} "<本文>" clear_command idle_revive_scan` を発行。
 # --dry-run: 判定結果を stdout に出すのみ(実 clear 発行 0)。smoke / 動作検証用。
@@ -48,6 +68,7 @@
 import argparse
 import datetime
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -58,7 +79,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TASKS_DIR = REPO_ROOT / "queue" / "tasks"
 DEFAULT_REPORTS_DIR = REPO_ROOT / "queue" / "reports"
 DEFAULT_STATE_DIR = REPO_ROOT / "queue" / "state"
-INBOX_WRITE_SH = REPO_ROOT / "scripts" / "inbox_write.sh"
+# test 注入口: 本番 inbox へ書かず stub に記録させるため env で差し替え可能にする
+# (fixture roster での変異試験が実 inbox を汚さぬための唯一の経路。本番は未設定)。
+INBOX_WRITE_SH = Path(os.environ.get("IDLE_REVIVE_INBOX_WRITE",
+                                     str(REPO_ROOT / "scripts" / "inbox_write.sh")))
 
 # (b) revive 候補となる task status。それ以外(done/completed/idle/reassigned_* 等)は除外。
 ACTIVE_STATUSES = {"assigned", "in_progress"}
@@ -80,6 +104,26 @@ DEFAULT_KARO_STALE_MIN = 20        # dashboard.md staleness 閾値。家老 clea
 DEFAULT_KARO_MIN_INTERVAL_MIN = 20 # rate limit: karo 連続 clear 最小間隔(≥15-20分・設計 §4)。
 DEFAULT_DASHBOARD = REPO_ROOT / "dashboard.md"
 KARO_STATE_KEY = "karo"
+
+# ── cmd_1339: 停電型 (相関沈黙) quorum gate パラメータ (runbook §5) ──
+DEFAULT_QUORUM_MIN_STALLED = 3     # 系イベント判定に要する同時 stall 最小体数。1〜2体では不成立。
+DEFAULT_QUORUM_RATIO = 0.75        # 同 上、scan 対象 (busy 含む) に対する stall 割合の下限。
+DEFAULT_BLACKOUT_THROTTLE_MIN = 30 # 家老への停電型 warning の最小間隔 (supervisor不在警告と同型)。
+BLACKOUT_AGENT_KEY = "*fleet*"     # 停電型判定の合成 result entry が名乗る agent 名。
+BLACKOUT_STATE_FILE = "blackout_suppress"  # queue/state/ 配下の throttle 専用 state file。
+
+# 上流障害 (account/API 層) の pane 兆候文字列。★clear では直らない障害に限定する★:
+# 新 session を張っても同じ壁に当たる account/認証/枠系のみ。一時的な API 5xx は
+# /clear+再読で復帰しうるため含めない (過剰抑止で真の固着を見逃さないための境界)。
+UPSTREAM_FAILURE_PATTERNS = (
+    "usage limit",              # Claude usage limit reached 型 (殿 token 枠)
+    "rate limit", "rate_limit", # rate_limit_error / Rate limited
+    "credit balance",           # credit balance is too low
+    "authentication_error",
+    "oauth token has expired",
+    "please run /login",
+    "overloaded",               # overloaded_error (上流容量・clear で直らない)
+)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -229,6 +273,53 @@ def agent_context_note(agent, reports_dir):
     except OSError:
         pass
     return f"直前pane末尾『{tail}』/ report最終更新={age}"
+
+
+# ─────────────────────────────────────────────────────────────
+# cmd_1339 quorum 補強: 上流障害文字列の検知 (軍師一号具申)
+# ─────────────────────────────────────────────────────────────
+_PANE_UPSTREAM_BASH = r'''
+set -uo pipefail
+cd "$1"
+agent="$2"
+source lib/agent_registry.sh
+PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
+pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
+[ -n "$pane" ] || exit 0
+tmux capture-pane -t "$pane" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -15
+'''
+
+
+def pane_upstream_text(agent):
+    """上流障害検知用に pane 末尾 15 行 (空行除く) を返す。取得不能は空文字。
+
+    エラー banner は prompt 付近 (末尾) に出るため末尾のみ見る — pane 全面を見ると
+    agent が編集中のコード本文 (「rate limit」等の語を含みうる) を拾う誤検知が増える。
+    """
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", _PANE_UPSTREAM_BASH, "_", str(REPO_ROOT), agent],
+            capture_output=True, text=True, timeout=30,
+        )
+        return proc.stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def detect_upstream_failure(text):
+    """pane 本文に上流障害 (account/API 層) の兆候文字列があれば該当 pattern を返す。
+
+    hit した agent への /clear は抑止する: 上流障害中の clear は context を失うだけで
+    何も直さない (新 session も同じ壁に当たる)。抑止は state を消費しない =
+    障害解消後は従来判定が即座に働く。
+    """
+    if not text:
+        return None
+    low = text.lower()
+    for pat in UPSTREAM_FAILURE_PATTERNS:
+        if pat in low:
+            return pat
+    return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -402,6 +493,79 @@ def load_pane_state_file(path: Path):
 # ─────────────────────────────────────────────────────────────
 # Task B: 家老 degrade 検知 (設計 §3) — 実データ乖離ベース・prose 非scrape
 # ─────────────────────────────────────────────────────────────
+# ★家老の生死判定に用いる証拠の一覧 (cmd_1339・2026-07-25 23:39 家老誤clear 実データ)★
+#   dashboard.md mtime は家老の成果物の一つにすぎない【代理変数】である。23:39 の
+#   誤clearでは、家老は 21分間で task を4本 dispatch していた (queue/tasks の
+#   updated_at が実証) のに、dashboard の鮮度だけで「死」と判定された。
+#   ★dashboard mtime 単独では家老を殺せない★ — 以下のいずれかが window 内なら生存:
+#     (K1) dashboard.md mtime                — 従来 signal (staleness の一次判定)
+#     (K2) queue/tasks/*.yaml mtime          — task dispatch/更新は家老の労働
+#     (K3) queue/inbox/*.yaml 内 from: karo  — メッセージ送信は家老の労働 (timestamp で判定)
+#     (K4) queue/shogun_to_karo.yaml mtime   — 台帳 progress 追記は家老の労働
+#   ★queue/reports/*.yaml は足軽/軍師の労働ゆえ含めない★ — 含めると 2026-07-01 型の
+#   真の degrade (現場は動くが家老だけ固まる) を見逃す。
+#   caveat (正直な明示): K2 は足軽が自 task YAML の status を書換えた場合も更新される
+#   = その窓 (≤window分) だけ真の家老 degrade の検知が遅れる。/clear は破壊的操作ゆえ
+#   「疑わしきは撃たない」側に倒す (2026-07-25 に誤clear が家老3件+足軽/軍師4件 vs
+#   真の家老 degrade は 7-01 の1件、という実績非対称に基づく)。
+KARO_LABOR_FUTURE_SKEW_MIN = 5  # mtime が now より未来の場合の許容 (clock skew)。それ超は無視。
+
+
+def karo_labor_evidence(tasks_dir: Path, window_min, now):
+    """家老の『実際の労働』の証跡 (K2/K3/K4) を探し、あれば説明文字列を返す。
+
+    無ければ None。K1 (dashboard) は呼出元 scan_karo_degrade が判定済みの前提。
+    """
+    queue_root = tasks_dir.parent
+
+    def _fresh(path: Path):
+        try:
+            age = (now.timestamp() - path.stat().st_mtime) / 60.0
+        except OSError:
+            return None
+        if -KARO_LABOR_FUTURE_SKEW_MIN <= age <= window_min:
+            return round(age, 1)
+        return None
+
+    # (K2) task YAML 書込
+    for p in sorted(tasks_dir.glob("*.yaml")):
+        age = _fresh(p)
+        if age is not None:
+            return f"K2: task YAML {p.name} 書込 {age}分前"
+
+    # (K4) 台帳書込
+    ledger = queue_root / "shogun_to_karo.yaml"
+    age = _fresh(ledger)
+    if age is not None:
+        return f"K4: 台帳 shogun_to_karo.yaml 書込 {age}分前"
+
+    # (K3) inbox の from: karo メッセージ (file mtime 前置 filter で parse cost を抑える)
+    inbox_dir = queue_root / "inbox"
+    if inbox_dir.is_dir():
+        for p in sorted(inbox_dir.glob("*.yaml")):
+            if _fresh(p) is None:
+                continue  # file 自体が古ければ中の message も古い
+            try:
+                with p.open(encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+            except (yaml.YAMLError, OSError):
+                continue
+            msgs = data.get("messages") if isinstance(data, dict) else None
+            if not isinstance(msgs, list):
+                continue
+            for m in msgs:
+                if not isinstance(m, dict) or m.get("from") != "karo":
+                    continue
+                dt = parse_iso_to_naive_local(m.get("timestamp"))
+                if dt is None:
+                    continue
+                age_min = (now - dt).total_seconds() / 60.0
+                if -KARO_LABOR_FUTURE_SKEW_MIN <= age_min <= window_min:
+                    return (f"K3: inbox {p.name} へ from:karo メッセージ "
+                            f"{round(age_min, 1)}分前")
+    return None
+
+
 def _has_active_task(tasks_dir: Path):
     """True if any scanned agent holds an active task (someone should be working)."""
     for task_path in tasks_dir.glob("*.yaml"):
@@ -473,6 +637,22 @@ def scan_karo_degrade(dashboard_path: Path, tasks_dir: Path, reports_dir: Path,
     if not _has_active_task(tasks_dir):
         return None, clear_log
 
+    # ★cmd_1339: 家老労働証跡 gate (K2/K3/K4)★ — dashboard が stale でも、家老が
+    # 実際に働いた形跡 (task dispatch / inbox 送信 / 台帳追記) が window 内にあれば
+    # 生存と判定し /clear を撃たない。dashboard mtime は代理変数にすぎない
+    # (2026-07-25 23:39: dispatch 4本の最中に dashboard 鮮度だけで誤clearされた実例)。
+    labor = karo_labor_evidence(tasks_dir, karo_stale_min, now)
+    if labor is not None:
+        print(f"[idle_revive] karo生存証跡: {labor} — dashboard "
+              f"{round(dash_age_min, 1)}分 stale でも clear せず (cmd_1339)",
+              file=sys.stderr)
+        if entry.get("consecutive") or entry.get("last_alert_ts"):
+            entry = dict(entry)
+            entry["consecutive"] = 0
+            entry.pop("last_alert_ts", None)
+            clear_log[KARO_STATE_KEY] = entry
+        return None, clear_log
+
     reality_moved = _reality_moved_after(dash_mtime, tasks_dir, reports_dir)
     consecutive = int(entry.get("consecutive", 0) or 0)
 
@@ -534,18 +714,31 @@ def scan_karo_degrade(dashboard_path: Path, tasks_dir: Path, reports_dir: Path,
 # ─────────────────────────────────────────────────────────────
 def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
          stall_min, min_interval_min, max_consecutive,
-         alert_cooldown_min=DEFAULT_ALERT_COOLDOWN_MIN, now=None):
+         alert_cooldown_min=DEFAULT_ALERT_COOLDOWN_MIN, now=None,
+         quorum_min_stalled=DEFAULT_QUORUM_MIN_STALLED,
+         quorum_ratio=DEFAULT_QUORUM_RATIO,
+         quorum_enabled=True):
     """Evaluate every scanned agent and return (candidates, updated_clear_log).
 
     Each returned candidate dict carries the reason + the action decided
     (revive / rate_limited / escalation_stop / alert_cooldown) so --dry-run
     can report it.
+
+    cmd_1339 quorum gate: stall 条件成立が同一 cycle で quorum_min_stalled 体以上
+    かつ scan 対象の quorum_ratio 以上なら停電型 (相関沈黙) と判定し、個別 clear /
+    escalation を "blackout_suppressed" へ差し替え (state 非消費)、合成 entry
+    (action="blackout_alert", agent=BLACKOUT_AGENT_KEY) を 1 つ追加する。
     """
     if now is None:
         now = datetime.datetime.now()
     now_ts = now.timestamp()
     results = []
     clear_log = dict(clear_log)
+
+    # quorum 集計: eligible = active task を持つ scan 対象 (busy 含む)。
+    # stalled = うち「沈黙」(idle+出力停止 / absent+出力停止) の agent。
+    eligible_count = 0
+    stalled = []
 
     for task_path in sorted(tasks_dir.glob("*.yaml")):
         agent = task_path.stem
@@ -572,6 +765,21 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
                 entry["consecutive"] = 0
                 entry.pop("last_alert_ts", None)
                 clear_log[agent] = entry
+            # quorum 集計: busy は「系が健全」の証拠として分母のみ。absent は
+            # 出力も止まっておれば分子にも数える (tmux server 消失 = 全 pane absent
+            # の 2026-07-25 22:3x 型を同じ網に掛ける)。clear 発行対象にはしない。
+            if task.get("status") in ACTIVE_STATUSES and not report_shows_completion(
+                    reports_dir / f"{agent}_report.yaml", task.get("task_id")):
+                eligible_count += 1
+                if state == "absent":
+                    newest = newest_output_mtime(agent, task, tasks_dir, reports_dir, repo_root)
+                    a_idle = (now_ts - newest) / 60.0 if newest is not None else None
+                    if a_idle is None or a_idle >= stall_min:
+                        stalled.append({
+                            "agent": agent,
+                            "idle_min": round(a_idle, 1) if a_idle is not None else None,
+                            "pane_state": "absent",
+                        })
             continue
 
         # (b) task status ∈ active。それ以外は対象外(復帰扱いで reset)。
@@ -589,6 +797,8 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         if report_shows_completion(report_path, task.get("task_id")):
             continue
 
+        eligible_count += 1
+
         # (c) file mtime: 直近書込があれば slow-gen とみなし触らない。
         newest = newest_output_mtime(agent, task, tasks_dir, reports_dir, repo_root)
         if newest is not None:
@@ -598,6 +808,12 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         if idle_min is not None and idle_min < stall_min:
             # 出力漸進中 → slow-gen → revive しない
             continue
+
+        stalled.append({
+            "agent": agent,
+            "idle_min": round(idle_min, 1) if idle_min is not None else None,
+            "pane_state": "idle",
+        })
 
         # ── ここまでで複合 AND 成立 = revive 候補 ──
         idle_min_disp = round(idle_min, 1) if idle_min is not None else None
@@ -669,6 +885,38 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         base["_new_state"] = entry
         results.append(base)
 
+    # ── cmd_1339: 停電型 (相関沈黙) quorum gate ──
+    # 判定は毎 scan ゼロから再計算 (状態 file は警報 throttle 専用) = いずれかの
+    # agent の出力 mtime が動けば次 scan で自然に不成立へ戻り、復帰漏れしない。
+    if (quorum_enabled
+            and len(stalled) >= quorum_min_stalled
+            and eligible_count > 0
+            and len(stalled) / eligible_count >= quorum_ratio):
+        for r in results:
+            if r["action"] in ("revive", "escalation_stop"):
+                r["suppressed_action"] = r["action"]
+                r["action"] = "blackout_suppressed"
+                # state 非消費: rate limit / consecutive を進めない =
+                # 停電解消後は従来の個別判定が即座に働く。
+                r.pop("_new_state", None)
+                r["detail"] = (f"停電型quorum成立につき {r['suppressed_action']} を抑止 "
+                               f"(state非消費・復帰後は従来判定へ自動復帰)")
+        results.append({
+            "agent": BLACKOUT_AGENT_KEY,
+            "task_id": None,
+            "parent_cmd": "cmd_1339",
+            "idle_min": None,
+            "consecutive": 0,
+            "action": "blackout_alert",
+            "stalled_count": len(stalled),
+            "eligible_count": eligible_count,
+            "detail": (f"停電型(相関沈黙)検知: scan対象{eligible_count}体中"
+                       f"{len(stalled)}体が同時にstall条件成立 "
+                       f"(≥{quorum_min_stalled}体かつ≥{int(quorum_ratio * 100)}%) "
+                       f"→ 個別clearを全面抑止し家老へ警報1通のみ"),
+            "_stalled": stalled,
+        })
+
     return results, clear_log
 
 
@@ -707,6 +955,38 @@ def format_karo_escalation_alert(hit, context=""):
             f"家老 session を手動確認要。{ctx}(idle_revive_scan cmd_1154)")
 
 
+def format_blackout_alert(hit, upstream_notes, throttle_min):
+    agents_desc = ", ".join(
+        f"{s['agent']}({s['idle_min']}分{'/pane消失' if s['pane_state'] == 'absent' else ''})"
+        for s in hit.get("_stalled", []))
+    up = f" pane上流障害痕跡: {'; '.join(upstream_notes)}。" if upstream_notes else ""
+    return (f"🚨停電型(相関沈黙)検知 (idle_revive quorum gate・cmd_1339): "
+            f"scan対象{hit['eligible_count']}体中{hit['stalled_count']}体が同時にstall条件成立。"
+            f"agent個別の固着ではなく上流障害 (殿token枠切れ/credit/auth/API障害/tmux server喪失) "
+            f"を疑え。★個別clearは全面抑止した=1本も撃っていない (context保全・家老degrade clearも抑止)★。"
+            f"対象: {agents_desc}。{up}"
+            f"いずれかのagentの出力が動けば次scanで自動的に通常監視へ戻る。"
+            f"本警報は{throttle_min}分に一度。")
+
+
+def blackout_throttled(state_dir: Path, throttle_min, now):
+    """前回 blackout 警報から throttle_min 分未満なら True (警報抑止)。"""
+    p = state_dir / BLACKOUT_STATE_FILE
+    try:
+        last = parse_iso_to_naive_local(p.read_text(encoding="utf-8").strip())
+    except OSError:
+        return False
+    if last is None:
+        return False
+    return (now - last).total_seconds() / 60.0 < throttle_min
+
+
+def blackout_mark_alerted(state_dir: Path, now):
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (state_dir / BLACKOUT_STATE_FILE).write_text(
+        now.isoformat(timespec="seconds") + "\n", encoding="utf-8")
+
+
 def send_inbox(target, body, msg_type, from_agent):
     return subprocess.run(
         ["bash", str(INBOX_WRITE_SH), target, body, msg_type, from_agent],
@@ -739,6 +1019,15 @@ def main(argv=None):
     ap.add_argument("--pane-state-file", type=Path, default=None,
                     help="smoke/test: pane 状態(agent→busy/idle/absent の JSON/YAML mapping)を "
                          "注入し tmux probe を bypass。")
+    ap.add_argument("--quorum-min-stalled", type=int, default=DEFAULT_QUORUM_MIN_STALLED,
+                    help=f"cmd_1339: 停電型判定に要する同時 stall 最小体数 "
+                         f"(default {DEFAULT_QUORUM_MIN_STALLED})。")
+    ap.add_argument("--quorum-ratio", type=float, default=DEFAULT_QUORUM_RATIO,
+                    help=f"cmd_1339: 停電型判定の stall 割合下限 (default {DEFAULT_QUORUM_RATIO})。")
+    ap.add_argument("--no-quorum-gate", action="store_true",
+                    help="cmd_1339: 停電型 quorum gate を無効化 (個別判定のみ)。変異試験用。")
+    ap.add_argument("--blackout-throttle-min", type=int, default=DEFAULT_BLACKOUT_THROTTLE_MIN,
+                    help=f"cmd_1339: 停電型 warning の最小間隔分 (default {DEFAULT_BLACKOUT_THROTTLE_MIN})。")
     ap.add_argument("--json", action="store_true", help="結果を JSON で出力。")
     ap.add_argument("--queue-root", type=Path, default=None,
                     help="queue root 上書き(tasks/ reports/ state/ を含む)。主にテスト用。")
@@ -767,10 +1056,16 @@ def main(argv=None):
         min_interval_min=args.min_interval_min,
         max_consecutive=args.max_consecutive,
         alert_cooldown_min=args.alert_cooldown_min,
+        quorum_min_stalled=args.quorum_min_stalled,
+        quorum_ratio=args.quorum_ratio,
+        quorum_enabled=not args.no_quorum_gate,
     )
+    blackout = next((r for r in results if r["action"] == "blackout_alert"), None)
 
     # ── Task B: 家老 degrade 検知(同居)。scan() の clear_log を引き継ぐ。 ──
-    if not args.no_karo_check:
+    # cmd_1339: 停電型成立中は家老 degrade 判定も抑止 — 上流障害中は家老の
+    # dashboard も止まって当然であり、karo /clear も context を失うだけである。
+    if not args.no_karo_check and blackout is None:
         karo_hit, new_clear_log = scan_karo_degrade(
             dashboard_path, tasks_dir, reports_dir, new_clear_log,
             karo_stale_min=args.karo_stale_min,
@@ -780,6 +1075,9 @@ def main(argv=None):
         )
         if karo_hit is not None:
             results.append(karo_hit)
+    elif blackout is not None and not args.no_karo_check:
+        print("[idle_revive] 停電型quorum成立中につき家老degrade判定を抑止 "
+              "(karo /clear も撃たない)", file=sys.stderr)
 
     if args.json:
         printable = [{k: v for k, v in r.items() if not k.startswith("_")}
@@ -798,10 +1096,39 @@ def main(argv=None):
 
     # ── 実発行(非 dry-run) ──
     exit_code = 0
+    state_dir = state_path.parent
     # scan() 段階の reset(復帰した agent の consecutive=0 等)も永続化対象に含める。
     state_dirty = (new_clear_log != clear_log)
     for r in results:
         is_karo = (r["agent"] == KARO_STATE_KEY)
+        if r["action"] == "blackout_suppressed":
+            # 停電型: 個別 clear/escalation は抑止済 (scan() 側)。log のみ。
+            print(f"[idle_revive] BLACKOUT抑止: {r['agent']} "
+                  f"(本来={r.get('suppressed_action')}) — {r['detail']}", file=sys.stderr)
+            continue
+        if r["action"] == "blackout_alert":
+            # 停電型: 家老へ warning 1通のみ (30分 throttle・supervisor不在警告と同型)。
+            now = datetime.datetime.now()
+            if blackout_throttled(state_dir, args.blackout_throttle_min, now):
+                print("[idle_revive] BLACKOUT警報 throttle 中 (前回から "
+                      f"{args.blackout_throttle_min}分未満) — 再警報せず", file=sys.stderr)
+                continue
+            # 各 pane 末尾の上流障害痕跡 (token/usage limit 等) を警報へ引用 (runbook §5)
+            upstream_notes = []
+            for s in r.get("_stalled", [])[:10]:
+                pat = detect_upstream_failure(pane_upstream_text(s["agent"]))
+                if pat:
+                    upstream_notes.append(f"{s['agent']}=『{pat}』")
+            body = format_blackout_alert(r, upstream_notes, args.blackout_throttle_min)
+            proc = send_inbox("karo", body, "warning", "idle_revive_scan")
+            if proc.returncode != 0:
+                # cmd_1338 流儀: 握り潰さない。throttle も進めない = 次回 scan で再試行。
+                print(f"[idle_revive] FATAL: 停電型警報の inbox_write 失敗: "
+                      f"{proc.stderr.strip()}", file=sys.stderr)
+                exit_code = 1
+            else:
+                blackout_mark_alerted(state_dir, now)
+            continue
         if r["action"] == "revive":
             # cmd_1339 (e): /clear は★破壊的操作★ — 発行直前に対象 pane を再 probe し、
             # busy/absent/unknown へ転じていれば発行しない (scan→発行の TOCTOU 封鎖)。
@@ -812,6 +1139,19 @@ def main(argv=None):
                       f"{state_now} — 破壊的 /clear を発行せず (cmd_1339 (e))",
                       file=sys.stderr)
                 # state を進めない (rate limit / consecutive を消費させない)
+                if r["agent"] in clear_log:
+                    new_clear_log[r["agent"]] = clear_log[r["agent"]]
+                else:
+                    new_clear_log.pop(r["agent"], None)
+                continue
+            # cmd_1339 quorum補強 (軍師一号具申): pane 末尾に上流障害文字列 (usage limit /
+            # credit / auth / rate limit) が見えたら発行しない — 上流障害中の /clear は
+            # context を失うだけで何も直さない。state 非消費 = 障害解消後は従来判定。
+            upstream_hit = detect_upstream_failure(pane_upstream_text(r["agent"]))
+            if upstream_hit:
+                print(f"[idle_revive] SKIP(上流障害gate): {r['agent']} pane に"
+                      f"『{upstream_hit}』検知 — 上流障害中の /clear は context を失うだけ"
+                      f"ゆえ発行せず (cmd_1339 quorum補強)", file=sys.stderr)
                 if r["agent"] in clear_log:
                     new_clear_log[r["agent"]] = clear_log[r["agent"]]
                 else:

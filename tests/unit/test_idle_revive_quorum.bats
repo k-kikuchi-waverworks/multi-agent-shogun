@@ -434,6 +434,39 @@ EOF
     grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
 }
 
+# ---------------------------------------------------------------------------
+# T-QRM-014: escalation にも上流障害 gate — 枠切れ agent への「復帰せず」警報 (今夜の
+#            10通 spam の型) を出さず台帳へ記録。文言が無ければ従来どおり警報 (両側)。
+# ---------------------------------------------------------------------------
+@test "T-QRM-014 (cmd_1355): upstream banner suppresses escalation alert and records ledger; benign text re-enables (both sides)" {
+    for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do _write_task "$a"; done
+    _write_pane_states ashigaru91:idle ashigaru92:busy ashigaru93:busy ashigaru94:busy
+    # escalation latch 直行: consecutive=3 (max) + last_alert_ts なし (旧 schema = 即警報側)
+    mkdir -p "$Q/state"
+    cat > "$Q/state/clear_log.yaml" <<EOF
+agents:
+  ashigaru91:
+    last_clear_ts: '$(date -d '20 minutes ago' +%Y-%m-%dT%H:%M:%S)'
+    consecutive: 3
+    last_task_id: subtask_qrm_ashigaru91
+EOF
+
+    # Side A: banner あり → escalation 警報を出さず台帳記録
+    _load_real_pane_text
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record 'idle_revive_escalation_alert')" -eq 0 ]
+    echo "$output" | grep -q "上流障害gate/escalation"
+    grep -q "ashigaru91" "$Q/state/upstream_outage.yaml"
+
+    # Side B: banner なし → 従来どおり escalation 警報が出る
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/upstream_outage.yaml" "$Q/state/upstream_alert_throttle"
+    FAKE_PANE_TEXT="normal tool output, nothing suspicious here" \
+        run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record 'idle_revive_escalation_alert')" -eq 1 ]
+}
+
 @test "T-QRM-008: detect_upstream_failure catches all four advised pattern families, not plain text" {
     run "$VENV_PY" - <<'PY'
 import importlib.util, os

@@ -9,15 +9,24 @@
 #   件数 gate が偶然捕まえたゆえ事故にならなんだ。本 gate はその偶然を契約に変える。
 #   経緯の詳細: docs/content/ops/cmd_1352_silent_pitfall_gates.md
 #
+# 二つの mode (見る「正」が違う):
+#   index mode (既定)     … git index (ls-files) を正とする。commit しようとしている中身の検分
+#                           = pre-commit hook 用。
+#   head mode (--committed) … ★HEAD の commit済blob を正とする = fresh clone が受け取る中身★。
+#                           作業ツリーを信ぜぬ (軍師二号が cmd_1349 QC で示した流儀:
+#                           作業ツリーから読めば「自分で自分を検める」循環になる)。
+#                           = 夜間 cron 用。disk に在って HEAD に無い file は [NOT-IN-HEAD]。
+#
 # manifest 文法 (1行1宣言・# はコメント):
 #   path/to/file            … この file が git 管理下に在ること
 #   dir/path/               … dir 配下の全 file が git 管理下に在ること (末尾 / が dir 宣言)
-#   dir/path/ min=N         … 加えて tracked 件数が N 以上 (件数 gate = cmd_1349 で効いた実物の一般化)
+#   dir/path/ min=N         … 加えて捕捉件数が N 以上 (件数 gate = cmd_1349 で効いた実物の一般化)
 #
 # 使い方:
-#   bash scripts/gate_artifact_capture.sh <manifest>   # 単一 manifest を検分
-#   bash scripts/gate_artifact_capture.sh --all        # config/artifact_manifests/*.manifest 全件
-#   bash scripts/gate_artifact_capture.sh --selftest   # 変異試験つき自己検分 (一時repoを作って故意に壊す)
+#   bash scripts/gate_artifact_capture.sh <manifest>            # 単一 manifest (index mode)
+#   bash scripts/gate_artifact_capture.sh --all                 # 登録済み全 manifest (index mode)
+#   bash scripts/gate_artifact_capture.sh --all --committed     # 同・HEAD blob を正とする
+#   bash scripts/gate_artifact_capture.sh --selftest            # 変異試験つき自己検分
 #
 # 三値 (0件/未判定を緑にせぬ — cmd_1342 Phase1d の流儀):
 #   exit 0 = PASS / exit 1 = FAIL / exit 2 = UNDETERMINED (前提不成立・0件宣言)
@@ -29,15 +38,39 @@ SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 # CONTRACT: 空 manifest / manifest 0件 は PASS ではない (0件を緑にするな)
 EMPTY_UNDETERMINED_EXIT=2
 
-# untracked file の理由を分類する。★ignore 判定は check-ignore -q の exit code が正★
+# MODE: index (既定) / head (--committed)
+MODE="index"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# mode 別の「捕捉されておるか」述語と一覧
+# ─────────────────────────────────────────────────────────────────────────────
+is_captured() { # $1=repo $2=relpath
+    if [ "$MODE" = "head" ]; then
+        git -C "$1" cat-file -e "HEAD:$2" 2>/dev/null
+    else
+        git -C "$1" ls-files --error-unmatch -- "$2" >/dev/null 2>&1
+    fi
+}
+
+list_captured() { # $1=repo $2=reldir
+    if [ "$MODE" = "head" ]; then
+        git -C "$1" ls-tree -r --name-only HEAD -- "$2" 2>/dev/null
+    else
+        git -C "$1" ls-files -- "$2"
+    fi
+}
+
+# 未捕捉 file の理由を分類する。★ignore 判定は check-ignore -q の exit code が正★
 # (-v の出力有無で判ずるのは誤り: -v は【否定規則の match も出力する】ため、
 #  whitelist 型 .gitignore で un-ignore された file を [IGNORED] と偽陽性にする。
 #  本 repo の実 .gitignore (`*` + `!path` 方式) で 2026-07-26 に実測した罠である)
-classify_untracked() { # $1=repo $2=relpath → 1行を stdout
+classify_uncaptured() { # $1=repo $2=relpath → 1行を stdout
     local repo="$1" rel="$2" culprit
     if git -C "$repo" check-ignore -q -- "$rel" 2>/dev/null; then
         culprit="$(git -C "$repo" check-ignore -v -- "$rel" 2>/dev/null | head -1 | awk -F'\t' '{print $1}')"
         echo "  [IGNORED] $rel ← ${culprit:-ignore規則} が黙って弾いておる"
+    elif [ "$MODE" = "head" ]; then
+        echo "  [NOT-IN-HEAD] $rel … disk に在るが HEAD に commit されておらぬ (fresh clone には渡らぬ)"
     else
         echo "  [UNTRACKED] $rel … disk に在るが一度も git add されておらぬ"
     fi
@@ -45,20 +78,36 @@ classify_untracked() { # $1=repo $2=relpath → 1行を stdout
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 単一 manifest の検分。stdout へ所見・戻り値 0/1/2。
-# $1=manifest path
+# $1=manifest path (head mode では内容も HEAD blob から読む = 循環を断つ)
 # ─────────────────────────────────────────────────────────────────────────────
 check_manifest() {
     local manifest="$1"
-    if [ ! -f "$manifest" ]; then
-        echo "[gate-1] UNDETERMINED: manifest が無い: $manifest"
+    local mdir repo mrel content
+    mdir="$(cd "$(dirname "$manifest")" 2>/dev/null && pwd)" || {
+        echo "[gate-1] UNDETERMINED: manifest の置き場が無い: $manifest"
         return "$EMPTY_UNDETERMINED_EXIT"
-    fi
-    local mdir repo
-    mdir="$(cd "$(dirname "$manifest")" && pwd)"
+    }
     repo="$(git -C "$mdir" rev-parse --show-toplevel 2>/dev/null)" || {
         echo "[gate-1] UNDETERMINED: git repo の外にある manifest: $manifest"
         return "$EMPTY_UNDETERMINED_EXIT"
     }
+    if [ "$MODE" = "head" ]; then
+        if ! git -C "$repo" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+            echo "[gate-1] UNDETERMINED: HEAD が無い (commit 0 の repo): $repo"
+            return "$EMPTY_UNDETERMINED_EXIT"
+        fi
+        mrel="$(cd "$mdir" && git rev-parse --show-prefix)$(basename "$manifest")"
+        content="$(git -C "$repo" show "HEAD:$mrel" 2>/dev/null)" || {
+            echo "[gate-1] UNDETERMINED: manifest が HEAD に無い (commit されておらぬ): $mrel"
+            return "$EMPTY_UNDETERMINED_EXIT"
+        }
+    else
+        if [ ! -f "$manifest" ]; then
+            echo "[gate-1] UNDETERMINED: manifest が無い: $manifest"
+            return "$EMPTY_UNDETERMINED_EXIT"
+        fi
+        content="$(cat "$manifest")"
+    fi
 
     local problems=0 entries=0 line raw path minspec min
     local out=""
@@ -78,64 +127,84 @@ check_manifest() {
         if [ "${path%/}" != "$path" ]; then
             # ── dir 宣言 ─────────────────────────────────────────────
             local d="${path%/}"
-            if [ ! -d "$repo/$d" ]; then
-                out+="  [MISSING-DIR] $d … 宣言された dir が disk に無い"$'\n'
-                problems=$((problems + 1))
-                continue
+            local diskfiles captured_n f rel
+            diskfiles=""
+            if [ -d "$repo/$d" ]; then
+                diskfiles="$(cd "$repo" && find "$d" -name __pycache__ -prune -o -type f ! -name '*.pyc' -print | sort)"
             fi
-            local diskfiles tracked_n f rel
-            diskfiles="$(cd "$repo" && find "$d" -name __pycache__ -prune -o -type f ! -name '*.pyc' -print | sort)"
-            if [ -z "$diskfiles" ]; then
+            captured_n="$(list_captured "$repo" "$d" | grep -c . || true)"
+            if [ -z "$diskfiles" ] && [ "$captured_n" -eq 0 ]; then
                 out+="  [EMPTY-DIR] $d … 宣言された dir に file が 1 つも無い (真空=成果物不在)"$'\n'
                 problems=$((problems + 1))
                 continue
             fi
-            while IFS= read -r rel; do
-                if ! git -C "$repo" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1; then
-                    out+="$(classify_untracked "$repo" "$rel")"$'\n'
-                    problems=$((problems + 1))
-                fi
-            done <<< "$diskfiles"
-            tracked_n="$(git -C "$repo" ls-files -- "$d" | wc -l)"
-            if [ "$tracked_n" -lt "$min" ]; then
-                out+="  [COUNT] $d … tracked ${tracked_n} 件 < 宣言 min=${min} (件数 gate)"$'\n'
+            # disk に在って捕捉されておらぬ file (= `git add dir/` の黙殺 / commit 漏れ)
+            if [ -n "$diskfiles" ]; then
+                while IFS= read -r rel; do
+                    if ! is_captured "$repo" "$rel"; then
+                        out+="$(classify_uncaptured "$repo" "$rel")"$'\n'
+                        problems=$((problems + 1))
+                    fi
+                done <<< "$diskfiles"
+            fi
+            if [ "$captured_n" -lt "$min" ]; then
+                out+="  [COUNT] $d … 捕捉 ${captured_n} 件 < 宣言 min=${min} (件数 gate)"$'\n'
                 problems=$((problems + 1))
             fi
         else
             # ── file 宣言 ────────────────────────────────────────────
-            if git -C "$repo" ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+            if is_captured "$repo" "$path"; then
                 :
             elif [ -e "$repo/$path" ]; then
-                out+="$(classify_untracked "$repo" "$path")"$'\n'
+                out+="$(classify_uncaptured "$repo" "$path")"$'\n'
                 problems=$((problems + 1))
             else
                 out+="  [MISSING] $path … disk にも git にも無い"$'\n'
                 problems=$((problems + 1))
             fi
         fi
-    done < "$manifest"
+    done <<< "$content"
 
+    local modenote=""
+    [ "$MODE" = "head" ] && modenote=" [committed=HEAD正]"
     if [ "$entries" -eq 0 ]; then
         echo "[gate-1] UNDETERMINED: manifest に宣言が 0 件 (0件は PASS ではない): $manifest"
         return "$EMPTY_UNDETERMINED_EXIT"
     fi
     if [ "$problems" -gt 0 ]; then
-        echo "[gate-1] FAIL: $(basename "$manifest") … 宣言 ${entries} 件中 問題 ${problems} 件"
+        echo "[gate-1] FAIL: $(basename "$manifest")${modenote} … 宣言 ${entries} 件中 問題 ${problems} 件"
         printf '%s' "$out"
         echo "  処方: [IGNORED] は (a) .gitignore へ否定規則 (!path) を足す か (b) git add -f で明示追加。"
-        echo "        [UNTRACKED]/[MISSING] は成果物の実在と add を確かめよ。直したら本 gate を再走して緑を確認せよ。"
+        echo "        [UNTRACKED]/[NOT-IN-HEAD]/[MISSING] は成果物の実在と add/commit を確かめよ。直したら本 gate を再走して緑を確認せよ。"
         return 1
     fi
-    echo "[gate-1] PASS: $(basename "$manifest") … 宣言 ${entries} 件すべて git 管理下 (repo=$repo)"
+    echo "[gate-1] PASS: $(basename "$manifest")${modenote} … 宣言 ${entries} 件すべて捕捉済 (repo=$repo)"
     return 0
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
 # --all: config/artifact_manifests/*.manifest 全件。worst-of で集約。
+# head mode では manifest の一覧も HEAD tree から取る (disk のみの manifest は
+# cmd_1352_gates.manifest の dir 宣言が [NOT-IN-HEAD] として別途捕まえる)。
 # ─────────────────────────────────────────────────────────────────────────────
 check_all() {
     local mdir="$SCRIPT_DIR/config/artifact_manifests"
     local worst=0 rc m found=0
+    if [ "$MODE" = "head" ]; then
+        local rels
+        rels="$(git -C "$SCRIPT_DIR" ls-tree -r --name-only HEAD -- config/artifact_manifests/ 2>/dev/null | grep '\.manifest$' || true)"
+        if [ -z "$rels" ]; then
+            echo "[gate-1] UNDETERMINED: HEAD に manifest が 1 つも無い (0件は PASS ではない)"
+            return "$EMPTY_UNDETERMINED_EXIT"
+        fi
+        while IFS= read -r m; do
+            found=$((found + 1))
+            check_manifest "$SCRIPT_DIR/$m"; rc=$?
+            if [ "$rc" -eq 1 ]; then worst=1
+            elif [ "$rc" -eq 2 ] && [ "$worst" -ne 1 ]; then worst=2; fi
+        done <<< "$rels"
+        return "$worst"
+    fi
     if [ ! -d "$mdir" ]; then
         echo "[gate-1] UNDETERMINED: manifest 置き場が無い: $mdir"
         return "$EMPTY_UNDETERMINED_EXIT"
@@ -157,6 +226,7 @@ check_all() {
 # ─────────────────────────────────────────────────────────────────────────────
 # --selftest: 一時 repo を組んで故意に壊し、赤くなるべき所で赤くなるかを撃つ。
 # S2 が cmd_1349 の実事故そのもの (.gitignore が dir add から黙って弾く) の再現である。
+# S11-S13 が head mode (commit済blob 正 = fresh clone 視点) の検分である。
 # ─────────────────────────────────────────────────────────────────────────────
 selftest() {
     local T pass=0 fail=0
@@ -165,6 +235,9 @@ selftest() {
 
     _mkrepo() { # $1=dir
         mkdir -p "$1" && git -C "$1" init -q
+    }
+    _commit() { # $1=dir $2=msg
+        git -C "$1" -c user.email=selftest@local -c user.name=selftest commit -q -m "$2"
     }
     _expect() { # $1=name $2=expected_rc $3=actual_rc $4=must_contain(optional) $5=output
         local name="$1" want="$2" got="$3" needle="${4:-}" output="${5:-}"
@@ -249,6 +322,31 @@ selftest() {
     out="$(check_manifest "$r/m.manifest")"; rc=$?
     _expect "S10 否定規則match=UNTRACKED" 1 "$rc" "[UNTRACKED]" "$out"
 
+    # ── head mode (--committed = fresh clone 視点) ──────────────────────────
+    # S11: commit 済なら head mode も PASS
+    r="$T/s11"; _mkrepo "$r"
+    mkdir -p "$r/pkg"; echo a > "$r/pkg/a.py"
+    printf 'pkg/ min=1\n' > "$r/m.manifest"
+    git -C "$r" add . >/dev/null 2>&1; _commit "$r" base
+    MODE="head"; out="$(check_manifest "$r/m.manifest")"; rc=$?; MODE="index"
+    _expect "S11 commit済=head-PASS" 0 "$rc" "committed=HEAD正" "$out"
+
+    # S12: ★index は緑でも HEAD に無ければ fresh clone には渡らぬ★
+    #      = staged 止まりの file を head mode が [NOT-IN-HEAD] で赤にする
+    echo new > "$r/pkg/new_after_commit.py"
+    git -C "$r" add pkg/new_after_commit.py >/dev/null 2>&1
+    out="$(check_manifest "$r/m.manifest")"; rc=$?
+    _expect "S12a staged=index緑" 0 "$rc"
+    MODE="head"; out="$(check_manifest "$r/m.manifest")"; rc=$?; MODE="index"
+    _expect "S12b 未commit=head赤" 1 "$rc" "[NOT-IN-HEAD]" "$out"
+
+    # S13: manifest 自体が HEAD に無い → head mode は UNDETERMINED (循環を断つ=diskの宣言を信ぜぬ)
+    r="$T/s13"; _mkrepo "$r"
+    echo a > "$r/a.txt"; git -C "$r" add a.txt >/dev/null 2>&1; _commit "$r" base
+    printf 'a.txt\n' > "$r/m.manifest"   # ← disk にのみ在る manifest
+    MODE="head"; out="$(check_manifest "$r/m.manifest")"; rc=$?; MODE="index"
+    _expect "S13 manifest未commit=head-UNDETERMINED" 2 "$rc" "HEAD に無い" "$out"
+
     echo "----"
     if [ "$fail" -eq 0 ]; then
         echo "[gate-1 selftest] ${pass}/${pass} ALL PASS"
@@ -258,10 +356,19 @@ selftest() {
     return 1
 }
 
-case "${1:-}" in
-    --selftest) selftest; exit $? ;;
-    --all)      check_all; exit $? ;;
-    "")
-        echo "usage: $0 <manifest> | --all | --selftest"; exit 2 ;;
-    *)          check_manifest "$1"; exit $? ;;
-esac
+# ─────────────────────────────────────────────────────────────────────────────
+# 引数解釈
+# ─────────────────────────────────────────────────────────────────────────────
+DO_ALL=0; DO_SELFTEST=0; TARGET=""
+for arg in "$@"; do
+    case "$arg" in
+        --selftest)  DO_SELFTEST=1 ;;
+        --all)       DO_ALL=1 ;;
+        --committed) MODE="head" ;;
+        *)           TARGET="$arg" ;;
+    esac
+done
+if [ "$DO_SELFTEST" -eq 1 ]; then selftest; exit $?; fi
+if [ "$DO_ALL" -eq 1 ]; then check_all; exit $?; fi
+if [ -n "$TARGET" ]; then check_manifest "$TARGET"; exit $?; fi
+echo "usage: $0 <manifest> [--committed] | --all [--committed] | --selftest"; exit 2

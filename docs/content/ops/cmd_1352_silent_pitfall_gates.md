@@ -23,7 +23,7 @@
 
 | 部品 | 役割 |
 |---|---|
-| `scripts/gate_artifact_capture.sh` | **gate-1**: manifest 宣言 vs git 実体の突合。ignore に黙って弾かれた file を**弾いた規則の行番号つき**で名指し。件数 gate (`min=N`) 含む |
+| `scripts/gate_artifact_capture.sh` | **gate-1**: manifest 宣言 vs git 実体の突合。ignore に黙って弾かれた file を**弾いた規則の行番号つき**で名指し。件数 gate (`min=N`) 含む。`--committed` で **HEAD blob を正** (fresh clone が受け取る中身・作業ツリーを信ぜぬ = 軍師二号が cmd_1349 QC で示した流儀。manifest 自体も HEAD から読む = 自分で自分を検める循環を断つ) |
 | `config/artifact_manifests/*.manifest` | gate-1 の宣言置き場 (1 task 1 file・累積で守る) |
 | `scripts/gate_mutation_replay.py` | **gate-2**: 変異台帳の全件再走。「赤くなるべき変異」が緑のままなら名指しで FAIL。baseline 赤・mutate 空振りは UNDETERMINED |
 | `config/mutation_registry.yaml` | 変異の台帳 (**出所はこの1 file のみ**)。変異試験を新設したらここへ登録 |
@@ -33,11 +33,12 @@
 
 ## どこで回るか (人が思い出して回す形にはしていない)
 
-- **commit 時** (pre-commit hook): gate-1 全 manifest + gate-2 sanity。数百 ms。
+- **commit 時** (pre-commit hook): gate-1 全 manifest (index 視点=いま commit しようとする中身) + gate-2 sanity。数百 ms。
   FAIL は commit を**止める**。UNDETERMINED は**大声で警告して通す**
   (全 agent が commit する repo ゆえ、一過性の未判定で全軍を塞がぬ — cmd_1342 zip 関所と同じ流儀)。
-- **毎朝 06:30** (cron `silent_pitfall_gates_cmd1352`): 両 gate フル (gate-2 は変異を実走)。
-  非 PASS は家老 inbox へ warning (是正手順つき)。hook 消失・commit の無い日の drift もここが拾う。
+- **毎朝 06:30** (cron `silent_pitfall_gates_cmd1352`): 両 gate フル (gate-1 は `--committed` で
+  fresh clone 視点・gate-2 は変異を実走)。非 PASS は家老 inbox へ warning (是正手順つき)。
+  hook 消失 (shim marker の grep)・commit の無い日の drift もここが拾う。
 - 手動再走はいつでも可:
   `bash scripts/gate_artifact_capture.sh --all` / `python3 scripts/gate_mutation_replay.py`
 
@@ -54,6 +55,21 @@ manifest 0件・台帳 0件・baseline 赤・mutate 空振り (sed の当たり�
 - gate-2 の `★NG★ MUT-…` … 名指しされた変異の test を仕様変更へ追随させ、
   **再び赤くなることを確認**して台帳を維持。変異が正当に不要なら
   **理由を commit log に書いて**台帳から外せ (黙って外すな)。
+
+## 境界: gate-1 が証明する範囲と、しない範囲 (依存解決の再現性)
+
+軍師二号の cmd_1349 束ねQC が引いた線をここに固定する (設計上の宣言・実装は範囲外):
+
+- gate-1 が**証明する**もの: 「repo の中身が**完全** (宣言された成果物が fresh clone に渡る) かつ
+  **忠実** (`--committed` なら HEAD blob そのもの)」であること。
+- gate-1 が**証明しない**もの: 「その中身から**依存解決が今日も成功する**」こと。
+  pip/uv の resolver 挙動・PyPI 上流の生存・transitive 依存の版ずれは repo の外の世界であり、
+  manifest 突合では**原理的に**捕まえられない。
+- ゆえに残余リスクは**依存解決側に集中**する。処方は (a) freeze を text list でなく
+  `pip install -r` 可能な **lockfile として機械強制**すること (cmd_1349 A-O2)、
+  (b) 「復元が今日も通る」の唯一の証明は **restore の実走リハーサル**であり、
+  gate の緑をその代替にしないこと。restore 実走は重い (venv 構築) ゆえ gate には載せず、
+  runbook 側の定期演習 (人ではなく cmd 起票で駆動) に置く。
 
 ## 逃がし口 (隠さぬ・使ったら理由を残せ)
 

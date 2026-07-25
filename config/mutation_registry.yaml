@@ -54,3 +54,16 @@ mutations:
     test: |
       python3 scripts/gate_mutation_replay.py --selftest
     expect: nonzero
+
+  - id: MUT-1352-004
+    origin: cmd_1352
+    desc: |
+      gate-1 の head mode (--committed = HEAD blob 正) の捕捉述語 (cat-file -e) を折ると、
+      selftest S11-S13 (fresh clone 視点の検分) が赤くなるべき。折っても緑なら
+      「commit済と申告したが fresh clone には渡らぬ」を再び見逃す (軍師二号 QC A-O1 の型)。
+    paths: [scripts/gate_artifact_capture.sh]
+    mutate: |
+      sed -i 's/git -C "$1" cat-file -e/git -C "$1" cat-file-neutered -e/' scripts/gate_artifact_capture.sh
+    test: |
+      bash scripts/gate_artifact_capture.sh --selftest
+    expect: nonzero

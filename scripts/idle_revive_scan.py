@@ -1035,6 +1035,47 @@ def selftest_upstream():
     if not episode_has_live_wall({"agents": {"x": {"detected_ts": "t"}}}):
         ng.append("U8k verdict を持たぬ旧 entry で門が閉じた = 旧台帳の断定が黙って消える")
 
+    # U8l: ★断定を保留した episode でも【再開通知は上がる】★ (cmd_1385 OBS-A1・軍師二号)
+    #
+    # ★何故 此の契約が要るか★ = cmd_1385 は ★新しい死に方を1つ増やした★。
+    #   残渣しか無い episode では detect_notified_ts を ★立てぬ★ 道を作ったゆえ、
+    #   「detect_notified_ts が立っておる」を再開判定の前提に置く変異が入ると
+    #   ★保留された episode だけが永久に再開通知を貰えぬ★ = cmd_1355 の北極星が死ぬ。
+    #   ★然るに U1-U8k は全て緑のまま★ であった (軍師二号が変異を1本当てて実測)。
+    #   機序 = ★U4/U5/U6 は outage_release_check を【直に】呼んでおり、
+    #   剪定・close・再開の門を束ねる outage_maintain を一度も通っておらなんだ★。
+    # ⇒ ★此処だけは outage_maintain を通す★ = 門の側を縛る契約にござる。
+    with tempfile.TemporaryDirectory() as td:
+        sdir = Path(td) / "state"
+        # 残渣ゆえ断定を保留した episode = ★detect_notified_ts が立っておらぬ★形。
+        # first_detected から FALLBACK_RESUME_MIN 超 = R2 が解除を返すべき盤面。
+        save_outage(sdir, {"first_detected": "2026-07-26T20:00:00", "resets_eta": None,
+                           "detect_notified_ts": None,
+                           "resume_notified_ts": None,
+                           "agents": {"x": {"detected_ts": "2026-07-26T20:00:00",
+                                            "task_id": "t", "verdict": UPSTREAM_RESIDUE}}})
+        g = globals()
+        orig_probe = g["outage_probe_agent"]
+        # 未回復 (剪定されぬ) かつ banner は消えておる = R2 で解除される形
+        g["outage_probe_agent"] = lambda agent, ps, tdir: (
+            False, {"pane_state": "idle", "upstream_pattern": None})
+        try:
+            hit = outage_maintain(sdir, {}, Path(td) / "tasks",
+                                  now=datetime.datetime(2026, 7, 26, 21, 30))
+        finally:
+            g["outage_probe_agent"] = orig_probe
+        if hit is None:
+            ng.append("U8l ★断定を保留した episode (detect_notified_ts 無し) で再開通知が上がらぬ★ = "
+                      "cmd_1385 が増やした死に方を縛る契約が折れた。残渣と判じて黙った相手は "
+                      "枠が戻っても永久に起こされぬ = cmd_1355 の北極星が死ぬ")
+        elif hit.get("action") != "upstream_resume":
+            ng.append(f"U8l2 再開通知の action が変わった: {hit.get('action')!r}")
+        else:
+            # ★上がる通知が【人に読める物】であることまで見る★ (main が送る本文と同じ経路)
+            body = format_upstream_resume_alert(hit["episode"], hit["reason"])
+            if "再開せよ" not in body:
+                ng.append(f"U8l3 再開通知の本文から命令が消えた (家老が何をすべきか読めぬ): {body[:80]!r}")
+
     if ng:
         for line in ng:
             print(f"★NG★ {line}")

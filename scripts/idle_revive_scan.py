@@ -65,7 +65,8 @@
 #     [--no-karo-check] [--dashboard-path PATH] [--pane-state-file PATH]
 #     [--quorum-min-stalled N] [--quorum-ratio F] [--no-quorum-gate]
 #     [--blackout-throttle-min N] [--upstream-alert-throttle-min N]
-#     [--selftest-upstream] [--json] [--queue-root PATH]
+#     [--selftest-upstream] [--expected-interval-sec N] [--gap-warn-factor F]
+#     [--json] [--queue-root PATH]
 #
 # On hit (非 dry-run): `inbox_write.sh {agent} "<本文>" clear_command idle_revive_scan` を発行。
 # --dry-run: 判定結果を stdout に出すのみ(実 clear 発行 0)。smoke / 動作検証用。
@@ -119,6 +120,28 @@ DEFAULT_QUORUM_RATIO = 0.75        # 同 上、scan 対象 (busy 含む) に対�
 DEFAULT_BLACKOUT_THROTTLE_MIN = 30 # 家老への停電型 warning の最小間隔 (supervisor不在警告と同型)。
 BLACKOUT_AGENT_KEY = "*fleet*"     # 停電型判定の合成 result entry が名乗る agent 名。
 BLACKOUT_STATE_FILE = "blackout_suppress"  # queue/state/ 配下の throttle 専用 state file。
+
+# ══════════════════════════════════════════════════════════════════════════
+# ★cmd_1394: 番人が【己の振舞い】を証す★ (2026-07-27 未明・家老が二度誤った)
+# ──────────────────────────────────────────────────────────────────────────
+# 穴(a) ★log は【撃つと判じた】と【撃った】を一字も区別せなんだ★:
+#   ACTION=revive の行は判定直後に無条件で print され、--dry-run の return も
+#   発行直前 gate (probe/上流障害) も その【後】に在る。⇒ log だけでは
+#   「抑止が効いておったか」を永久に判じられず、撃った証は clear_log.yaml の
+#   last_clear_ts のみであった。実測: 22:48〜23:18 の 11 scan は全て「対象なし」=
+#   ★抑止は一度も試されておらぬ★= 害が無かったのは守りゆえでなく撃つ場面が
+#   無かったゆえ (「緑のtestが何も証明していない」の log 版)。
+#   ⇒ ACTION 行に MODE= / PHASE=decided を焼き、★実行相で OUTCOME= を1行★出す。
+#     ★決定 1 件に対し OUTCOME 丁度 1 行★ = 沈黙が「撃った」に化けられぬ。
+# 穴(b) ★走行そのものの欠測を名指す行が一つも無かった★:
+#   23:18:01 → 00:15:02 の 57 分 (*/3 ゆえ 18 scan 欠) が log から読めぬ。
+#   ★「対象なし が出ておらぬ」と「走っておらぬ」は別である★ — 後者は
+#   ★観測者の不在★であり、固着を誰も見ておらぬ窓を意味する。
+#   ⇒ 走行の刻を1つ残し、次回走行が前回との差で欠測を名指す。
+# ══════════════════════════════════════════════════════════════════════════
+SCAN_HEARTBEAT_FILE = "idle_revive_last_scan.yaml"  # queue/state/ 配下・走行の刻のみ
+DEFAULT_EXPECTED_INTERVAL_SEC = 180  # cron の周期 (*/3 分)。欠測判定の物差し。
+DEFAULT_GAP_WARN_FACTOR = 2.0        # 周期の何倍を超えたら欠測と名指すか (1 回飛ばしを許容)。
 
 # 上流障害 (account/API 層) の pane 兆候文字列。★clear では直らない障害に限定する★:
 # 新 session を張っても同じ壁に当たる account/認証/枠系のみ。一時的な API 5xx は
@@ -1924,6 +1947,117 @@ def blackout_mark_alerted(state_dir: Path, now):
         now.isoformat(timespec="seconds") + "\n", encoding="utf-8")
 
 
+# ─────────────────────────────────────────────────────────────
+# cmd_1394 (1): ★判じた★と★撃った★を log の上で分ける
+# ─────────────────────────────────────────────────────────────
+# ★scan() の段階で既に抑止が決しておる action★ = 発行相では何もせぬ。
+# 其れでも OUTCOME を出す = ★何もせなんだ事も log に残す★ (沈黙を作らぬ)。
+PRE_SUPPRESSED_REASONS = {
+    "blackout_suppressed": "blackout_quorum",
+    "rate_limited": "rate_limit",
+    "alert_cooldown": "alert_cooldown",
+}
+
+
+def outcome_base(r):
+    """result entry → OUTCOME の語幹。
+
+    blackout_suppressed / rate_limited / alert_cooldown は【本来撃つ筈であった物が
+    撃たれなんだ】形ゆえ、抑止された側の行為 (revive / escalation) で名乗る =
+    ★読み手が探す語で出る★ (「revive は撃たれたか」を grep する者に届く)。
+    """
+    a = r.get("action")
+    if a == "blackout_suppressed":
+        a = r.get("suppressed_action") or "revive"
+    return {"revive": "revive",
+            "rate_limited": "revive",
+            "escalation_stop": "escalation",
+            "alert_cooldown": "escalation",
+            "blackout_alert": "blackout_alert"}.get(a, str(a))
+
+
+def emit_outcome(r, fired: bool, reason: str):
+    """★決定 1 件につき丁度 1 行★ の実行相 log (stderr = 実行相の他の行と同じ流れ)。
+
+    ★この行が無い決定は【撃ったか判らぬ決定】である★ — 決定行 (ACTION=) の数と
+    本行の数が一致することを試験が縛る (T-LOG-004)。ゆえに新しい分岐を足す者は
+    ★continue する前に必ず本関数を呼べ★。REASON は空白を含まぬ機械語で書く。
+    ★但し --json 時は決定行 (ACTION=) を出さぬゆえ、一致するのは平文出力の時のみ★
+    (本行は mode に依らず出る = 撃った証は json でも log に残る)。
+    """
+    print(f"[idle_revive] OUTCOME={outcome_base(r)}_{'fired' if fired else 'not_fired'} "
+          f"AGENT={r.get('agent')} TASK_ID={r.get('task_id')} REASON={reason}",
+          file=sys.stderr)
+
+
+# ─────────────────────────────────────────────────────────────
+# cmd_1394 (2): 走行の刻 = 欠測 (観測者の不在) を次回走行が名指す
+# ─────────────────────────────────────────────────────────────
+def load_scan_heartbeat(state_dir: Path):
+    p = state_dir / SCAN_HEARTBEAT_FILE
+    if not p.is_file():
+        return None
+    try:
+        data = yaml.safe_load(p.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, OSError) as e:
+        print(f"[idle_revive] WARN: scan heartbeat parse failed: {p}: {e}",
+              file=sys.stderr)
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_scan_heartbeat(state_dir: Path, now, mode):
+    """★走行の刻だけ★を記す (判定 state ではない)。
+
+    ★dry-run でも書く★= 本 file が答えるのは「番人は走ったか」であって
+    「番人は撃ったか」ではない。dry-run を欠測扱いにすれば、人が様子を見た事が
+    ★番人の不在★として log に嘘を書くことになる。判定 state (clear_log/上流障害
+    台帳) は従来どおり dry-run では 1 byte も動かさぬ。
+    """
+    state_dir.mkdir(parents=True, exist_ok=True)
+    p = state_dir / SCAN_HEARTBEAT_FILE
+    doc = {
+        "# managed by": "scripts/idle_revive_scan.py (cmd_1394)",
+        "last_scan_ts": now.isoformat(timespec="seconds"),
+        "mode": mode,
+        "pid": os.getpid(),
+    }
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
+    tmp.replace(p)
+
+
+def scan_gap_line(prev, now, expected_sec, factor):
+    """前回走行との差が周期の factor 倍を超えておれば、欠測を名指す1行を返す。
+
+    戻り値 None = 名指すことが無い (正常周期 / 判じられぬ)。
+    ★判じられぬ場合に何も言わぬのは誤り★ゆえ、走行記録が無い場合は呼び手が
+    NOTE=scan_history_absent を出す (沈黙を「健全」と読ませぬため)。
+    """
+    if not isinstance(prev, dict):
+        return None
+    last = parse_iso_to_naive_local(prev.get("last_scan_ts"))
+    if last is None:
+        return None
+    prev_mode = prev.get("mode") or "unknown"
+    elapsed = (now - last).total_seconds()
+    if elapsed < 0:
+        # 時計が巻き戻った (手動変更/tz 事故)。欠測と同じ扱いにはできぬゆえ別名で。
+        return (f"[idle_revive] WARN=scan_clock_rewind LAST={last.isoformat(timespec='seconds')} "
+                f"ELAPSED_SEC={int(elapsed)} PREV_MODE={prev_mode} "
+                f"— ★前回走行が未来に在る★= 欠測判定は本走行では成り立たぬ。")
+    if expected_sec <= 0 or elapsed <= expected_sec * factor:
+        return None
+    missed = max(1, int(elapsed // expected_sec) - 1)
+    return (f"[idle_revive] WARN=scan_gap LAST={last.isoformat(timespec='seconds')} "
+            f"ELAPSED_SEC={int(elapsed)} EXPECTED_SEC={int(expected_sec)} "
+            f"MISSED={missed} PREV_MODE={prev_mode} "
+            f"— ★番人の走行が欠けておった ({elapsed / 60.0:.1f}分)★= "
+            f"此の窓で起きた固着は誰も見ておらぬ。"
+            f"★「対象なし が出ておらぬ」と「走っておらぬ」は別である★。")
+
+
 def send_inbox(target, body, msg_type, from_agent):
     return subprocess.run(
         ["bash", str(INBOX_WRITE_SH), target, body, msg_type, from_agent],
@@ -1935,7 +2069,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true",
-                    help="判定を stdout に出すのみ(clear/alert を発行しない・state 書込なし)。")
+                    help="判定を stdout に出すのみ(clear/alert を発行しない・判定 state"
+                         "(clear_log/上流障害台帳)書込なし)。★走行の刻だけは記す"
+                         "(cmd_1394・欠測判定の要)★。")
     ap.add_argument("--stall-min", type=int, default=DEFAULT_STALL_MIN,
                     help=f"(c) 出力 file 無更新の許容分=slow_gen_grace (default {DEFAULT_STALL_MIN})。")
     ap.add_argument("--min-interval-min", type=int, default=DEFAULT_MIN_INTERVAL_MIN,
@@ -1972,6 +2108,13 @@ def main(argv=None):
     ap.add_argument("--selftest-upstream", action="store_true",
                     help="cmd_1355: 実 pane 文言 fixture と再開判定契約の selftest "
                          "(tmux/queue 非接触・gate-2 変異試験の的)。")
+    ap.add_argument("--expected-interval-sec", type=int,
+                    default=DEFAULT_EXPECTED_INTERVAL_SEC,
+                    help=f"cmd_1394: 走行周期の物差し秒 (cron */3 = default "
+                         f"{DEFAULT_EXPECTED_INTERVAL_SEC})。欠測判定に使う。")
+    ap.add_argument("--gap-warn-factor", type=float, default=DEFAULT_GAP_WARN_FACTOR,
+                    help=f"cmd_1394: 周期の何倍を超えたら欠測を名指すか "
+                         f"(default {DEFAULT_GAP_WARN_FACTOR})。")
     ap.add_argument("--json", action="store_true", help="結果を JSON で出力。")
     ap.add_argument("--queue-root", type=Path, default=None,
                     help="queue root 上書き(tasks/ reports/ state/ を含む)。主にテスト用。")
@@ -1990,6 +2133,29 @@ def main(argv=None):
         state_path = DEFAULT_STATE_DIR / "clear_log.yaml"
 
     dashboard_path = args.dashboard_path if args.dashboard_path is not None else DEFAULT_DASHBOARD
+
+    # ── cmd_1394 (2): ★走行の刻を先に検め、先に記す★ ──
+    # 検分を先に置く理由 = 本走行が落ちても「欠測が在った」事実は log に残る。
+    # 記すのを先に置く理由 = 以降の処理が落ちても「走った」事実は次回走行が読める
+    # (走ったが落ちた を 走っておらぬ と読ませぬ)。
+    state_dir = state_path.parent
+    run_mode = "dry-run" if args.dry_run else "live"
+    scan_now = datetime.datetime.now()
+    heartbeat = load_scan_heartbeat(state_dir)
+    gap_line = scan_gap_line(heartbeat, scan_now,
+                             args.expected_interval_sec, args.gap_warn_factor)
+    if gap_line is not None:
+        print(gap_line, file=sys.stderr)
+    elif heartbeat is None:
+        print("[idle_revive] NOTE=scan_history_absent — 走行記録が無い "
+              "(初回 or state 消失)。★欠測は次回走行から名指せる★ (cmd_1394)",
+              file=sys.stderr)
+    try:
+        save_scan_heartbeat(state_dir, scan_now, run_mode)
+    except OSError as e:
+        # ★欠測の目が潰れた事自体を黙らせぬ★ (本走行は続ける)。
+        print(f"[idle_revive] WARN: 走行の刻の書込に失敗 ({e}) — "
+              f"次回走行の欠測判定が効かぬ", file=sys.stderr)
 
     if args.pane_state_file is not None:
         pane_states = load_pane_state_file(args.pane_state_file)
@@ -2037,16 +2203,24 @@ def main(argv=None):
             print("[idle_revive] revive 対象なし(全 agent 稼働 or 完了 or 出力漸進)。"
                   f"eligible={eligible_count}")
         for r in results:
+            # ★cmd_1394 (1): 此の行は【判じた】であって【撃った】ではない★ —
+            # MODE/PHASE を焼いて其れを行自身に名乗らせる。既存の読み手を壊さぬため
+            # ★ACTION=/AGENT=/TASK_ID=/IDLE_MIN=/CONSECUTIVE= の並びは1字も動かさぬ★
+            # (cmd_1385 の契約 test / 家老の grep は此の前置きを見ておる)。
             print(f"ACTION={r['action']} AGENT={r['agent']} TASK_ID={r['task_id']} "
                   f"IDLE_MIN={r['idle_min']} CONSECUTIVE={r['consecutive']} "
+                  f"MODE={run_mode} PHASE=decided "
                   f"— {r['detail']}")
 
     if args.dry_run:
+        # ★判じたまま撃たなんだ事を log に残す★ = 「dry-run ゆえ抑止が効いた」を
+        # ★log だけで★言えるようにする唯一の行 (2026-07-27 に家老が誤った其の点)。
+        for r in results:
+            emit_outcome(r, False, PRE_SUPPRESSED_REASONS.get(r["action"], "dry_run"))
         return 0
 
     # ── 実発行(非 dry-run) ──
     exit_code = 0
-    state_dir = state_path.parent
     # scan() 段階の reset(復帰した agent の consecutive=0 等)も永続化対象に含める。
     state_dirty = (new_clear_log != clear_log)
     for r in results:
@@ -2055,6 +2229,12 @@ def main(argv=None):
             # 停電型: 個別 clear/escalation は抑止済 (scan() 側)。log のみ。
             print(f"[idle_revive] BLACKOUT抑止: {r['agent']} "
                   f"(本来={r.get('suppressed_action')}) — {r['detail']}", file=sys.stderr)
+            emit_outcome(r, False, PRE_SUPPRESSED_REASONS["blackout_suppressed"])
+            continue
+        if r["action"] in ("rate_limited", "alert_cooldown"):
+            # scan() 段階で抑止が決しており発行相では何もせぬ action。
+            # ★決定 1 件 : OUTCOME 1 行★ を破らぬため此処でも名乗る (cmd_1394)。
+            emit_outcome(r, False, PRE_SUPPRESSED_REASONS[r["action"]])
             continue
         if r["action"] == "blackout_alert":
             # 停電型: 家老へ warning 1通のみ (30分 throttle・supervisor不在警告と同型)。
@@ -2074,6 +2254,7 @@ def main(argv=None):
             if blackout_throttled(state_dir, args.blackout_throttle_min, now):
                 print("[idle_revive] BLACKOUT警報 throttle 中 (前回から "
                       f"{args.blackout_throttle_min}分未満) — 再警報せず", file=sys.stderr)
+                emit_outcome(r, False, "throttle")
                 continue
             body = format_blackout_alert(r, upstream_notes, args.blackout_throttle_min)
             proc = send_inbox("karo", body, "warning", "idle_revive_scan")
@@ -2081,9 +2262,11 @@ def main(argv=None):
                 # cmd_1338 流儀: 握り潰さない。throttle も進めない = 次回 scan で再試行。
                 print(f"[idle_revive] FATAL: 停電型警報の inbox_write 失敗: "
                       f"{proc.stderr.strip()}", file=sys.stderr)
+                emit_outcome(r, False, "inbox_write_failed")
                 exit_code = 1
             else:
                 blackout_mark_alerted(state_dir, now)
+                emit_outcome(r, True, "karo_warning_sent")
             continue
         if r["action"] == "revive":
             # cmd_1339 (e): /clear は★破壊的操作★ — 発行直前に対象 pane を再 probe し、
@@ -2094,6 +2277,7 @@ def main(argv=None):
                 print(f"[idle_revive] SKIP(発行直前gate): {r['agent']} は再probeで "
                       f"{state_now} — 破壊的 /clear を発行せず (cmd_1339 (e))",
                       file=sys.stderr)
+                emit_outcome(r, False, f"probe_gate:{state_now}")
                 # state を進めない (rate limit / consecutive を消費させない)
                 if r["agent"] in clear_log:
                     new_clear_log[r["agent"]] = clear_log[r["agent"]]
@@ -2109,6 +2293,7 @@ def main(argv=None):
                 print(f"[idle_revive] SKIP(上流障害gate): {r['agent']} pane に"
                       f"『{upstream_hit}』検知 — 上流障害中の /clear は context を失うだけ"
                       f"ゆえ発行せず (cmd_1339 quorum補強)", file=sys.stderr)
+                emit_outcome(r, False, "upstream_gate")
                 # cmd_1355: 抑止した事実を台帳へ (pane 文言は誤 clear や scroll で消える
                 # 揮発証拠ゆえ、抑止の瞬間に永続化する)。枠回復時の再開通知 (下の
                 # outage_maintain) の入力になる。
@@ -2127,6 +2312,7 @@ def main(argv=None):
             if proc.returncode != 0:
                 print(f"[idle_revive] ERROR: clear_command 発行失敗 {r['agent']}: "
                       f"{proc.stderr.strip()}", file=sys.stderr)
+                emit_outcome(r, False, "inbox_write_failed")
                 exit_code = 1
                 # 発行失敗時は state を進めない(次回再試行)。旧 state を維持。
                 if r["agent"] in clear_log:
@@ -2139,6 +2325,9 @@ def main(argv=None):
                 # cron 毎回 clear 再発行 → ≥5分間隔 / escalation 停止が機能しない。
                 new_clear_log[r["agent"]] = r["_new_state"]
                 state_dirty = True
+                # ★撃った証を log にも置く★ — 従来 last_clear_ts (clear_log.yaml) だけが
+                # 証拠であり、log からは永久に判じられなんだ (cmd_1394 穴(a))。
+                emit_outcome(r, True, "clear_command_sent")
         elif r["action"] == "escalation_stop":
             # cmd_1355: escalation にも上流障害 gate — 枠切れ agent への「復帰せず」警報は
             # 誤診 (固着でなく上流障害) であり、2026-07-26 未明はこの型の警報が家老 inbox に
@@ -2150,6 +2339,7 @@ def main(argv=None):
                 print(f"[idle_revive] SKIP(上流障害gate/escalation): {r['agent']} pane に"
                       f"『{esc_hit}』検知 — 固着でなく上流障害ゆえ escalation 警報を出さぬ "
                       f"(cmd_1355)", file=sys.stderr)
+                emit_outcome(r, False, "upstream_gate")
                 outage_record(state_dir, r["agent"], esc_hit, esc_text,
                               task_id=r.get("task_id"))
                 if r["agent"] in clear_log:
@@ -2170,12 +2360,15 @@ def main(argv=None):
             if proc.returncode != 0:
                 print(f"[idle_revive] ERROR: escalation alert 発行失敗: "
                       f"{proc.stderr.strip()}", file=sys.stderr)
+                emit_outcome(r, False, "inbox_write_failed")
                 exit_code = 1
-            elif "_new_state" in r:
-                # alert 発行成功 → last_alert_ts を永続化(再警報 cooldown の要・cmd_1280)。
-                # 発行失敗時は進めない(次回 scan で再試行)。
-                new_clear_log[r["agent"]] = r["_new_state"]
-                state_dirty = True
+            else:
+                emit_outcome(r, True, f"alert_sent_to:{target}")
+                if "_new_state" in r:
+                    # alert 発行成功 → last_alert_ts を永続化(再警報 cooldown の要・cmd_1280)。
+                    # 発行失敗時は進めない(次回 scan で再試行)。
+                    new_clear_log[r["agent"]] = r["_new_state"]
+                    state_dirty = True
 
     if state_dirty:
         try:

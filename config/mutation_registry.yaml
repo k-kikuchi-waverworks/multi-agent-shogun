@@ -152,7 +152,7 @@ mutations:
       軍師二人へ各3連射) が再来する。U1c が対の pattern "/usage-credits" を同様に守る。
     paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
     mutate: |
-      sed -i '/"session limit",/d' scripts/idle_revive_scan.py
+      sed -i '/^    "session limit",/d' scripts/idle_revive_scan.py
     test: |
       python3 scripts/idle_revive_scan.py --selftest-upstream
     expect: nonzero
@@ -164,7 +164,16 @@ mutations:
     #   sed は行削除ゆえ ★2 行とも消える★ = 実測 2 箇所 (己の手で grep -c して数え直した)。
     #   ⇒ ★他人の commit が、他人の牙を黙って鈍らせうる★ = 同じ事は明日また起こる。
     #     ★防ぐ形 (共有台帳を構造で断つ) は本任の外であり cmd_1386 (三号) へ渡してある★。
-    anchor_sites: 2
+    # ★2026-07-27 cmd_1382 = 所有者 (足軽一号) の裁可で mutate を一意へ絞った★
+    #   anchor_sites: 2 は【記述としては真・処方としては誤り】であった = 2 本目 (170 行) は
+    #   UPSTREAM_TIMED_HEAD_PATTERNS の【定義行】ゆえ、消すと NameError で番人が墜ちる。
+    #   ⇒ 変異後 rc=1 の赤は【契約が破れた赤】でなく【墜落の赤】= ★U1b は一度も走っておらなんだ★。
+    #   ★申告 (anchor_sites) は数を正すが、折れた牙は直さぬ★ ゆえ綴りを行頭 4 空白へ絞り、
+    #   狙い (150 行 = pattern 表の 1 要素) だけを消す形にした = 実測 hit 1 ⇒ anchor_sites 不要。
+    #   実測 2026-07-27: 変異後 exit 1 + 「★NG★ U1b」を名指し (Traceback/NameError 無し)。
+    #   ★同じ pattern を頼る U8c/U8e/U8f も同時に鳴るが、之は production の pattern を
+    #   撃った以上 当然の波及であり、red_needle が U1b を名指すゆえ赤の出所は絞れておる★。
+    #   ★代筆 = 足軽六号 (台帳の単独書き手)。疑い・裁可・実射はいずれも足軽一号★。
 
   - id: MUT-1355-002
     origin: cmd_1355
@@ -302,7 +311,15 @@ mutations:
     test: |
       python3 scripts/idle_revive_scan.py --selftest-upstream
     expect: nonzero
-    red_needle: "★NG★ U8d"  # 実測 2026-07-26: U8d + U8f が名指しで落ちる
+    # ★札の流れ (2026-07-27 01:0x・六号が代筆・原報は五号)★
+    #   ★旧 red_needle = "★NG★ U8d" (実測 2026-07-26: U8d + U8f が名指しで落ちた)★。
+    #   ★五号の cmd_1389 是正 (a5cf185) の副作用で、名指しが U8d → U8f へ移った★ =
+    #   ★赤の力は失われておらぬ (rc=1 のまま)。移ったのは【札】だけである★。
+    #   ★六号が己の手で両方を実射して確かめた (代筆ゆえ鵜呑みにせぬ)★:
+    #     red_needle=U8d ⇒ ★FAIL「赤いが名指しが無い」★ / red_needle=U8f ⇒ ★PASS (名指し確認)★
+    #   ★之も MUT-1355-001 / MUT-1384-M8 と同族である★ =
+    #   ★牙の当たり所も、赤の名乗りも【今の盤面の性質】であり、他人の是正が黙って動かしうる★。
+    red_needle: "★NG★ U8f"  # 実測 2026-07-27 01:0x (六号): 変異後 U8f が名指しで落ちる
 
   - id: MUT-1385-003
     origin: cmd_1385
@@ -351,6 +368,64 @@ mutations:
       python3 scripts/idle_revive_scan.py --selftest-upstream
     expect: nonzero
     red_needle: "★NG★ U8j"
+
+  # ══════════════════════════════════════════════════════════════════════
+  # cmd_1389 — ★期限の読みと、選び方の順序依存★ (2026-07-27)
+  #  ★原案 = 足軽五号が実射 (anchor は撃つ前に grep -x -F で hits=1・門も着弾を認めた)★。
+  #  ★代筆 = 足軽六号 (台帳の単独書き手ゆえ・五号は台帳へ 1 byte も書いておらぬ)★。
+  #  ★★suspected_by の書き分け★★ = ★001/002 は【軍師二号】★ (A3 で機序を実測したのは軍師)。
+  #    003 は五号自身が「蓋を広げすぎる方向」を疑うて立てた。
+  #    ★己の疑いでない物を己の名で登録せぬ★ = suspected_by の趣旨は「誰の疑いも通って
+  #    おらぬ場所」を数えられるようにすることゆえ、代筆で名を潰せば其の数が腐る。
+  #  ★paths に fixture を必ず含める★ = 落とすと U0 が倒れ baseline が赤 = UNDETERMINED になる
+  #    (★六号が cmd_1385 で払った授業料★ = 上の MUT-1385-004 の註を見よ)。
+  # ══════════════════════════════════════════════════════════════════════
+  - id: MUT-1389-001
+    origin: cmd_1389
+    suspected_by: gunshi2
+    desc: |
+      ★期限を読めた banner を live と判ずる改変★ = ahead_h の蓋 (MAX_RESETS_ETA_AHEAD_HOURS)
+      を無効にすると、selftest U9a が赤くなるべき。
+      ★折っても緑なら 2026-07-26 の迂回路が戻る★ = 期限が遠すぎる banner を live と読み、
+      枠切れ沈黙へ /clear を撃つ夜が再来する。
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
+    mutate: |
+      sed -i 's|^        if ahead_h > MAX_RESETS_ETA_AHEAD_HOURS:$|        if False:|' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U9a"
+
+  - id: MUT-1389-002
+    origin: cmd_1389
+    suspected_by: gunshi2
+    desc: |
+      ★first-match の順序依存を戻す★ = select_informative_pattern を heads[0] へ戻すと、
+      selftest U9e が赤くなるべき。
+      ★折っても緑なら「台帳の並び順が判定を支配する」形が黙って戻る★ =
+      ★同じ盤面でも、pattern を書いた順で答が変わる番人になる★。
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
+    mutate: |
+      sed -i 's|^    head = select_informative_pattern(heads)$|    head = heads[0]|' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U9e"
+
+  - id: MUT-1389-003
+    origin: cmd_1389
+    suspected_by: ashigaru5
+    desc: |
+      ★退行の側の牙★ = 期限を読めぬ族まで残渣へ倒す改変 (蓋を広げすぎる方向)。
+      ★偽陽性を潰す変更は、必ず此の側も同時に縛らねばならぬ★ (家老下命(3)) =
+      ★折っても緑なら【本物の壁を見逃す形】が黙って通る★。
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
+    mutate: |
+      sed -i 's|^    if head in UPSTREAM_TIMED_HEAD_PATTERNS:$|    if True:|' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U9d"
 
   - id: MUT-1154-001
     origin: cmd_1356

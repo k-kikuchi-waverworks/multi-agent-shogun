@@ -2034,6 +2034,146 @@ mutations:
     red_needle: "not ok 1 T-CW-000"
     timeout: 300
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ★cmd_1408 (2026-07-27 朝)★ — ★本夜 建てた五つの口へ牙を立てる★
+  #   出所 = 07-27 06:30 の門が「台帳に無い変異test 7 件」で FAIL した其の中身。
+  #   ★七件の内訳は六号が己の手で数え直した★ (家老の読みは 5/7 が当たり・2 件は挙がっておらなんだ)。
+  #   ★五本を此処へ登録し、残る二件は【他者の持ち物】ゆえ所有者へ回す★ (報告 YAML に名指しで記した)。
+  #
+  #   ★suspected_by は五本とも ashigaru6★ = ★口を建てたのは他者だが、
+  #     【何処を壊せば此の口が黙るか】を疑い、変異を設計し、赤を実見したのは六号である★。
+  #     (建てた者は desc に併記した = 功を攫わぬため)。
+  #
+  #   ★paths に【兄弟】を併記しておる理由 (五本すべてに効く註)★=
+  #     runner は paths に挙げた物【だけ】を scratch へ写す。★己の selftest が兄弟を読む口は、
+  #     兄弟を写さねば baseline が赤になり、其の牙は永久に UNDETERMINED へ落ちる★。
+  #     ⇒ ★之は本朝の未判定 17 件のうち 10 件が現に嵌っておる穴である★ (報告 3 節)。
+  #     ★ゆえに登録の前に「兄弟を写した scratch で baseline が緑か」を五本とも実測した★。
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: MUT-1408-C1
+    desc: |
+      ★registry_census.py (建てたのは六号・軍師二号が実測を寄せた) の芯 = 「冊が無い木を NO_BOOK と名乗る」★。
+      ★之を「牙あり」へ倒すと、台帳を一冊も持たぬ木が【守られておる顔】で点呼を通る★=
+      ★点呼が最も静かに形骸化する形★ゆえ牙を立てた。
+      ★実測 (2026-07-27 07:44 六号)★= baseline rc=0 (34/34) → 変異後 rc=1・T1 が名指しで落ちた。
+    suspected_by: ashigaru6
+    paths: [scripts/registry_census.py, scripts/gate_nightly.sh]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/registry_census.py"
+      s = open(p, encoding="utf-8").read()
+      a = '        elif not books:\n            state = NO_BOOK\n'
+      assert a in s, "MUT-1408-C1: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(a, '        elif not books:\n            state = "★牙あり★"  # MUT-1408-C1\n', 1))
+      PY
+    test: |
+      python3 scripts/registry_census.py --selftest
+    expect: nonzero
+    red_needle: "T1 冊が無い木を NO_BOOK と名乗る"
+    timeout: 300
+
+  - id: MUT-1408-C2
+    desc: |
+      ★fang_domain_census.py (建てたのは足軽三号) の芯 = 「牙の名札が幾つ【一意】か」を数える所★。
+      ★unique を定数 1 へ固めると、重複を解いても数が動かぬ★=
+      ★「族が痩せておる」を見つける当の計器が、常に同じ数を返す置物になる★。
+      ★実測 (07:44 六号)★= baseline rc=0 (22/22) → 変異後 rc=1・★T1b (偽にして赤の側)★ が落ちた。
+      ★T1 は【変異後も緑のまま】である★= ★正の検だけ見ておれば此の変異は素通りした★ =
+      ★負の主張が刃を持っておったゆえ捕まった一例★ (02:12 全軍規律の実地の証)。
+    suspected_by: ashigaru6
+    paths: [scripts/fang_domain_census.py, scripts/gate_nightly.sh]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/fang_domain_census.py"
+      s = open(p, encoding="utf-8").read()
+      a = '        "unique": len(c),\n'
+      assert a in s, "MUT-1408-C2: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(a, '        "unique": 1,  # MUT-1408-C2\n', 1))
+      PY
+    test: |
+      python3 scripts/fang_domain_census.py --selftest
+    expect: nonzero
+    red_needle: "T1b"
+    timeout: 300
+
+  - id: MUT-1408-C3
+    desc: |
+      ★ledger_id_census.py (建てたのは足軽三号) の芯 = ★枝つき id を 1 本へ潰さぬ物差し★。
+      ★変異は「三号が cmd_1386 で捨てた壊れた物差し (BROKEN_ID_RE)」を現役へ戻すだけ★=
+      ★己の repo が既に持っておる【対照】を、そのまま牙に使うた形★。
+      ★実測 (07:44 六号)★= baseline rc=0 (9/9) → 変異後 rc=1・T1 が名指しで落ちた。
+      ★★併せて申す = 此の壊れた物差しは、今 gate_mutation_replay.py:504 REGISTRY_ID_RE に現役で居る★★
+      = ★三号が己の口で捨てた欠陥が、門の側では捨てられておらぬ★ (報告 2 節・幽霊 13 件の出所)。
+    suspected_by: ashigaru6
+    paths: [scripts/ledger_id_census.py, scripts/gate_mutation_replay.py]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/ledger_id_census.py"
+      s = open(p, encoding="utf-8").read()
+      a = 'ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*(?:-[A-Za-z0-9]+)+")\n'
+      assert a in s, "MUT-1408-C3: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(
+          a, 'ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*-[A-Za-z0-9]+")  # MUT-1408-C3\n', 1))
+      PY
+    test: |
+      python3 scripts/ledger_id_census.py --selftest
+    expect: nonzero
+    red_needle: "T1 MUT-1330-R3-M1"
+    timeout: 300
+
+  - id: MUT-1408-C4
+    desc: |
+      ★gate_anchor_touched.py (建てたのは足軽三号) の芯 = 「commit が触れた牙の錨が鈍っておらぬか」を其の場で名指す口★。
+      ★screen_entry の判定を None へ倒すと、門は【何も鳴らさぬ】= 常に緑★=
+      ★★之は「門を外した」のではなく「門が黙った」ゆえ、外から見分けが付かぬ★★。
+      ★実測 (07:44 六号)★= baseline rc=0 (ok=16 ng=0) → 変異後 rc=1・S2 (非一意化を名指す) が落ちた。
+    suspected_by: ashigaru6
+    paths: [scripts/gate_anchor_touched.py, scripts/gate_mutation_replay.py]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_anchor_touched.py"
+      s = open(p, encoding="utf-8").read()
+      a = ("    return R.check_anchor_uniqueness(e, pristine, mut, work, PER_ENTRY_TIMEOUT,\n"
+           "                                     spelling_measure=False)\n")
+      assert a in s, "MUT-1408-C4: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(a, "    return None  # MUT-1408-C4\n", 1))
+      PY
+    test: |
+      python3 scripts/gate_anchor_touched.py --selftest
+    expect: nonzero
+    red_needle: "S2"
+    timeout: 300
+
+  - id: MUT-1408-C5
+    desc: |
+      ★gate_verdict_drift.py (建てたのは家老の下命・足軽五号の材料) の芯 =
+      「同じ id が二度 出たら【先】を採る」= 二つの走行を継ぎ足した log で、古い判定に新しい物を上書きさせぬ規★。
+      ★setdefault を代入へ倒すと後勝ちになり、★退行を【回復】と読み替えうる★★。
+      ★実測 (07:44 六号)★= baseline rc=0 (20/20) → 変異後 rc=1・T6 が名指しで落ちた。
+      ★本 file は五本の中で唯ひとつ【兄弟を要さぬ】★ (己だけで baseline が緑)。
+    suspected_by: ashigaru6
+    paths: [scripts/gate_verdict_drift.py]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_verdict_drift.py"
+      s = open(p, encoding="utf-8").read()
+      a = "        out.setdefault(eid, verdict)\n"
+      assert a in s, "MUT-1408-C5: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(a, "        out[eid] = verdict  # MUT-1408-C5\n", 1))
+      PY
+    test: |
+      python3 scripts/gate_verdict_drift.py --selftest
+    expect: nonzero
+    red_needle: "T6 同じ id が二度 出たら先を採る"
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

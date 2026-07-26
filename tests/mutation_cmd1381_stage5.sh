@@ -15,6 +15,14 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 WORK="$(mktemp -d)"
 NG=0
+# ★★2026-07-27 08:5x 四号 = 己の負の対照が【他人の NG を吸い取っておった】ゆえ足す★★
+#   ■ ★機序 (実測で掴んだ)★= 下の 208 の帳消しは ★「NG が 1 増えた」だけ★を見ておった。
+#     ⇒ ★harness 自身の【赤の検め】(if [ $rc -eq 0 ]) を目潰しすると★、208 は
+#        ★「緑のまま」ではなく【針が名指されぬ】で NG を立てる★ — 数は同じ 1 ゆえ
+#        ★帳消しが其れを「期待どおり」と読み、rc=0 (緑) へ戻しておった★。
+#   ■ ★之は本夜ずっと狩ってきた族そのもの★= ★数が合うだけで理由を検めぬ守り★。
+#   ⇒ ★NG の【理由】を記録し、208 は【緑のまま】以外の理由を帳消しにせぬ★。
+LAST_NG_KIND=""
 declare -a TOUCHED=()
 
 restore_all() {
@@ -73,7 +81,7 @@ mutate() {
   hits="$(grep -Fc -- "$anchor" "$REPO/$rel" || true)"
   if [ "$hits" != "1" ]; then
     echo "★NG★ $id: anchor の hit が $hits 件 (期待 1) = ★一意でない綴りを撃てば、赤の出所が絞れぬ★"
-    NG=$((NG + 1)); return
+    LAST_NG_KIND=anchor; NG=$((NG + 1)); return
   fi
 
   backup "$rel"
@@ -86,12 +94,12 @@ p.write_text(s.replace(sys.argv[2], sys.argv[3], 1), encoding="utf-8")
 PY
   local mrc=$?
   if [ $mrc -ne 0 ]; then
-    echo "★NG★ $id: 変異そのものが当たらなんだ"; NG=$((NG + 1)); restore_all; return
+    echo "★NG★ $id: 変異そのものが当たらなんだ"; LAST_NG_KIND=mutate; NG=$((NG + 1)); restore_all; return
   fi
   # ── ★着弾の証明★= byte が現に動いたか ──
   if cmp -s "$REPO/$rel" "$WORK/orig/$(echo "$rel" | tr '/' '_')"; then
     echo "★NG★ $id: 変異後も byte が同一 = ★撃っておらぬ (UNDETERMINED)★"
-    NG=$((NG + 1)); restore_all; return
+    LAST_NG_KIND=bytes; NG=$((NG + 1)); restore_all; return
   fi
 
   # ── 試験を走らせ、★赤くなること★と★狙った検が名指されること★を見る ──
@@ -101,12 +109,12 @@ PY
 
   if [ $rc -eq 0 ]; then
     echo "★NG★ $id ($desc): ★変異させても試験が緑のまま★ = 此の緑は何も証しておらぬ"
-    NG=$((NG + 1)); return
+    LAST_NG_KIND=green; NG=$((NG + 1)); return
   fi
   if ! grep -qF -- "$needle" <<<"$out"; then
     echo "★NG★ $id ($desc): 赤くはなったが ★狙った検 [$needle] が名指されておらぬ★ = 別の場所に当たった疑い"
     echo "$out" | tail -5 | sed 's/^/      /'
-    NG=$((NG + 1)); return
+    LAST_NG_KIND=needle; NG=$((NG + 1)); return
   fi
   echo "ok   $id ($desc) — 赤 rc=$rc / 名指し=[$needle]"
 }
@@ -202,15 +210,23 @@ mutate MUT-1400-212 "★牙の牙★ 後方互換を壊す (curl_rc を必須へ
 #   区別がつかぬ★ (本日 全軍で積んだ「鳴る側と鳴らぬ側を同数 撃て」の、変異台帳の側の顔)。
 #   ⇒ ★振舞いを 1 bit も変えぬ変異 (註釈のみ) を撃ち、道具が【捕まらなんだ】と正しく申すかを見る★。
 NG_BEFORE=$NG
+LAST_NG_KIND=""   # ★208 の直前で必ず洗う★= 前の変異が残した理由を 208 の判定に持ち込まぬ
 mutate MUT-1381-208 "★負の対照★ 註釈だけの変異 → 捕まらぬ筈" \
   scripts/gate_ntfy_sendlog.py \
   "★北極星 (cmd_1381 の起源)★" \
   "★北極星 (cmd_1381 の起源・此の行は註釈ゆえ振舞いを変えぬ)★" \
   "python3 scripts/gate_ntfy_sendlog.py --selftest" \
   "★NG★"
-if [ "$NG" -eq $((NG_BEFORE + 1)) ]; then
+# ★★帳消しは【数】でなく【理由】で判ずる (2026-07-27 08:5x 四号の是正)★★
+#   ★数だけで判ずれば、208 は己と無縁の NG (針が名指されぬ 等) まで吸い取って緑へ戻す★
+#   = ★実測で現に起きた形ゆえ、理由 [green] を要求する★。
+if [ "$NG" -eq $((NG_BEFORE + 1)) ] && [ "$LAST_NG_KIND" = "green" ]; then
   NG=$NG_BEFORE   # ★此の NG は【期待どおり】ゆえ帳消しにする★
   echo "ok   MUT-1381-208 — ★道具は無害な変異を『緑のまま』と正しく名指した★ = 常に赤を出す道具ではない"
+elif [ "$NG" -eq $((NG_BEFORE + 1)) ]; then
+  echo "★NG★ MUT-1381-208: ★NG は 1 件 立ったが、其の理由が [$LAST_NG_KIND] であって [green] でない★"
+  echo "      = ★帳消しにせぬ★ (数が合うだけで理由を検めねば、己と無縁の NG を吸い取る門になる)"
+  NG=$((NG + 1))
 else
   echo "★NG★ MUT-1381-208: ★振舞いを変えぬ変異を『捕えた』と申しておる★ = 此の道具の赤は信用できぬ"
   NG=$((NG + 1))

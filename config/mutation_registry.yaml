@@ -340,7 +340,20 @@ mutations:
     paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh,
             tests/unit/test_stall_watchdog_status_normalize.bats]
     mutate: |
-      sed -i 's/print(f"\[stall_watchdog\] 帳簿漏れ hit なし。assigned={assigned_count}")/pass/' scripts/stall_watchdog_scan.py
+      # ★2026-07-26 追随 (cmd_1369)★ — 三号が cmd_1370 の全数走査で ★本 entry の空振り★ を検出。
+      #   機序: 旧 mutate は ★単行 print を前提とした sed★ であったが、同日 e7944ba (cmd_1359・拙者) が
+      #   当該 print を ★2 行の暗黙連結★ へ広げたため sed が当たらず ★黙って何もせず★ 通っておった。
+      #   ★牙が空振りしておることに、牙が守るはずの規律 (分母0 と全員健全を区別せよ) で気づいた形★。
+      #   ⇒ ★字面の一致に賭けるのをやめる★ = 当たらねば assert で大声で落ちる (UNVERIFIABLE を名乗る)。
+      python3 - <<'PY'
+      p = "scripts/stall_watchdog_scan.py"
+      s = open(p, encoding="utf-8").read()
+      old = ('            print(f"[stall_watchdog] 帳簿漏れ hit なし。assigned={assigned_count} "\n'
+             '                  f"再dispatch除外={len(redispatch_skipped)}")')
+      assert old in s, "MUT-0552-003: 分母印字の実体が原形と一致せぬ (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "            pass  # MUT-0552-003", 1))
+      PY
+      grep -q 'pass  # MUT-0552-003' scripts/stall_watchdog_scan.py
     test: |
       mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
       bats --filter "T-SWD-005" tests/unit/test_stall_watchdog_status_normalize.bats

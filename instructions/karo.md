@@ -760,41 +760,16 @@ for m in (data.get("messages") or []):
 bash scripts/stall_watchdog_scan.sh || true
 # 試験時は `bash scripts/stall_watchdog_scan.sh --dry-run` で stdout 確認、karo.yaml 書込抑止。
 # --threshold-min N で閾値上書き、--json で hits を JSON 出力 (将来 dashboard 連携)。
-# 独自 fallback (スクリプト未配備時) の参考 python snippet:
-python3 -c '
-import yaml, datetime
-from pathlib import Path
-COMP={"done","completed","success"}; TH=30
-now=datetime.datetime.now()
-for t in sorted(Path("queue/tasks").glob("*.yaml")):
-    agent=t.stem
-    if not (agent.startswith("ashigaru") or agent=="gunshi"): continue
-    d=yaml.safe_load(t.read_text(encoding="utf-8")) or {}
-    ti=(d.get("task") or {})
-    if ti.get("status")!="assigned": continue
-    r=Path(f"queue/reports/{agent}_report.yaml")
-    if not r.exists(): continue
-    docs=list(yaml.safe_load_all(r.read_text(encoding="utf-8")))
-    latest=None
-    for doc in docs:
-        if not isinstance(doc,dict): continue
-        inner=doc["report"] if isinstance(doc.get("report"),dict) else doc
-        ts=inner.get("timestamp")
-        if not isinstance(ts,str): continue
-        try: dt=datetime.datetime.fromisoformat(ts.replace("Z","+00:00"))
-        except ValueError: continue
-        if dt.tzinfo is not None: dt=dt.astimezone().replace(tzinfo=None)
-        rid=inner.get("task_id") or inner.get("primary_task")
-        rst=inner.get("status")
-        if latest is None or dt>latest[0]: latest=(dt,rid,rst)
-    if not latest: continue
-    dt,rid,rst=latest
-    if rid!=ti.get("task_id"): continue
-    if not isinstance(rst,str) or rst.lower() not in COMP: continue
-    em=int((now-dt).total_seconds()//60)
-    if em<TH: continue
-    print(f"BOOKKEEPING STALE: {agent} task_id={rid} parent_cmd={ti.get(\"parent_cmd\")} elapsed={em}min status={rst}")
-' || true
+# ★2026-07-26 削除: 独自 fallback の python snippet★
+#   理由 = 足軽一号の具申 (cmd_1154 系・commit ad31bf5)。この snippet は
+#   ★status を生 exact match (ti.get("status") != "assigned") で照合しており、
+#   家老の注記形式 ('assigned   # 家老dispatch…') に【盲目】であった★。
+#   同型の穴が本体 script 側にも在り、2026-07-26 未明の枠切れで
+#   ★番人の全経路が入口で消灯する実害★ を出した (一号 d8fc7fd / ad31bf5 で是正済)。
+#   ⇒ ★script は既に配備済 (stall_watchdog_scan.sh/.py) ゆえ、
+#     直った本体の傍らに【盲目な写し】を残す方が危うい★ =
+#     「fallback があるから安心」と思わせて、実は同じ穴を持つ。
+#   ★fallback が要る事態 (script 消失) は gate-1 の hook 消失検知が拾う★。
 ```
 
 ### 検出時の対応

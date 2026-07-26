@@ -138,6 +138,13 @@ scripts/seo_qc.sh
 # 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
 !scripts/gate_artifact_capture.sh
 !scripts/gate_mutation_replay.py
+# cmd_1339/1354 (2026-07-25夜〜07-26朝): 恋の本番TTS(port 9100)を構造的に守る道具。
+# 保護portを実測判定して拒否し、意図的停止は3条件 (意思明示 + 20字以上の理由 + port名指し承認)
+# でのみ通す。★家老裁定 2026-07-26 10:43 = 追跡下へ入れよ★ = fresh clone に渡らねば
+# 「守り」は存在せぬのと同じ (ash一号 cmd_1349 の『fork実体が gitignore された venv にしか
+# 無かった』と同型を、この道具自身が抱えておった)。
+# ★logs/production_stop_journal.log は追跡せぬ★ (運用記録は肥大し秘匿情報が混じりうる=家老裁定)。
+!scripts/gpu_sidecar_stop.sh
 !scripts/gate_precommit.sh
 !scripts/install_gate_hooks.sh
 !scripts/gate_nightly.sh

@@ -877,9 +877,17 @@ def tree_census(registry: Path, watched_file: Path | None, projects: Path,
         print("  処方: その木を実在させる (submodule init / path 是正) か、gate 側の"
               " 呼び出しを外して ★撃とうとしておらぬ★ ことを明示せよ (黙って飛ばすな)。")
         return 2
+    # ★cmd_1376 で此処の但し書きを実測で書き直した★:
+    #   旧文は「TS/JS の木では成り立たぬ」で止まっており、★次の者は拡張子を足せば直ると読む★。
+    #   実測 = ★.ts/.tsx を COVERAGE_EXTS へ足しても engine の候補は 0 件のまま★ =
+    #   D1/D2/D3 は @test / --selftest / def test_ を見ており ★vitest の it( はどれにも当たらぬ★。
+    #   ⇒ 抜け道は拡張子でなく ★牙の走らせ方★ の側に在った (engine は .sh の harness から
+    #     実 TS を走らせる形で監視下へ入った = 牙 1 件として現に数えられておる)。
     print(f"[木の点呼] PASS: 牙を持つ木はすべて監視下 (免除 {n_waived} 本は可視・"
           f"★牙なし未監視 {n_fangless} 本は牙が生えれば赤へ変わる — "
-          f"★但し牙の勘定は sh/bash/py/bats に限る = TS/JS の木では成り立たぬ (cmd_1376)★)")
+          f"★但し牙の勘定は sh/bash/py/bats に限る = ★.ts を足しても vitest の it( は "
+          f"D1/D2/D3 のどれにも当たらず候補 0 件のままである (cmd_1376 実測)★ = "
+          f"TS/JS の木は 牙を .sh 側から走らせるか 検知規則を足すまで数えられぬ★)")
     return 0
 
 

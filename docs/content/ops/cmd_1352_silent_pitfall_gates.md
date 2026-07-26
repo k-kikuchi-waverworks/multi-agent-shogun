@@ -332,6 +332,39 @@ waverworks web repo は `/mnt/c/Users` 配下 (殿 CLAUDE.md の変更禁止領�
 **★本体台帳への相乗りは不可★** — 相乗りさせて `--repo-root` を web にすると shogun 自身の全 entry が
 「paths の実体が無い」で UNDETERMINED になる (実測)。**台帳 file と repo-root は 1 対 1** である。
 
+**engine (TS の木) は台帳を repo の中へ置く (cmd_1376)**: web と扱いを違えた理由 =
+**engine は我らが日々書き換えておる木ゆえ、牙は其の木と共に配られねば fresh clone に届かぬ**
+(「直したが配られておらぬ」= cmd_1367 の族)。台帳 = `<engine>/config/mutation_registry.yaml`、
+牙 = `<engine>/scripts/mutation_gate_confirmed_date.sh` (backend/app と同方式)。
+
+### ★TS/JS の木で牙が 0 件だった理由は【二重】であった (cmd_1376 実測)★
+
+木の点呼 (cmd_1374) が engine を「走査元 33 本に対し牙 0 件」と名指した。その理由:
+
+| 層 | 何が塞いでおったか | 実測 |
+|----|----------------|------|
+| ① 拡張子 | 牙の勘定は `.sh/.bash/.py/.bats` のみ。engine の試験 111 本は全て `.ts` | 候補 0 件 |
+| ② 検知規則 | **`.ts/.tsx` を足しても 0 件のまま** — D1/D2/D3 は `@test` / `--selftest` / `def test_` を見ており **vitest の `it(` はどれにも当たらぬ** | 4 repo 全てで候補数に変化なし (0→0) |
+| ③ 走らせ方 | **WSL から vitest を踏めぬ** — R2-1 (npm 系禁) に加え `node_modules/@esbuild` が **win32-x64 のみ** ゆえ tsx/vitest は WSL の node で起動すらせぬ | — |
+
+**★台帳の形そのものは ts の木でも成立する★** (mutate/test は shell ゆえ言語を問わぬ)。
+成立せなんだのは **③ 走らせ方** の側だけであった。⇒ 抜け道は拡張子でなく
+**「npm を一度も呼ばぬ走らせ方」**: `node_modules/typescript` (**純 JS の transpiler ゆえ OS 非依存**)
+で実 TS を CJS へ落とし、`require` を差し替えて走らせる。**fixture の写しでなく repo の実 file を撃つ**。
+DB/網の module は「呼ばれたら記録するだけの stub」、許さぬ module は **throw** =
+**本番へ 1bit も触れておらぬことを申告でなく構造で示す**。
+
+**★D4 (vitest 型の検知規則) を今 足さぬ理由★**: 足せば engine で **2 件** が鳴る (実測 =
+`stocks-eod-step-notice.test.ts` / `stocks-universe-confirmed-date.test.ts`・いずれも未登録)。
+**鳴る数を先に数えた上で見送っておる** — 牙 1 本を立てるのが本任ゆえ。
+足す時は **この 2 件をどうするか (登録 or 期限つき免除) まで同時に決めよ**。
+
+**注意 — 「vitest が緑」を根拠にするな**: engine の vitest 群は **WSL から一度も走らせられておらぬ**
+(SKIP=FAIL の状態)。実際 `T-CFM-13` (実物の呼び手と同形の試験) は自身の comment に
+**「変異試験 = 未実走・これは説明であって実測ではない」** と書いてある。
+cmd_1376 の牙は **その「筈」を実測に変えた** = 同じ機序を vitest を通さず撃ち、
+守りを戻せば赤くなることを機械で確かめた。
+
 ## harness 内 SKIP=FAIL (gate-2 付帯2・2026-07-26 四号の申し送り)
 
 **なぜ在るか — 実例 (2026-07-26 朝・足軽四号)**: 四号の STT 署名 canary は、変異を撃っても

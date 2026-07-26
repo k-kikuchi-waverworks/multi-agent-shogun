@@ -122,7 +122,31 @@ else
     rc7=2; out7="[gate-2 web] UNDETERMINED: web 台帳 ($WEB_REG) か repo ($WEB_ROOT) が見えぬ = 検分できておらぬは緑ではない"
     rc8=2; out8="[gate-2 web coverage] UNDETERMINED: 同上"
 fi
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out6b" "$out7" "$out8"
+# ── ★ai-automate-engine 台帳延長 (cmd_1376)★ ────────────────────────────────
+# 木の点呼が掘り出した3本目 = ★走査元 33 本に対し牙 0 件★ (cmd_1374 census) の木。
+# ★0 件であった理由は二重であった (cmd_1376 実測)★:
+#   ① 牙の勘定は sh/bash/py/bats を継ぎ、engine の試験 111 本は全て .ts で網の外
+#   ② ★.ts を網へ入れても候補は 0 件のまま★ = D1/D2/D3 は @test / --selftest / def test_ を
+#      見ており vitest の it( はどれにも当たらぬ ⇒ ★拡張子と検知規則の両方で盲★であった。
+# ★台帳と牙は engine repo 側に置く★ = 牙は其の木と共に配られねば fresh clone に届かぬ
+#   (web と扱いを違えた理由 = engine は我らが日々書き換えておる木ゆえ)。
+# 牙の走らせ方は ★npm を一度も呼ばぬ形★ (node_modules/typescript で実 TS を落として撃つ) =
+#   R2-1 (WSL から npm 系は禁) と @esbuild が win32-x64 のみ、の両方を避けておる。
+ENGINE_ROOT="${GATE_ENGINE_ROOT:-/mnt/c/Users/k-kikuchi/development/ai-automate-engine}"
+ENGINE_ROOT="$(readlink -f "$ENGINE_ROOT" 2>/dev/null || echo "$ENGINE_ROOT")"
+ENGINE_REG="$ENGINE_ROOT/config/mutation_registry.yaml"
+echo "[gate_nightly] engine 台帳 = $ENGINE_REG"
+export GATE_ENGINE_ROOT="$ENGINE_ROOT"   # 牙が typescript を見つける口 (scratch からは repo が見えぬゆえ)
+attempted "$ENGINE_ROOT"
+if [ -f "$ENGINE_REG" ]; then
+    out9="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --registry "$ENGINE_REG" --repo-root "$ENGINE_ROOT" 2>&1)"; rc9=$?
+    out10="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --coverage --registry "$ENGINE_REG" --repo-root "$ENGINE_ROOT" 2>&1)"; rc10=$?
+    watched "$ENGINE_ROOT"
+else
+    rc9=2; out9="[gate-2 engine] UNDETERMINED: engine 台帳が見えぬ ($ENGINE_REG) = path 違い / disk 喪失の疑い。検分できておらぬは緑ではない"
+    rc10=2; out10="[gate-2 engine coverage] UNDETERMINED: 同上"
+fi
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out6b" "$out7" "$out8" "$out9" "$out10"
 
 # hook 消失検知: pre-commit shim は .git/hooks 住まいゆえ環境再構築で黙って消える
 # (cmd_1342 で六号が指摘した弱点)。消えておれば commit 時の関所が不在 = 緑ではない。
@@ -182,14 +206,18 @@ fold_lines() {
     return 0
 }
 
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then
     # 警告は1行に畳む (inbox message の YAML 安全のため改行・コロン+空白を避ける)
     # 行連結は awk で行う (tr '\n' '・' は byte 置換ゆえ多byte文字の先頭1byteのみを埋め
     # 不正 UTF-8 を inbox へ混入させる — 2026-07-26 実測で発見した既存バグの是正)
     # PASS 行は除外する: PASS 行にも red_needle 文字列 (「★NG★ U1b」等) が引用されるため、
     # 除かねば緑の行が所見を埋めて肝心の非 PASS 行を head -8 から押し出す
     # (2026-07-26 cmd_1355b の E2E 実射で発見)
-    detail="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" | grep -E '\[(IGNORED|UNTRACKED|MISSING|COUNT|EMPTY-DIR|UNREGISTERED|WAIVER-EXPIRED)\]|★NG★|UNDETERMINED|陽性対照' | grep -vE '^\s*ok\s' | fold_lines 8)"
+    # ★cmd_1376: web (out7/out8) と engine (out9/out10) を所見の分母へ入れる★ =
+    #   従前は gate-1/2 と backend/app の out しか畳んでおらず、★web/engine が非 PASS でも
+    #   家老の警告には「UNDETERMINED」の verdict だけが出て【何が起きたか】が載らなんだ★
+    #   (cmd_1367 N1 / cmd_1355b で二度直した「名指しできぬ警告」の同族。三度目ゆえ族として断つ)。
+    detail="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out7" "$out8" "$out9" "$out10" | grep -E '\[(IGNORED|UNTRACKED|MISSING|COUNT|EMPTY-DIR|UNREGISTERED|WAIVER-EXPIRED)\]|★NG★|UNDETERMINED|陽性対照' | grep -vE '^\s*ok\s' | fold_lines 8)"
     hooknote=""
     [ "$hook_rc" -ne 0 ] && hooknote="★pre-commit shim不在=install_gate_hooks.sh で再据付せよ★ "
     wirenote=""
@@ -205,12 +233,12 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     #   足さねば「点呼が赤いのに、どの木が見られておらぬか名指しできぬ警告」になる
     #   (cmd_1367 の配布 gate で実際に踏んだ轍。角括弧つきの判定行のみを拾う)。
     [ "$census_rc" -ne 0 ] && censusnote="★どの gate も見ておらぬ木あり (cmd_1374)=$(printf '%s' "$census_out" | grep -E '\[(UNWATCHED|免除期限切れ)\]|木の点呼\] (FAIL|UNDETERMINED)' | fold_lines 4)★ "
-    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")。${hooknote}${wirenote}${undistnote}${censusnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
+    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/engine台帳(cmd_1376)=$(verdict "$rc9")/engine登録検知=$(verdict "$rc10")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")。${hooknote}${wirenote}${undistnote}${censusnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2
 fi
 
-echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") ──"
-if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ]; then exit 1; fi
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then exit 2; fi
+echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") engine台帳=$(verdict "$rc9") engine登録検知=$(verdict "$rc10") hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") ──"
+if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$rc9" -eq 1 ] || [ "$rc10" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ]; then exit 1; fi
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then exit 2; fi
 exit 0

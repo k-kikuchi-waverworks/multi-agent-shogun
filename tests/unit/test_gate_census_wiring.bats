@@ -18,29 +18,29 @@
 # ★此の試験の作法 (本夜の教訓を全て当てる)★:
 #   (a)★梯子を書き写さぬ★= 判定の実体は ★gate_nightly.sh から現物を抜いて eval する★=
 #      ★実装が動けば此の試験も動く★ (cmd_1404 二束目「梯子を書き写しておった二本」の轍を踏まぬ)。
-#   (b)★canary を先に撃つ★= 抜き出しが空でないことを T0 で確かめる =
-#      ★関数が renamed されたら【0 行を eval して全部緑】でなく、T0 が赤で名指す★。
-#   (c)★負の主張は一度 偽にして赤を見よ★ (02:12 全軍規律) = T2/T3 は ★道具を現に壊して★撃つ。
+#   (b)★canary を先に撃つ★= 抜き出しが空でないことを T-CW-000 で確かめる =
+#      ★関数が renamed されたら【0 行を eval して全部緑】でなく、T-CW-000 が赤で名指す★。
+#   (c)★負の主張は一度 偽にして赤を見よ★ (02:12 全軍規律) = T-CW-002/T-CW-003 は ★道具を現に壊して★撃つ。
 #   (d)★bare `!` を使わぬ★= bats の `!` は set -e から免除ゆえ刃を持たぬ (cmd_1401・repo 94 箇所)。
 #      判定は必ず `if <cmd>; then return 1; fi` の形で書く。
 #
 # 契約 (gate_nightly.sh の census 配線):
-#   T0: ★canary★= run_reporter / srt / 配線 block が現物から抜ける (抜けねば以下は全て無意味)
-#   T1: 既定は ★呼ばぬ★ = GATE_CENSUS_WIRING 未設定 → CENSUS_WIRING=0 / 同 STRICT も 0
-#   T2: ★道具が居らぬ★ → rc=2 (UNDETERMINED) + 「道具が居らぬ」と名乗る (★黙って飛ばさぬ★)
-#   T3: ★札を出さぬ (落ちた・綴りが変わった)★ → rc=2 + 「1行も出さなんだ」と名乗る
+#   T-CW-000: ★canary★= run_reporter / srt / 配線 block が現物から抜ける (抜けねば以下は全て無意味)
+#   T-CW-001: 既定は ★呼ばぬ★ = GATE_CENSUS_WIRING 未設定 → CENSUS_WIRING=0 / 同 STRICT も 0
+#   T-CW-002: ★道具が居らぬ★ → rc=2 (UNDETERMINED) + 「道具が居らぬ」と名乗る (★黙って飛ばさぬ★)
+#   T-CW-003: ★札を出さぬ (落ちた・綴りが変わった)★ → rc=2 + 「1行も出さなんだ」と名乗る
 #       ★rc だけを見る形では緑になる盤面 (rc=0 で札を出さぬ道具) で撃つ★
-#   T4: 札つき rc=0 → rc=0・出力は素通し
-#   T5: 札つき rc=1 → ★rc=1 が保たれる★ (FAIL を UNDETERMINED や PASS へ丸めぬ)
-#   T6: ★門へ入れるのは WIRING=1 かつ STRICT=1 の時のみ★= 他の三通りは 0 (報告のみ)
-#   T7: ★呼ばぬ朝も黙らぬ★= WIRING=0 で配線 block を撃つと「呼んでおらぬ」と毎朝 1 行 名乗る
+#   T-CW-004: 札つき rc=0 → rc=0・出力は素通し
+#   T-CW-005: 札つき rc=1 → ★rc=1 が保たれる★ (FAIL を UNDETERMINED や PASS へ丸めぬ)
+#   T-CW-006: ★門へ入れるのは WIRING=1 かつ STRICT=1 の時のみ★= 他の三通りは 0 (報告のみ)
+#   T-CW-007: ★呼ばぬ朝も黙らぬ★= WIRING=0 で配線 block を撃つと「呼んでおらぬ」と毎朝 1 行 名乗る
 #
 # 変異登録案 (牙 台帳の単独書き手=六号・登録は家老の号令後):
-#   MUT-CENSUSWIRE-W1: run_reporter の「道具が居らぬ」枝を `return 0` へ倒す          → T2 赤
-#   MUT-CENSUSWIRE-W2: 札の照合 (grep -qF "$banner") を消す                           → T3 赤
-#   MUT-CENSUSWIRE-W3: srt() を `echo "$1"` へ倒す (既定で門へ入れる)                 → T6 赤
-#   MUT-CENSUSWIRE-W4: else 枝の「呼んでおらぬ」1 行を消す (黙って呼ばぬ)             → T7 赤
-#   MUT-CENSUSWIRE-W5: CENSUS_WIRING の既定を 1 へ倒す                                → T1 赤
+#   MUT-CENSUSWIRE-W1: run_reporter の「道具が居らぬ」枝を `return 0` へ倒す          → T-CW-002 赤
+#   MUT-CENSUSWIRE-W2: 札の照合 (grep -qF "$banner") を消す                           → T-CW-003 赤
+#   MUT-CENSUSWIRE-W3: srt() を `echo "$1"` へ倒す (既定で門へ入れる)                 → T-CW-006 赤
+#   MUT-CENSUSWIRE-W4: else 枝の「呼んでおらぬ」1 行を消す (黙って呼ばぬ)             → T-CW-007 赤
+#   MUT-CENSUSWIRE-W5: CENSUS_WIRING の既定を 1 へ倒す                                → T-CW-001 赤
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
@@ -56,14 +56,14 @@ teardown() {
     [ -n "${TEST_TMPDIR:-}" ] && [ -d "$TEST_TMPDIR" ] && rm -rf "$TEST_TMPDIR"
 }
 
-# ★現物から抜く★ — 書き写さぬ。抜けねば空が返り、T0 が之を赤で名指す。
+# ★現物から抜く★ — 書き写さぬ。抜けねば空が返り、T-CW-000 が之を赤で名指す。
 extract_block() { sed -n "$1" "$GATE"; }
 
 fn_run_reporter() { extract_block '/^run_reporter() {/,/^}/p'; }
 # ★srt は一行形★= `/^}/` の範囲で抜くと ★閉じ括弧が同じ行に在るゆえ次の関数の `}` まで走る★
 #   (2026-07-27 05:2x 実測 = 22 行 抜けて後続の代入と verdict()/fold_lines() まで eval しておった。
 #    ★己の計器が黙って範囲を広げた★= 本夜 何度も出た族の、抜き出し側の顔である)。
-#   ⇒ ★一行形は其の一行だけを取る★。T0 が ★行数と越境★の両方を縛る。
+#   ⇒ ★一行形は其の一行だけを取る★。T-CW-000 が ★行数と越境★の両方を縛る。
 fn_srt()          { grep -m1 '^srt() {' "$GATE"; }
 defaults_block()  { extract_block '/^CENSUS_WIRING=/,/^regcensus_rc=/p'; }
 wiring_block()    { extract_block '/^if \[ "\$CENSUS_WIRING" = "1" \]; then/,/^fi$/p'; }
@@ -74,7 +74,7 @@ make_tool() { # $1=path $2=banner $3=rc
     chmod +x "$1"
 }
 
-@test "T0: canary — run_reporter/srt/配線block が現物から抜ける (抜けねば以下は無意味)" {
+@test "T-CW-000: canary — run_reporter/srt/配線block が現物から抜ける (抜けねば以下は無意味)" {
     # ★下限だけでなく上限も縛る★= ★抜き出しが越境しておらぬ★ことまで見る。
     #   越境は「足りぬ」でなく「余る」形の誤りゆえ、行数の下限では捕まらぬ。
     run fn_run_reporter
@@ -103,7 +103,7 @@ make_tool() { # $1=path $2=banner $3=rc
     printf '%s' "$output" | grep -qF 'GATE_CENSUS_WIRING'
 }
 
-@test "T1: 既定は呼ばぬ・門へも入れぬ (env 未設定 → WIRING=0 / STRICT=0)" {
+@test "T-CW-001: 既定は呼ばぬ・門へも入れぬ (env 未設定 → WIRING=0 / STRICT=0)" {
     # ★現物の既定行を其のまま eval する★= 既定を書き替えれば此処が落ちる。
     run bash -c "set -u; unset GATE_CENSUS_WIRING GATE_CENSUS_STRICT; \
                  eval \"\$(sed -n '/^CENSUS_WIRING=/,/^regcensus_rc=/p' '$GATE')\"; \
@@ -118,7 +118,7 @@ make_tool() { # $1=path $2=banner $3=rc
     [ "$output" = "W=1 S=1" ]
 }
 
-@test "T2: 道具が居らぬ → rc=2 で【撃てなんだ】と名乗る (黙って飛ばさぬ)" {
+@test "T-CW-002: 道具が居らぬ → rc=2 で【撃てなんだ】と名乗る (黙って飛ばさぬ)" {
     run bash -c "set -u; eval \"\$(sed -n '/^run_reporter() {/,/^}/p' '$GATE')\"; \
                  run_reporter '試し' '[試し]' '$TEST_TMPDIR/居らぬ道具.py'"
     [ "$status" -eq 2 ]
@@ -126,7 +126,7 @@ make_tool() { # $1=path $2=banner $3=rc
     printf '%s' "$output" | grep -qF 'UNDETERMINED'
 }
 
-@test "T3: 札を1行も出さぬ道具 → rc=2 (★rc=0 で黙る道具を緑と読まぬ★)" {
+@test "T-CW-003: 札を1行も出さぬ道具 → rc=2 (★rc=0 で黙る道具を緑と読まぬ★)" {
     # ★之が「偽にして赤を見る」の当の盤面★= rc は 0 ゆえ rc だけ見る形では緑になる。
     printf '#!/usr/bin/env python3\nprint("何か別の綴り")\n' > "$TEST_TMPDIR/黙る.py"
     chmod +x "$TEST_TMPDIR/黙る.py"
@@ -138,7 +138,7 @@ make_tool() { # $1=path $2=banner $3=rc
     printf '%s' "$output" | grep -qF '何か別の綴り'
 }
 
-@test "T4: 札つき rc=0 → rc=0・出力は素通し" {
+@test "T-CW-004: 札つき rc=0 → rc=0・出力は素通し" {
     make_tool "$TEST_TMPDIR/緑.py" '[台帳の点呼]' 0
     run bash -c "set -u; eval \"\$(sed -n '/^run_reporter() {/,/^}/p' '$GATE')\"; \
                  run_reporter '試し' '[台帳の点呼]' '$TEST_TMPDIR/緑.py'"
@@ -147,7 +147,7 @@ make_tool() { # $1=path $2=banner $3=rc
     if printf '%s' "$output" | grep -qF 'UNDETERMINED'; then return 1; fi
 }
 
-@test "T5: 札つき rc=1 → rc=1 が保たれる (FAIL を丸めぬ)" {
+@test "T-CW-005: 札つき rc=1 → rc=1 が保たれる (FAIL を丸めぬ)" {
     make_tool "$TEST_TMPDIR/赤.py" '[牙の域の点呼]' 1
     run bash -c "set -u; eval \"\$(sed -n '/^run_reporter() {/,/^}/p' '$GATE')\"; \
                  run_reporter '試し' '[牙の域の点呼]' '$TEST_TMPDIR/赤.py'"
@@ -155,7 +155,7 @@ make_tool() { # $1=path $2=banner $3=rc
     printf '%s' "$output" | grep -qF '[牙の域の点呼] 実測'
 }
 
-@test "T6: 門へ入れるのは WIRING=1 かつ STRICT=1 の時のみ (他の三通りは報告のみ)" {
+@test "T-CW-006: 門へ入れるのは WIRING=1 かつ STRICT=1 の時のみ (他の三通りは報告のみ)" {
     for pair in "0 0" "0 1" "1 0" "1 1"; do
         set -- $pair
         run bash -c "set -u; CENSUS_WIRING=$1; CENSUS_STRICT=$2; \
@@ -169,7 +169,7 @@ make_tool() { # $1=path $2=banner $3=rc
     done
 }
 
-@test "T7: 呼ばぬ朝も黙らぬ (WIRING=0 で【呼んでおらぬ】と1行 名乗る)" {
+@test "T-CW-007: 呼ばぬ朝も黙らぬ (WIRING=0 で【呼んでおらぬ】と1行 名乗る)" {
     run bash -c "set -u; CENSUS_WIRING=0; SCRIPT_DIR='$PROJECT_ROOT'; \
                  out2=; out4=; out6b=; out7=; out9=; regcensus_rc=0; fangdom_rc=0; drift_rc=0; \
                  eval \"\$(sed -n '/^run_reporter() {/,/^}/p' '$GATE')\"; \

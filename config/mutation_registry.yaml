@@ -1901,6 +1901,139 @@ mutations:
     red_needle: "not ok 1 T-NEG-001"  # 実測 2026-07-27 ★03:49〜03:52★ (六号が隔離台帳で撃った)  # ★訂正: 初稿は「04:5x」= 己で date を撃たず他者の報告の刻を写した★。機械の刻で挟む = census 03:48:32 と commit 5b4d094 03:52:28 の間
     timeout: 300
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ★★census 配線の牙 6 本 (2026-07-27 05:4x・六号)★★
+  #   出所 = 家老 04:33 の任 (軍師二号が「実体 7/7・配線 4/7」を実測した件)。
+  #   ★★此の 6 本を登録する理由は【commit した其の場で門が名指したゆえ】★★=
+  #     6804106 の pre-commit が ★段2 UNDETERMINED = 負の主張 3 本 (T-CW-000/T-CW-004/T-CW-007) を誰も証しておらぬ★
+  #     と名乗った。★配線した其の日の朝に門を騒がせぬ★のが本任の枷ゆえ、★己の commit が生んだ
+  #     新しい UNDETERMINED は己が畳む★ (朝番 06:30 へ持ち越さぬ)。
+  #   ★cmd 番号は未払い出し★ゆえ id は衝突せぬ綴りで置く (★手動採番はせぬ★)。
+  #     ⇒ ★払い出し後に家老が MUT-<cmd>-* へ付け替えられたい★。
+  #   ★錨は全て hit=1 を明示 path で実測済 (2026-07-27 05:35)★= 再帰 grep は使うておらぬ
+  #     (白名簿 repo では再帰 grep が追跡下しか見ぬゆえ = 本夜 01:37 の全軍規律)。
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: MUT-CENSUSWIRE-W1
+    origin: karo_0433_census_wiring
+    suspected_by: ashigaru6
+    desc: |
+      ★run_reporter の【道具が居らぬ】枝を殺す★ (if [ ! -f "$script" ] を偽へ倒す)。
+      ⇒ 居らぬ道具は python3 へ落ち、rc は 2 のままだが ★「道具が居らぬ」と名乗る言葉が消える★。
+      ★之が本 entry の芯じゃ★= ★rc だけ見れば区別が付かぬ★=
+      ★「撃てなんだ」を【名指しで】言えておるかを縛る★ (黙って飛ばす形への退行を捕まえる)。
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
+    mutate: |
+      sed -i 's@if \[ ! -f "$script" \]; then@if false; then@' scripts/gate_nightly.sh
+    test: |
+      bats --filter "T-CW-002" tests/unit/test_gate_census_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-CW-002"
+    timeout: 300
+
+  - id: MUT-CENSUSWIRE-W2
+    origin: karo_0433_census_wiring
+    suspected_by: ashigaru6
+    desc: |
+      ★札 (banner) の照合を消す★= 出力に狙うた札が在るかを見ずに rc だけで判ずる形へ退行させる。
+      ⇒ ★rc=0 で何も刷らぬ道具 (落ちた・綴りが変わった) が【緑】として通る★=
+      ★本夜 幾度も出た族そのもの★。T-CW-003 は ★rc=0 で黙る道具★ を的に据えておるゆえ赤くなる。
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
+    mutate: |
+      sed -i 's@if ! printf .%s. "$out" | grep -qF "$banner"; then@if false; then@' scripts/gate_nightly.sh
+    test: |
+      bats --filter "T-CW-003" tests/unit/test_gate_census_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-CW-003"
+    timeout: 300
+
+  - id: MUT-CENSUSWIRE-W3
+    origin: karo_0433_census_wiring
+    suspected_by: ashigaru6
+    desc: |
+      ★srt() を素通しへ倒す★= 三本の rc が ★flag に依らず門へ入る★形。
+      ⇒ ★「報告のみ (既定)」の約束が破れる★= ★配線した其の日の朝に門が落ちる★=
+      家老が 04:33 に最も重く据えられた枷の、機械の側の守りである。
+      ★T-CW-000 も同時に落ちる★ (canary が srt の一行に CENSUS_STRICT を求めるゆえ) = ★隠さず記す★。
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
+    mutate: |
+      sed -i 's@srt() { if .*@srt() { echo "$1"; }@' scripts/gate_nightly.sh
+    test: |
+      bats --filter "T-CW-006" tests/unit/test_gate_census_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-CW-006"
+    timeout: 300
+
+  - id: MUT-CENSUSWIRE-W4
+    origin: karo_0433_census_wiring
+    suspected_by: ashigaru6
+    desc: |
+      ★呼ばぬ朝の 1 行を黙らせる★ (else 枝の申告を `:` へ倒す)。
+      ⇒ ★三本が呼ばれておらぬ事を、朝の門が【一字も名乗らぬ】★=
+      ★★之は cmd_1359 (stall_watchdog が3ヶ月 呼ばれなんだ) が起きた当の形★★=
+      ★眠っておる番人が眠っておると言わぬ★。★本 entry は「配線が消えても音がする」を守る★。
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
+    mutate: |
+      sed -i '/★三本 (台帳の点呼/c\    :' scripts/gate_nightly.sh
+    test: |
+      bats --filter "T-CW-007" tests/unit/test_gate_census_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-CW-007"
+    timeout: 300
+
+  - id: MUT-CENSUSWIRE-W5
+    origin: karo_0433_census_wiring
+    suspected_by: ashigaru6
+    desc: |
+      ★既定を 1 へ倒す★ (GATE_CENSUS_WIRING:-0 → :-1)。
+      ⇒ ★誰も命じておらぬのに三本が呼ばれ始める★= ★fang_domain_census は今 rc=1 を返すゆえ、
+      STRICT と併せて倒れれば初日から毎朝 赤★= ★誰も消せぬ札は、やがて門ごと外される★ (cmd_1388 の族)。
+      ★号令を待つ形★を機械で縛る一本である。
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
+    mutate: |
+      sed -i 's@GATE_CENSUS_WIRING:-0@GATE_CENSUS_WIRING:-1@' scripts/gate_nightly.sh
+    test: |
+      bats --filter "T-CW-001" tests/unit/test_gate_census_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-CW-001"
+    timeout: 300
+
+  - id: MUT-CENSUSWIRE-W6
+    origin: karo_0433_census_wiring
+    suspected_by: ashigaru6
+    desc: |
+      ★健やかな道具の走行でも UNDETERMINED と刷る★形へ倒す (return "$rc" の直前に札を吐かせる)。
+      ⇒ ★常に鳴る門は読まれなくなる★= ★T-CW-004 が「緑の時は UNDETERMINED と言わぬ」を負に縛っておる★。
+      ★本 entry は 6804106 の pre-commit が名指した 3 本のうち T-CW-004 の刃を証すために足した★=
+      ★門が「誰も証しておらぬ」と申した其の 3 本を、1 本も残さず塞ぐ★ (T-CW-000=W3 / T-CW-007=W4 / T-CW-004=W6)。
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
+    mutate: |
+      sed -i 's@    return "$rc"@    printf "★UNDETERMINED★ 常に鳴る\\n"; return "$rc"@' scripts/gate_nightly.sh
+    test: |
+      bats --filter "T-CW-004" tests/unit/test_gate_census_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-CW-004"
+    timeout: 300
+
+  - id: MUT-CENSUSWIRE-W7
+    origin: karo_0433_census_wiring
+    suspected_by: ashigaru6
+    desc: |
+      ★run_reporter を改名する★= ★試験が現物から抜く梯子が【外れる】★形。
+      ⇒ ★抜き出しが空になり、eval は 0 行を食うて全部 緑になりうる★=
+      ★★之が「梯子を書き写した試験」と同じ死に方じゃ★★ (cmd_1404 二束目の族)。
+      ★canary (T-CW-000) が【抜けなんだ事】を己で名乗るかを縛る★=
+      ★本 entry が無ければ、canary そのものは誰にも証されておらぬ★
+      (★W3 も T-CW-000 を落とすが、needle が T-CW-006 を名指すゆえ canary の証にはならぬ★=
+       ★★「別の牙が偶々巻き込む」は【其の検が証された】と同じでない★★)。
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
+    mutate: |
+      sed -i 's@^run_reporter() {@run_reporter_kaimei() {@' scripts/gate_nightly.sh
+    test: |
+      bats --filter "T-CW-000" tests/unit/test_gate_census_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-CW-000"
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

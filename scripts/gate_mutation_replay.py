@@ -825,12 +825,55 @@ def evaluate_entry(e, repo: Path, work: Path):
     return PASS, f"変異後 exit {rc} (赤) = 契約どおり (red_needle 未設定=名指し検分なし)"
 
 
+def board_declaration(repo: Path, entries) -> str:
+    """★本 gate が読んだ盤面を名乗る (事例15・軍師一号の名指し)★
+
+    ★軍師一号の指摘★= evaluate_entry は copy_paths で ★worktree から写す★ ゆえ、
+    ★毎朝の緑は【作業ツリーが壊せば落ちる】ことしか言うておらぬ★ =
+    ★HEAD が・まして配られる物が同じ性質を持つとは言うておらぬ★。
+
+    ★六号の判 = 之は【仕様】である (欠陥ではない)★:
+      本 gate は pre-commit でも使われ、★其処では「これから commit する物」を検めるのが目的★ゆえ、
+      HEAD を読めば ★門が用を成さぬ★ (未 commit の是正を検められぬ)。
+    ★然れど【名乗っておらぬ】のは欠陥である★ = ★今は読む者が HEAD の話と読む (規律(6) の型)★。
+
+    ⇒ ★静かな一文を毎回刷るのでなく、★食い違う其の時に名指す★形を採った★:
+      ・作業ツリー = HEAD なら ★「今回は HEAD についても同じ事を言うておる」と積極的に言える★
+      ・食い違えば ★何が食い違うかを列挙し、「此の緑は HEAD について何も言うておらぬ」と告げる★
+    ★之なら【いつ効く警告か】が読む者に判る★ = 常に鳴る門にならぬ。
+    """
+    rels = sorted({str(p) for e in entries if isinstance(e, dict)
+                   for p in (e.get("paths") or [])})
+    if not rels:
+        return "  [盤面] 台帳に paths が無い = 検分の対象を持たぬ"
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "status", "--porcelain", "--"] + rels,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"  [盤面] ★作業ツリーと HEAD の異同を測れなんだ★ ({e!r}) = 未検分"
+    if r.returncode != 0:
+        tail = (r.stderr or "").strip().splitlines()[-1:] or [""]
+        return f"  [盤面] ★git が答えず異同を測れなんだ★ ({tail[0][:80]}) = 未検分"
+    dirty = [ln for ln in r.stdout.splitlines() if ln.strip()]
+    if not dirty:
+        return ("  [盤面] 本 gate は ★作業ツリー★ を読む。"
+                "今回は台帳の paths について ★作業ツリー = HEAD★ ゆえ、"
+                "★此の結果は HEAD についても同じ事を言うておる★")
+    names = ", ".join(ln[3:] for ln in dirty[:6]) + (" ほか" if len(dirty) > 6 else "")
+    return ("  [盤面] ★★本 gate は【作業ツリー】を読む。HEAD については何も言うておらぬ★★ = "
+            f"台帳の paths のうち ★{len(dirty)} 件が HEAD と食い違う★ ({names})。"
+            " ★未 commit の是正は fresh clone に無い★ ゆえ、"
+            "配る物について断ずるなら commit してから撃ち直せ")
+
+
 def run_all(registry: Path, repo: Path) -> int:
     entries, err = load_registry(registry)
     if err:
         print(f"[gate-2] UNDETERMINED: {err}")
         print("  処方: 台帳 config/mutation_registry.yaml を検めよ。空にする変更をしたなら、その変更こそ疑え。")
         return 2
+    print(board_declaration(repo, entries))
     n_pass = n_fail = n_undet = 0
     for e in entries:
         eid = e.get("id", "?") if isinstance(e, dict) else "?"
@@ -2017,6 +2060,30 @@ def selftest() -> int:
             expect("T54 ★古い .pyc を持ち込んでも変異は届く (処置が効いておる)★",
                    0, rc, "PASS", out)
 
+        # ── ★T55: 本 gate が読んだ盤面を名乗る (事例15・軍師一号の名指し)★ ──────
+        #   ★毎朝の緑は【作業ツリーが壊せば落ちる】ことしか言うておらぬ★ =
+        #   ★HEAD について何も言うておらぬのに、読む者は HEAD の話と読む (規律(6) の型)★。
+        #   ⇒ ★食い違う其の時に名指す形にした★ = 常に鳴る門にせぬため。
+        board_repo = _mk_git_repo(T / "board", {
+            "tool.sh": "#!/bin/bash\n# MARKER_LINE\nexit 0\n",
+            "check.sh": "#!/bin/bash\nbash tool.sh\n",
+        })
+        subprocess.run(["git", "-C", str(board_repo), "-c", "user.email=gate@local",
+                        "-c", "user.name=gate", "commit", "-q", "-m", "init"],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        reg55 = T / "board.yaml"
+        _write_reg(reg55, [_entry("MUT-BOARD-1", "sed -i 's/^exit 0$/exit 1/' tool.sh\n")])
+
+        # T55a: 作業ツリー = HEAD ⇒ ★HEAD についても同じ事を言うておる★ と積極的に名乗る
+        rc, out = _invoke(["--registry", str(reg55), "--repo-root", str(board_repo)])
+        expect("T55a ★盤面を名乗る (作業ツリー = HEAD)★", 0, rc, "作業ツリー = HEAD", out)
+
+        # T55b: worktree だけ動かす ⇒ ★此の緑は HEAD について何も言うておらぬ★ と告げる
+        (board_repo / "tool.sh").write_text(
+            "#!/bin/bash\n# MARKER_LINE\n# worktree だけの一行\nexit 0\n", encoding="utf-8")
+        rc, out = _invoke(["--registry", str(reg55), "--repo-root", str(board_repo)])
+        expect("T55b ★食い違う其の時に名指す★", 0, rc, "HEAD については何も言うておらぬ", out)
+
         # T50: ★gate の実出力の語が docs に在ること★ (cmd_1382 差し戻し・軍師二号)
         #   ★書いた場所と読まれる場所を揃える★ = 赤を見た者が docs を grep して辿り着けるか。
         #   ★語が食い違えば此処が赤くなる★ ゆえ、次に出力を整理する者が黙って道を切れぬ。
@@ -2036,8 +2103,12 @@ def selftest() -> int:
             na.append("T50 (docs 木を持たぬ木ゆえ検分せず — repo では検分される)")
         else:
             doc_txt = doc.read_text(encoding="utf-8") if doc.exists() else ""
+            # ★語を足す時は docs も同時に足せ★ = 此の tuple が【道が通っておるか】の見張りである
+            #   (cmd_1382 = pycache の処置 / 事例15 = 盤面の名乗り の語を 2026-07-27 に追加)
             missing = [w for w in ("同一の綴り置換", "過大申告", "撃たなんだ候補",
-                                   "着弾を測れなんだ", "行の塊")
+                                   "着弾を測れなんだ", "行の塊",
+                                   "HEAD については何も言うておらぬ",
+                                   "interpreter に届かぬ")
                        if w not in doc_txt]
             expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
                    0, len(missing))

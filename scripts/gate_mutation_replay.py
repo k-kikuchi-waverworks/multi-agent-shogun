@@ -683,10 +683,39 @@ def tree_digest(root: Path) -> dict[str, str]:
     return out
 
 
+def purge_pycache(root: Path) -> None:
+    """★射の前に、走る物と測る物を揃える (規律(8) 第四の型 = (d))★
+
+    ★何を塞ぐか★= ★file には当たったが interpreter に届かぬ★道。
+    Python の .pyc は (source の mtime【秒】, size) だけで有効性を判ずるゆえ、
+    ★同じ byte 数の変異を同じ秒に書けば、古い .pyc が有効と判ぜられ【変異前の code が走る】★
+    (五号が cmd_1384 で 4 段で決定的に再現・2026-07-26)。
+    ★束縛入替 (列の順を入れ替える等) は size 差が寸分違わぬゆえ、最も当たり易い★。
+
+    ★今 此の runner が免れておる理由は _IGNORE (copytree が __pycache__ を写さぬ) である★=
+    ★然れど其れは【遠くの一行に偶々乗った免疫】であり、写し方を変える者が黙って壊しうる★。
+    ⇒ ★射の前に此処で消す = 免疫を意図として、撃つ場所の傍らに置く★。
+    ★負例 T54 が此の処置を縛っておる (外せば赤くなる)★。
+    """
+    for d in sorted(root.rglob("__pycache__")):
+        if d.is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+    for p in sorted(root.rglob("*.pyc")):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
 def run_sh(script: str, cwd: Path, timeout: int):
+    env = dict(os.environ)
+    # ★新たな .pyc を書かせぬ★ = 上の purge_pycache と対で (d) を閉じる。
+    #   purge = 持ち込まれた古い物を消す / 本 env = 射の途中で新たに作らせぬ。
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         r = subprocess.run(["bash", "-c", script], cwd=cwd, timeout=timeout,
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                           env=env)
         return r.returncode, r.stdout
     except subprocess.TimeoutExpired:
         return None, f"timeout {timeout}s"
@@ -706,6 +735,8 @@ def evaluate_entry(e, repo: Path, work: Path):
         err = copy_paths(repo, e["paths"], d)
         if err:
             return UNDET, err
+        # ★写した直後に消す★ = paths が .pyc を名指して挙げておっても持ち込まれぬ
+        purge_pycache(d)
 
     # ① baseline: 変異前に test は緑であること (赤なら検出力を測れぬ)
     rc, out = run_sh(e["test"], base, timeout)
@@ -730,6 +761,10 @@ def evaluate_entry(e, repo: Path, work: Path):
         return UNDET, "mutate が timeout"
     if rc != 0:
         return UNDET, f"mutate 自体が失敗 (exit {rc}): {out.strip()[:200]}"
+    # ★変異を当てた【後】にもう一度消す★ = 変異前の code から作られた .pyc を残さぬ。
+    #   ★baseline は別の木 (base) で撃つゆえ mut に古い .pyc は出来ぬ筈だが、
+    #     「筈」を頼りにせぬ★ = mutate 自身が import する形も在りうる (python3 - <<PY 型)。
+    purge_pycache(mut)
 
     # ③ ★空振り検知★: mutate が 1 byte も変えておらねば「赤くなるか」を測っておらぬ
     #    (sed の当たり損ねは沈黙する — これ自体が本 gate が塞ぐ「沈黙する落とし穴」の一種)
@@ -1916,6 +1951,53 @@ def selftest() -> int:
         rc, out = _anchor_run("linemove", MOVE_BODY, MOVE_MUT,
                               guard="'^BBB$' tool.sh && [ \"$(sed -n 3p tool.sh)\" = BBB ] #")
         expect("T53 ★行の移動は 1 箇所 (負例)★", 0, rc, "PASS", out)
+
+        # ── ★T54: (d)【file には当たったが interpreter に届かぬ】= 五号 cmd_1384★ ──────
+        #   ★.pyc は (source の mtime【秒】, size) だけで有効性を判ずる★ゆえ、
+        #   ★同 size の変異を同じ mtime のまま書けば、古い .pyc が有効と判ぜられ
+        #     【変異前の code が走る】= 変異は当たったのに test は緑★。
+        #   ★束縛入替 (列の順を入れ替える等) は size 差が 0 byte ゆえ最も当たり易い★
+        #   (実例 = backend MUT-1384-M10/M11)。
+        #   ★本 case は .pyc を paths へ名指しで持ち込み、mutate が mtime を戻す★ =
+        #   ★purge_pycache を外せば変異後も緑 = runner は FAIL を返す★ ⇒
+        #   ★之が処置を縛る負例である (処置が現に効いておることの証明)★。
+        pyroot = T / "pycrepo"
+        (pyroot / "pkg").mkdir(parents=True)
+        (pyroot / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+        (pyroot / "pkg" / "mod.py").write_text(
+            "def pair():\n    return (\n        1,\n        2,\n    )\n", encoding="utf-8")
+        (pyroot / "check.sh").write_text(
+            f'"{sys.executable}" -c '
+            "'import pkg.mod as m; assert m.pair()==(1,2), \"NG PAIR\"'\n", encoding="utf-8")
+        # ★古い .pyc を repo 側に作る★ (五号が実地で踏んだ盤面を再現する)
+        subprocess.run([sys.executable, "-c", "import pkg.mod"], cwd=pyroot,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        pycs = sorted((pyroot / "pkg" / "__pycache__").glob("mod.*.pyc"))
+        if not pycs:
+            na.append("T54 (.pyc が作られぬ環境ゆえ検分せず — PYTHONDONTWRITEBYTECODE か)")
+        else:
+            rel_pyc = str(pycs[0].relative_to(pyroot))
+            PYC_MUT = ("python3 - <<'PY2'\n"
+                       "import os\n"
+                       "p = 'pkg/mod.py'\n"
+                       "st = os.stat(p)\n"
+                       "s = open(p, encoding='utf-8').read()\n"
+                       "old = '        1,\\n        2,\\n'\n"
+                       "new = '        2,\\n        1,\\n'\n"
+                       "assert s.count(old) == 1\n"
+                       "assert len(old) == len(new)\n"
+                       "open(p, 'w', encoding='utf-8').write(s.replace(old, new, 1))\n"
+                       "os.utime(p, (st.st_atime, st.st_mtime))\n"
+                       "PY2\n")
+            e54 = {"id": "MUT-PYC-STALE", "desc": "d",
+                   "paths": ["pkg/__init__.py", "pkg/mod.py", rel_pyc, "check.sh"],
+                   "mutate": PYC_MUT, "test": "bash check.sh", "expect": "nonzero",
+                   "red_needle": "NG PAIR"}
+            reg54 = T / "pyc.yaml"
+            _write_reg(reg54, [e54])
+            rc, out = _invoke(["--registry", str(reg54), "--repo-root", str(pyroot)])
+            expect("T54 ★古い .pyc を持ち込んでも変異は届く (処置が効いておる)★",
+                   0, rc, "PASS", out)
 
         # T50: ★gate の実出力の語が docs に在ること★ (cmd_1382 差し戻し・軍師二号)
         #   ★書いた場所と読まれる場所を揃える★ = 赤を見た者が docs を grep して辿り着けるか。

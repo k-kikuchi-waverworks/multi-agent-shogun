@@ -138,6 +138,10 @@ scripts/seo_qc.sh
 # 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
 !scripts/gate_artifact_capture.sh
 !scripts/gate_mutation_replay.py
+# cmd_1363 (2026-07-26): 「道具へ渡す前に shell が食う」関所 (PreToolUse hook)。
+# ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
+#   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。
+!scripts/shell_expansion_guard.py
 # cmd_1339/1354 (2026-07-25夜〜07-26朝): 恋の本番TTS(port 9100)を構造的に守る道具。
 # 保護portを実測判定して拒否し、意図的停止は3条件 (意思明示 + 20字以上の理由 + port名指し承認)
 # でのみ通す。★家老裁定 2026-07-26 10:43 = 追跡下へ入れよ★ = fresh clone に渡らねば

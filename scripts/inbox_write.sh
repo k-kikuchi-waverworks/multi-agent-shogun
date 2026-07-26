@@ -17,6 +17,43 @@ CONTENT="${2:-}"
 TYPE="${3:-}"
 FROM="${4:-}"
 
+# ── cmd_1363: shell に食われぬ本文の受け口 ────────────────────────────────
+# ★本文を二重引用符で渡す限り、shell が inbox_write.sh へ渡す【前に】中身を評価する★
+#   (A)`…` (B)$(…) (C)未定義 $VAR は静かに置換され、道具が受け取った時には原文は失われておる。
+#   ⇒ 道具の内側では直せぬ。★shell を一切通らぬ経路を用意する★のが本受け口である。
+#   同日3人 (足軽四号・五号・家老) が別々に踏んだ実害への手当て。
+# 使い方 (第2引数の位置に sentinel を置く):
+#   bash scripts/inbox_write.sh karo --body-stdin type from <<'EOF'    ← ★引用符つき heredoc★
+#   本文に ` も $(…) も $VAR も書けて、原文どおり届く
+#   EOF
+#   bash scripts/inbox_write.sh karo --body-file=/path/to/body.txt type from
+# ★shell 側の入口は scripts/hooks/shell_expansion_guard.py が見張る (危うい形を止める)★
+#   bash scripts/inbox_write.sh karo --content-file /path/body.txt type from
+# ★綴りは scripts/shell_expansion_guard.py の BODY_SENTINELS と【必ず一致させよ】★
+#   (食い違えば「関所は逃げ道と認めたのに道具は受け取らぬ」= 逃げ場の無い関所になる。
+#    一致は guard の selftest が contract 検査で機械で見張る)
+_read_body_file() {
+    if [ ! -f "$1" ]; then
+        echo "[inbox_write] FATAL: 本文 file が読めぬ: $1" >&2
+        exit 1
+    fi
+    cat "$1"
+}
+case "$CONTENT" in
+    --stdin|--body-stdin|-)
+        CONTENT="$(cat)"
+        ;;
+    --content-file=*|--body-file=*)
+        CONTENT="$(_read_body_file "${CONTENT#*=}")"
+        ;;
+    --content-file|--body-file)
+        # 空白区切り形: 本文 file が $3 へ来るゆえ type/from が1つずつ後ろへずれる
+        CONTENT="$(_read_body_file "${3:-}")"
+        TYPE="${4:-}"
+        FROM="${5:-}"
+        ;;
+esac
+
 # Deprecated gunshi redirect (write-layer): gunshi/gunshi_a/gunshi_b → active gunshi (Round-robin)
 # Ensures ashigaru reports land in active gunshi1/2 inboxes regardless of caller using deprecated name.
 case "$TARGET" in
@@ -161,6 +198,11 @@ fi
 while [ $attempt -lt $max_attempts ]; do
     if _acquire_lock; then
         trap _release_lock EXIT
+        # 書く前の姿を控える (cmd_1363): 本文が変質して届いた時に ★壊れた entry を
+        # 残したまま去らぬ★ ため。content 不一致は決定的ゆえ retry しても同じ結果になり、
+        # retry すれば同じ id の entry が3つ積まれる = 直す気の穴を新しく開けることになる。
+        _IW_BACKUP="$(mktemp "${INBOX}.bak.XXXXXX")"
+        cp "$INBOX" "$_IW_BACKUP" 2>/dev/null || true
         if "$IW_PYTHON" -c '
 import os, sys, yaml
 
@@ -216,11 +258,53 @@ except Exception as e:
             STATUS=$?
         fi
         # Read-back verify (still under lock): python exit 0 でも実在を確かめる。
-        # inbox は最大50件ゆえ grep 1回=軽量。書けたつもり事故の最終網 (cmd_1338)。
-        if [ $STATUS -eq 0 ] && ! grep -qF "id: $MSG_ID" "$INBOX" 2>/dev/null; then
-            echo "[inbox_write] VERIFY FAILED: $MSG_ID not found in $INBOX after write" >&2
-            STATUS=1
+        # 書けたつもり事故の最終網 (cmd_1338)。
+        # ★cmd_1363 で【中身の突合】へ格上げした★= 旧版は `grep "id: $MSG_ID"` = ★entry が
+        #   在ることしか見ておらず、本文が変わって届いても緑であった★。本件 (黙って中身が
+        #   変わる) と同じ family の穴が verify 自身に在った形ゆえ、id ではなく
+        #   ★content を byte 単位で突合する★。不正 UTF-8 / YAML round-trip 事故もここで落ちる。
+        #   ※ shell に食われる口はここでは捕まらぬ (道具に届く前に原文が失われるゆえ) —
+        #     それは scripts/hooks/shell_expansion_guard.py の領分である。
+        if [ $STATUS -eq 0 ]; then
+            # ★`if ! cmd` で受けるな★: then 節の $? は【否定の結果 (=0)】であって
+            #   python の終了値ではない = 3 (決定的不一致) を取り落とす。
+            #   本 test (V-001) がこの取り落としを実際に捕まえた。ゆえに素直に受ける。
+            _VRC=0
+            "$IW_PYTHON" -c '
+import os, sys, yaml
+try:
+    with open(os.environ["IW_INBOX"]) as f:
+        data = yaml.safe_load(f) or {}
+    hit = [m for m in (data.get("messages") or []) if m.get("id") == os.environ["IW_MSG_ID"]]
+    if not hit:
+        print("entry not found after write", file=sys.stderr); sys.exit(1)
+    got, want = hit[-1].get("content"), os.environ["IW_CONTENT"]
+    if got != want:
+        print("CONTENT MISMATCH after write (本文が届く途中で変わった)", file=sys.stderr)
+        print(f"  wrote(len={len(want)}): {want[:120]!r}", file=sys.stderr)
+        print(f"  read (len={len(got) if isinstance(got,str) else got}): {str(got)[:120]!r}", file=sys.stderr)
+        sys.exit(3)   # 3 = 決定的な不一致 (retry しても同じ) — 呼び手側で即座に諦める
+except SystemExit:
+    raise
+except Exception as e:
+    print(f"VERIFY ERROR: {e}", file=sys.stderr); sys.exit(1)
+' || _VRC=$?
+            if [ $_VRC -ne 0 ]; then
+                if [ $_VRC -eq 3 ]; then
+                    # ★決定的な不一致★ = retry しても同じ本文が積まれるだけゆえ即座に諦める。
+                    # 壊れた entry を残さぬよう書く前の姿へ戻す (黙って壊れた文を配らぬ)。
+                    cp "$_IW_BACKUP" "$INBOX" 2>/dev/null || true
+                    rm -f "$_IW_BACKUP"
+                    _release_lock; trap - EXIT
+                    echo "[inbox_write] FATAL: 本文が変質して届いた ($MSG_ID) — ★配達を取り消し書込前へ戻した★。" >&2
+                    echo "[inbox_write]        送り手は本文を検めて再送せよ (message は配達されておらぬ)。" >&2
+                    exit 1
+                fi
+                echo "[inbox_write] VERIFY FAILED: $MSG_ID content mismatch in $INBOX" >&2
+                STATUS=1
+            fi
         fi
+        rm -f "$_IW_BACKUP"
         _release_lock
         trap - EXIT
         if [ $STATUS -eq 0 ]; then

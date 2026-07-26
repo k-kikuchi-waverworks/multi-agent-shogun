@@ -450,6 +450,118 @@ mutations:
     expect: nonzero
     red_needle: "NG T21"
 
+  # ═══ cmd_1363: 「道具へ渡す前に shell が食う」口 ═══════════════════════
+  # 実害3件 (同日・別人・同型): 足軽五号=本文の backtick が実行され報告から消えた /
+  # 足軽四号=中身が5箇所 黙って欠けた ([OK] は返っておった) / 家老=ntfy 送信失敗を
+  # 黙って飲んだ・inbox 本文の backtick を意図せず実行 (docker rm が実際に走った)。
+  # ★三人が別々に踏んだ = 個人の不注意でなく道具の形の問題★ ゆえ機械で塞いだ。
+
+  - id: MUT-1363-001
+    origin: cmd_1363
+    suspected_by: ashigaru5
+    desc: |
+      関所の R1 (本文位置の生 backtick を DENY) の牙を折ると、guard selftest の
+      「家老が実際に踏んだ形」「ntfy 本文の backtick」が素通しになり赤くなるべき。
+      緑のままなら ★実害そのものの形を関所が通す★ = 番人が居らぬのと同じ。
+      由来 = 五号が (A)(B)(C) 3口を実測し「(A)だけを塞ぐな」と警告した、その (A)。
+    paths: [scripts/shell_expansion_guard.py, scripts/inbox_write.sh]
+    mutate: |
+      sed -i 's/if "`" in raw_unsafe:/if False and "`" in raw_unsafe:/' scripts/shell_expansion_guard.py
+    test: |
+      python3 scripts/shell_expansion_guard.py --selftest
+    expect: nonzero
+    red_needle: "NG  expect=DENY  got=ALLOW"  # 実測 2026-07-26: 3件が DENY→ALLOW へ退行
+
+  - id: MUT-1363-002
+    origin: cmd_1363
+    suspected_by: ashigaru5
+    desc: |
+      関所の R2 (散文に埋まった展開を DENY・展開単体は通す) の散文判定を殺すと、
+      「hash は $COMMIT_SHA じゃ」「port は $(echo 9100) である」が素通しになり
+      赤くなるべき。★(C) 未定義 $VAR は静かに空文字へ落ちる = 最も危うい口★ ゆえ
+      ここが緑に戻れば、報告から1文字消えても誰も気付かぬ状態へ戻る。
+    paths: [scripts/shell_expansion_guard.py, scripts/inbox_write.sh]
+    mutate: |
+      sed -i 's/if _PROSE_RE.search(remainder):/if False:/' scripts/shell_expansion_guard.py
+    test: |
+      python3 scripts/shell_expansion_guard.py --selftest
+    expect: nonzero
+    red_needle: "NG  expect=DENY  got=ALLOW"  # 実測 2026-07-26: $VAR/$(...) 3件が退行
+
+  - id: MUT-1363-003
+    origin: cmd_1363
+    suspected_by: ashigaru1
+    desc: |
+      関所の R4 (引用符なし heredoc <<EOF を DENY) の牙を折ると赤くなるべき。
+      ★これは拙者が【自分の処方を疑うて】足した口である★ = 関所は逃げ道として
+      heredoc を勧めるが、裸の <<EOF は本文全体が展開に晒される =
+      ★勧めた逃げ道が、そのまま新しい口になりうる★。塞がねば「安全な書き方」と
+      教えた形で事故が起きる = 最も質の悪い再発になる。
+    paths: [scripts/shell_expansion_guard.py, scripts/inbox_write.sh]
+    mutate: |
+      sed -i 's/for m in _UNQUOTED_HEREDOC_RE.finditer(command):/for m in []:/' scripts/shell_expansion_guard.py
+    test: |
+      python3 scripts/shell_expansion_guard.py --selftest
+    expect: nonzero
+    red_needle: "引用符なし"  # 実測 2026-07-26: <<EOF の case のみ DENY→ALLOW
+
+  - id: MUT-1363-004
+    origin: cmd_1363
+    suspected_by: ashigaru1
+    desc: |
+      関所が「逃げ道」と認めた綴り (--content-file/--body-file/--stdin/--body-stdin) を
+      inbox_write.sh 側から1つ削ると、contract 突合が赤くなるべき。
+      ★食い違えば「関所は逃げ道と認めたのに道具は受け取らぬ」= 逃げ場の無い関所★ に
+      なる。guard(python) と inbox_write(bash) は別言語ゆえ綴りは黙って食い違いうる =
+      cmd_1350 の harness順/実機順と同型の罠。散文の約束でなく機械で見張る。
+    paths: [scripts/shell_expansion_guard.py, scripts/inbox_write.sh]
+    mutate: |
+      sed -i 's/    --stdin|--body-stdin|-)/    --stdin|-)/' scripts/inbox_write.sh
+    test: |
+      python3 scripts/shell_expansion_guard.py --selftest
+    expect: nonzero
+    red_needle: "逃げ場の無い関所"  # 実測 2026-07-26: --body-stdin の実装不在を名指し
+
+  - id: MUT-1363-005
+    origin: cmd_1363
+    suspected_by: ashigaru4
+    desc: |
+      inbox_write.sh の read-back verify を【中身の突合】から【id の実在確認】へ戻すと、
+      本文が変質して届く形 (U+0085 が YAML round-trip で空白へ黙って変わる) が
+      緑で通るようになり、test V-001 が赤くなるべき。
+      由来 = ★四号の申し送り (2026-07-26)「送った後に自分の目で読み返すのが確か」★ を
+      機械化したもの。旧 verify は ★entry が在ることしか見ておらず★、道具が [OK] を
+      返しながら壊れた文を配る道が開いておった = 本 cmd の穴と同じ family が
+      verify 自身に在った。
+    paths: [scripts/inbox_write.sh, scripts/shell_expansion_guard.py, scripts/ntfy.sh, tests/test_cmd1363_shell_expansion.bats, lib, config]
+    mutate: |
+      sed -i 's/    if got != want:/    if False:/' scripts/inbox_write.sh
+    test: |
+      bats tests/test_cmd1363_shell_expansion.bats --filter V-00
+    expect: nonzero
+    red_needle: "not ok 1 V-001"  # 実測 2026-07-26
+
+  - id: MUT-1363-006
+    origin: cmd_1363
+    suspected_by: karo
+    desc: |
+      ntfy.sh の HTTP status 検分 (2xx 以外は非0で落ちる) を殺すと、送信失敗が
+      黙って飲まれるようになり test N-001 が赤くなるべき。
+      由来 = ★家老が 2026-07-26 に ntfy の送信失敗に気付けなんだ★。旧版は status を
+      log へ書くだけで ★何が起きても exit 0★ =「撃ったこと」を成功の証拠にしており
+      「届いたこと」を見ておらなんだ (五号の教訓「解放は撃ったでなく VRAM が戻ったで
+      確かめよ」の通知版)。
+      ★paths に lib/ と config/ が要る★ = ntfy.sh は lib/ntfy_auth.sh を source し
+      config/settings.yaml を読む。欠けると baseline が赤くなり UNDETERMINED に落ちる
+      (初回実測でこれを踏んだ = 赤の理由が変異でなく paths 不足であった)。
+    paths: [scripts/ntfy.sh, scripts/shell_expansion_guard.py, scripts/inbox_write.sh, tests/test_cmd1363_shell_expansion.bats, lib, config]
+    mutate: |
+      sed -i 's/    2??) ;;/    *) ;;/' scripts/ntfy.sh
+    test: |
+      bats tests/test_cmd1363_shell_expansion.bats --filter N-00
+    expect: nonzero
+    red_needle: "not ok 1 N-001"  # 実測 2026-07-26 (lib/config 同梱で baseline 緑を確認済)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

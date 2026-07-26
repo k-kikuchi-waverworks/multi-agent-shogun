@@ -70,9 +70,17 @@ elif ! crontab -l 2>/dev/null | grep -q "stall_watchdog_cmd1359"; then
     echo "[gate_nightly] ⚠ stall_watchdog の cron 配線が消えておる = 帳簿漏れの番人が誰にも呼ばれておらぬ (cmd_1359 の再発)"
 fi
 
+# ★配られておらぬ道具の検知 (cmd_1367)★: 上の「配線消失検知」は【呼ぶ者が居るか】を見る。
+# 本検査はその裏返し = ★呼ばれる者が fresh clone へ配られるか★。
+# whitelist 型 .gitignore ゆえ道具は既定で除外され、名指しを忘れると
+# 「手元では動くが clone には無い」形で静かに落ちる (本日 五号が gpu_sidecar_stop.sh で発見)。
+# 同じ穴が cmd_1280/1339/1354/1355/1363 と5回別々に開いておるゆえ、族として毎朝見る。
+undist_out="$(bash "$SCRIPT_DIR/scripts/gate_undistributed_tooling.sh" 2>&1)"; undist_rc=$?
+printf '%s\n' "$undist_out"
+
 verdict() { case "$1" in 0) echo PASS;; 1) echo FAIL;; *) echo UNDETERMINED;; esac; }
 
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ]; then
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ]; then
     # 警告は1行に畳む (inbox message の YAML 安全のため改行・コロン+空白を避ける)
     # 行連結は awk で行う (tr '\n' '・' は byte 置換ゆえ多byte文字の先頭1byteのみを埋め
     # 不正 UTF-8 を inbox へ混入させる — 2026-07-26 実測で発見した既存バグの是正)
@@ -84,12 +92,15 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     [ "$hook_rc" -ne 0 ] && hooknote="★pre-commit shim不在=install_gate_hooks.sh で再据付せよ★ "
     wirenote=""
     [ "$wiring_rc" -ne 0 ] && wirenote="★stall_watchdog の cron 配線不在=帳簿漏れの番人が誰にも呼ばれておらぬ (cmd_1359)★ "
-    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")。${hooknote}${wirenote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
+    undistnote=""
+    # 所見は undist 側の出力から直に採る (上の detail は gate-1/2 の out しか畳んでおらぬ)
+    [ "$undist_rc" -ne 0 ] && undistnote="★配られておらぬ道具あり (cmd_1367)=$(printf '%s' "$undist_out" | grep -E 'UNDISTRIBUTED|UNDETERMINED|allowlist' | head -4 | awk '{printf "%s・", $0}' | sed 's/: /：/g')★ "
+    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/配布(cmd_1367)=$(verdict "$undist_rc")。${hooknote}${wirenote}${undistnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2
 fi
 
-echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) ──"
-if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ]; then exit 1; fi
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ]; then exit 2; fi
+echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") ──"
+if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$undist_rc" -eq 1 ]; then exit 1; fi
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ]; then exit 2; fi
 exit 0

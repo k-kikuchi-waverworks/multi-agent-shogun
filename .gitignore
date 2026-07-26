@@ -149,6 +149,9 @@ scripts/seo_qc.sh
 # 無かった』と同型を、この道具自身が抱えておった)。
 # ★logs/production_stop_journal.log は追跡せぬ★ (運用記録は肥大し秘匿情報が混じりうる=家老裁定)。
 !scripts/gpu_sidecar_stop.sh
+# cmd_1367 (2026-07-26): ★配られておらぬ道具★の検知 (whitelist漏れの【族】を見る関所)。
+# 本 file 自身が追跡外なら gate_nightly が呼ぶ先を失う = 本 gate が検知する当の病ゆえ明示で通す。
+!scripts/gate_undistributed_tooling.sh
 !scripts/gate_precommit.sh
 !scripts/install_gate_hooks.sh
 !scripts/gate_nightly.sh

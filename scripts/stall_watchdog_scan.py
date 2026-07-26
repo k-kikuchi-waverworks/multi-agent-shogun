@@ -107,13 +107,27 @@ def parse_iso_to_naive_local(s):
 
 
 def parse_report_latest(path: Path):
+    """(最新 record, 其の刻, ★読めなんだか★) を返す.
+
+    ★cmd_1394 同族 (2026-07-27・家老 03:31 下命)★:
+      従来は parse 落ちを (None, None) で返しており、★呼び手からは
+      「report は在るが、此の task_id の記録が無い」と区別がつかなんだ★ =
+      ★黙って skip★ になっておった。
+      ⇒ 本 scan の実害は idle_revive とは【向きが逆】である:
+        idle_revive = 読めぬ物へ ★撃ってしまう★ (偽陽性)
+        stall_watchdog = 読めぬ物を ★見逃す★ (偽陰性) =
+          ★真の帳簿漏れが、report が壊れておるという別の理由で永久に鳴らぬ★。
+      ★しかも log は「帳簿漏れ hit なし。assigned=N」と申す★ =
+      ★【全員健全】と読める★ = ★之が四号の申した「無い木は無いと申さぬ」の族★。
+    ⇒ 第三の値として返し、呼び手が ★外したことを名乗れる★ ようにする。
+    """
     try:
         with path.open(encoding="utf-8") as f:
             docs = list(yaml.safe_load_all(f))
     except yaml.YAMLError as e:
         print(f"[stall_watchdog] WARN: report YAML parse failed: {path}: {e}",
               file=sys.stderr)
-        return None, None
+        return None, None, True
     latest = None
     latest_dt = None
     for doc in docs:
@@ -128,7 +142,7 @@ def parse_report_latest(path: Path):
             continue
         if latest_dt is None or dt > latest_dt:
             latest, latest_dt = rec, dt
-    return latest, latest_dt
+    return latest, latest_dt, False
 
 
 def should_scan_agent(agent: str) -> bool:
@@ -182,6 +196,10 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
     # 「分母0 (status drift 等で何も見えておらぬ)」と「全員健全 (帳簿漏れなし)」を
     # log 上で区別可能にする (idle_revive の eligible=N と同処方・家老裁定 09:24)。
     assigned_count = 0
+    # ★読めなんだ report の簿★ (cmd_1394 同族・家老 03:31)。
+    # ★之を分けねば「hit 0 = 全員健全」と読める★ = 判じられなんだ agent が
+    # 健全側へ黙って混ざる。★外すなら「外した」と名乗る口を同時に持たせよ★。
+    unreadable_reports = []
     for task_path in sorted(tasks_dir.glob("*.yaml")):
         agent = task_path.stem
         if not should_scan_agent(agent):
@@ -196,7 +214,15 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
         report_path = reports_dir / f"{agent}_report.yaml"
         if not report_path.is_file():
             continue
-        latest, latest_dt = parse_report_latest(report_path)
+        latest, latest_dt, unreadable = parse_report_latest(report_path)
+        if unreadable:
+            # ★読めなんだ = 判じられぬ★。★健全 (漏れ無し) と同じ扱いにせぬ★ =
+            # ★真の帳簿漏れが、report の壊れという別の理由で永久に鳴らぬ形を断つ★。
+            unreadable_reports.append({
+                "agent": agent, "task_id": task_id, "parent_cmd": parent_cmd,
+                "report": report_path.name,
+            })
+            continue
         if not latest or latest_dt is None:
             continue
         r_task_id, r_status, _r_ts = latest
@@ -227,7 +253,7 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
             # 「見分けられておらぬ」ことを alert に明記する (人が判ずるための材料)。
             "redispatch_basis": basis,
         })
-    return hits, assigned_count, redispatch_skipped
+    return hits, assigned_count, redispatch_skipped, unreadable_reports
 
 
 def format_alert_message(hit):
@@ -318,11 +344,17 @@ def main(argv=None):
         tasks_dir = DEFAULT_TASKS_DIR
         reports_dir = DEFAULT_REPORTS_DIR
 
-    hits, assigned_count, redispatch_skipped = scan(
+    hits, assigned_count, redispatch_skipped, unreadable_reports = scan(
         tasks_dir, reports_dir, args.threshold_min)
 
     if args.json:
         print(json.dumps(hits, ensure_ascii=False))
+        # ★json の口でも黙らぬ★= hits だけを吐けば、読めなんだ agent は
+        # ★json の読み手にとって存在せぬ★ = 同じ穴が口を変えて戻る。
+        for u in unreadable_reports:
+            print(f"[stall_watchdog] WARN: ACTION=report_unreadable "
+                  f"AGENT={u['agent']} TASK_ID={u['task_id']} "
+                  f"⇒ ★判じられぬゆえ hits に載らぬ (健全ではない)★", file=sys.stderr)
     else:
         # ★黙った件は黙って黙らぬ★ = 再dispatchと見て鳴らさなかった分を必ず印字する。
         # これが見えねば「再dispatch判定が効きすぎて全部握り潰す」状態と
@@ -330,12 +362,29 @@ def main(argv=None):
         for s in redispatch_skipped:
             print(f"[stall_watchdog] 再dispatchと判定し鳴らさず: "
                   f"AGENT={s['agent']} TASK_ID={s['task_id']} 根拠={s['basis']}")
+        # ★読めなんだ物を名乗る (cmd_1394 同族・家老 03:31 (2))★ =
+        # ★外したことを、外した其の走行で申す★。書き手を名指すのは
+        # ★番人が判ずるためでなく、直せる者へ届けるため★である。
+        for u in unreadable_reports:
+            print(f"ACTION=report_unreadable AGENT={u['agent']} "
+                  f"TASK_ID={u['task_id']} PARENT_CMD={u['parent_cmd']} "
+                  f"REPORT={u['report']} "
+                  f"⇒ ★読めなんだゆえ帳簿漏れを判じられぬ★ = "
+                  f"★健全と読むな★。★書き手 {u['agent']} が report を直すまで、"
+                  f"此の agent の漏れは鳴らぬ★ "
+                  f"(検め方: python3 scripts/report_validate.py "
+                  f"queue/reports/{u['agent']}_report.yaml)")
         if not hits:
             # 無出力を契約にせぬ: assigned 存在下で assigned=0 が常態なら scan は
             # 盲目である (2026-07-26 注記drift の型)。分母0の検知層は全PASSと
             # 区別がつかぬ — hit なしでも分母を名指しで残す (家老裁定 09:24)。
+            # ★hit 0 を「全員健全」と読ませぬ★ = 読めなんだ数を同じ行に載せる
+            # (0 の時も名乗る = 「見ておらぬ」と「見た上で 0」を分ける)。
             print(f"[stall_watchdog] 帳簿漏れ hit なし。assigned={assigned_count} "
-                  f"再dispatch除外={len(redispatch_skipped)}")
+                  f"再dispatch除外={len(redispatch_skipped)} "
+                  f"読めぬreport除外={len(unreadable_reports)}"
+                  + (" ★判じられなんだ agent が居る = 全員健全ではない★"
+                     if unreadable_reports else ""))
         for h in hits:
             print(f"AGENT={h['agent']} TASK_ID={h['task_id']} "
                   f"PARENT_CMD={h['parent_cmd']} ELAPSED_MIN={h['elapsed_min']} "

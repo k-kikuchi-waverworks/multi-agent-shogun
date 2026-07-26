@@ -15,7 +15,10 @@
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-    export SCAN_SH="$PROJECT_ROOT/scripts/stall_watchdog_scan.sh"
+    # ★番人は cron (15分毎) で現に走っておる★ ⇒ 変異は【複写】へ当てる。
+    # STALL_SCAN_SH_OVERRIDE を与えれば其の複写を撃つ (test_idle_revive_proc_age.bats
+    # の SCAN_PY_OVERRIDE と同じ流儀 = ★半端な状態の本番を走らせぬ★)。
+    export SCAN_SH="${STALL_SCAN_SH_OVERRIDE:-$PROJECT_ROOT/scripts/stall_watchdog_scan.sh}"
     export SCAN_PY="$PROJECT_ROOT/scripts/stall_watchdog_scan.py"
     [ -f "$SCAN_SH" ] || return 1
     [ -f "$SCAN_PY" ] || return 1
@@ -231,4 +234,75 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" != *"AGENT="* ]]
     [[ "$output" == *"hit なし。assigned=1"* ]]
+}
+
+# =============================================================================
+# T-011 (cmd_1394 同族・家老 03:31): ★読めぬ report を【健全】と読ませぬ★
+#
+# ★本 scan の実害は idle_revive とは向きが逆である★:
+#   idle_revive     = 読めぬ物へ ★撃ってしまう★ (偽陽性・cmd_1394 (3) で塞いだ)
+#   stall_watchdog  = 読めぬ物を ★見逃す★ (偽陰性) =
+#     ★真の帳簿漏れが「report が壊れておる」という別の理由で永久に鳴らぬ★
+#   ⇒ 従来は parse 落ちが (None, None) で返り、★「此の task の記録が無い」と
+#     区別がつかず黙って skip★ = log は「帳簿漏れ hit なし」と申しておった。
+# =============================================================================
+@test "T-011: an unreadable report is NAMED, never counted as healthy (silent skip is the disease)" {
+    _write_task ashigaru3 subtask_unreadable cmd_999 assigned
+    # ★YAML として壊れた report★ (tab 混入 + 閉じぬ引用符 = safe_load_all が上げる)
+    printf 'report:\n\tstatus: "done\n  task_id: subtask_unreadable\n' \
+        > "$Q/reports/ashigaru3_report.yaml"
+
+    run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "report YAML parse failed"
+    # ★外したことを、外した其の走行で申す★
+    echo "$output" | grep -q "ACTION=report_unreadable AGENT=ashigaru3 TASK_ID=subtask_unreadable"
+    echo "$output" | grep -q "★健全と読むな★"
+    echo "$output" | grep -q "書き手 ashigaru3"
+    # ★hit 0 の行が【全員健全】と読めぬ形になっておる★
+    echo "$output" | grep -q "読めぬreport除外=1"
+    echo "$output" | grep -q "判じられなんだ agent が居る"
+    # ★帳簿漏れとしては鳴らしておらぬ★ (判じられぬのに漏れと断ずるのは別の嘘)
+    if echo "$output" | grep -q "^AGENT=ashigaru3 TASK_ID=subtask_unreadable PARENT_CMD="; then
+        echo "★判じられぬ物を hit として鳴らしておる★" >&2
+        echo "$output" >&2
+        return 1
+    fi
+}
+
+# =============================================================================
+# T-012 (T-011 の逆向き): ★除外が過剰でない★
+# 同じ盤面で report が★健全★なら従前どおり hit が鳴り、読めぬ除外は 0 と名乗る。
+# (これが無ければ「全部を読めぬ扱いにして黙る」実装でも T-011 は緑になる)
+# =============================================================================
+@test "T-012: a healthy report on the same board still hits, and the exclusion count says zero" {
+    local ts="$(_ts_minutes_ago 45)"
+    _write_task ashigaru3 subtask_readable cmd_999 assigned
+    _write_report_flat ashigaru3 subtask_readable cmd_999 completed "$ts"
+
+    run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "AGENT=ashigaru3"
+    echo "$output" | grep -q "TASK_ID=subtask_readable"
+    if echo "$output" | grep -q "ACTION=report_unreadable"; then
+        echo "★健全な report を【読めぬ】と申しておる = 除外が過剰★" >&2
+        echo "$output" >&2
+        return 1
+    fi
+}
+
+# =============================================================================
+# T-013: ★json の口でも黙らぬ★
+# hits だけを吐けば、読めなんだ agent は ★json の読み手にとって存在せぬ★ =
+# 同じ穴が口を変えて戻る (本夜 全軍で潰してきた「一段上で戻る」の形)。
+# =============================================================================
+@test "T-013: --json also declares the unreadable ones (the hole must not return via another mouth)" {
+    _write_task ashigaru3 subtask_json_unreadable cmd_999 assigned
+    printf 'report:\n\tstatus: "done\n  task_id: subtask_json_unreadable\n' \
+        > "$Q/reports/ashigaru3_report.yaml"
+
+    run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30 --json
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "ACTION=report_unreadable AGENT=ashigaru3"
+    echo "$output" | grep -q "判じられぬゆえ hits に載らぬ"
 }

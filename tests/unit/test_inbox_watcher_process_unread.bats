@@ -210,10 +210,10 @@ YAML
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*inbox1" "$MOCK_LOG"
-    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! echo "$output" | grep -q "escalating"
-    ! echo "$output" | grep -q "ESCALATION Phase 3"
+    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if echo "$output" | grep -q "escalating"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if echo "$output" | grep -q "ESCALATION Phase 3"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-PU-P2-001: Phase 2 (claude) degrades to plain nudge ---
@@ -238,7 +238,7 @@ YAML
     echo "$output" | grep -q "escalating: Escape+nudge"
     echo "$output" | grep -q "suppressing Escape escalation"
     grep -q "send-keys.*inbox1" "$MOCK_LOG"
-    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-PU-P2-002: Phase 2 (copilot) → real Escape×2 + C-c + nudge ---
@@ -289,7 +289,7 @@ YAML
     grep -q "send-keys.*/clear" "$MOCK_LOG"
     echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"
     echo "$output" | grep -q "NEW_CONTEXT_SENT=0"
-    ! echo "$output" | grep -q "LAST_CLEAR_TS=0"
+    if echo "$output" | grep -q "LAST_CLEAR_TS=0"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-PU-P3-002: Phase 3 (codex) → skip /clear, plain nudge ---
@@ -313,9 +313,9 @@ YAML
 
     echo "$output" | grep -q "cli=codex — skipping /clear"
     grep -q "send-keys.*inbox1" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*/new" "$MOCK_LOG"
-    ! echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-PU-P3-003: Phase 3 (command-layer karo) → suppress /clear, Escape+nudge ---
@@ -337,9 +337,9 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "suppressed (command-layer"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     grep -q "send-keys.*inbox1" "$MOCK_LOG"
-    ! echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"
+    if echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-PU-P3-004: Phase 3 with active /clear cooldown → Escape+nudge, no /clear ---
@@ -360,7 +360,7 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "/clear cooldown, using Escape+nudge"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -419,7 +419,7 @@ YAML
 
     echo "$output" | grep -q "FLAG_CREATED"
     grep -q "send-keys.*C-u" "$MOCK_LOG"
-    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
+    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     [ ! -f "$METRICS_FILE" ]   # full read (update_metrics) never ran
 }
 
@@ -466,7 +466,7 @@ YAML
     '
     [ "$status" -eq 0 ]
 
-    ! echo "$output" | grep -q "CONTEXT-RESET"
+    if echo "$output" | grep -q "CONTEXT-RESET"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     grep -q "send-keys.*inbox1" "$MOCK_LOG"
 }
 
@@ -488,7 +488,7 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "suppressing context reset (command-layer agent)"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -514,7 +514,7 @@ YAML
 
     echo "$output" | grep -q "Startup prompt just sent to ashigaru9 — skipping nudge"
     echo "$output" | grep -q "STARTUP_PROMPT_SENT=0"
-    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
+    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-PU-DISABLE-001: ASW_DISABLE_ESCALATION=1 → escalation bypassed, plain nudge ---
@@ -536,8 +536,8 @@ YAML
 
     echo "$output" | grep -q "escalation disabled"
     grep -q "send-keys.*inbox1" "$MOCK_LOG"
-    ! echo "$output" | grep -q "ESCALATION Phase 3"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    if echo "$output" | grep -q "ESCALATION Phase 3"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -586,8 +586,8 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "busy — /clear (clear_command) deferred to next cycle"
-    ! grep -q "send-keys.*Session Start" "$MOCK_LOG"
-    ! echo "$output" | grep -q "AUTO-RECOVERY.*queued"
+    if grep -q "send-keys.*Session Start" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if echo "$output" | grep -q "AUTO-RECOVERY.*queued"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # ═══════════════════════════════════════════════════════════════

@@ -122,7 +122,7 @@ _count_record() {
     echo "$output" | grep -q "BLACKOUT抑止"
     # state 非消費: clear_log に last_clear_ts が積まれていない = 復帰後は即座に従来判定
     if [ -f "$Q/state/clear_log.yaml" ]; then
-        ! grep -q "last_clear_ts" "$Q/state/clear_log.yaml"
+        if grep -q "last_clear_ts" "$Q/state/clear_log.yaml"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     fi
     # throttle state が記録された
     [ -f "$Q/state/blackout_suppress" ]
@@ -573,7 +573,7 @@ PY
     echo "$output" | grep -q "上流障害の断定を保留"
     # 断定を保留した episode は detect_notified_ts を立てぬ = 後から本物の壁が
     # 見えたなら、その時に改めて1通上がる (黙って永久に口を塞がぬ)
-    ! grep -q "detect_notified_ts: '2" "$Q/state/upstream_outage.yaml"
+    if grep -q "detect_notified_ts: '2" "$Q/state/upstream_outage.yaml"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 @test "T-QRM-017 (cmd_1385): continuation line alone is residue — today's ashigaru3/gunshi1 shape raises no assertion" {

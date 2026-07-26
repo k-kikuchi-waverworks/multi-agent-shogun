@@ -269,7 +269,7 @@ YAML
     grep -q 'bytes_read: 100' "$METRICS_FILE"
     grep -q 'estimated_tokens: 25' "$METRICS_FILE"
     # latency computed from FIRST_UNREAD_SEEN → strictly positive
-    ! grep -q 'unread_latency_sec: 0' "$METRICS_FILE"
+    if grep -q 'unread_latency_sec: 0' "$METRICS_FILE"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 @test "T-METRICS-002: update_metrics reports zero latency when FIRST_UNREAD_SEEN=0" {
@@ -416,7 +416,7 @@ YAML
     '
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "SKIP_CANCELLED:cancelled"
-    ! grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"
+    if grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 @test "T-RECOV-004: enqueue_recovery_task_assigned skips when a flat-format task is idle" {
@@ -460,7 +460,7 @@ YAML
     '
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "SKIP_CANCELLED:cancelled"
-    ! grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"
+    if grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 @test "T-RECOV-006: annotated nested 'cancelled   # note' still skips — the raw exact match was the fail-OPEN (cmd_1356 OBS-4)" {
@@ -485,7 +485,7 @@ YAML
     '
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "SKIP_CANCELLED:cancelled"
-    ! grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"
+    if grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 @test "T-RECOV-007: annotated nested 'assigned   # note' does NOT skip — guard scope stays cancelled/idle only" {
@@ -508,7 +508,7 @@ YAML
         enqueue_recovery_task_assigned
     '
     [ "$status" -eq 0 ]
-    ! echo "$output" | grep -q "SKIP_CANCELLED"
+    if echo "$output" | grep -q "SKIP_CANCELLED"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     echo "$output" | grep -q "msg_auto_recovery_"
     grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"
 }
@@ -575,8 +575,8 @@ YAML
     grep -q "send-keys.*C-c" "$MOCK_LOG"
     grep -q "send-keys.*copilot --yolo" "$MOCK_LOG"
     # copilot never sends the literal /clear or /new
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*/new" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 @test "T-COPILOT-002: send_cli_command copilot /model is skipped (unsupported)" {
@@ -589,7 +589,7 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "not supported on copilot"
-    ! grep -q "send-keys.*/model" "$MOCK_LOG"
+    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # ═══════════════════════════════════════════════════════════════

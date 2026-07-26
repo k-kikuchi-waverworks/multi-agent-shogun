@@ -108,7 +108,7 @@ OLD
 @test "T-LEG-004 (mutation): killing the marker write reverts to 12-line spam = check is load-bearing" {
     sed '/: > "\$marker"/d' "$SUPERVISOR_SCRIPT" > "$TEST_TMPDIR/mutated_supervisor.sh"
     # 変異が実際に当たったことを確認 (空振り変異の防止)
-    ! grep -q ': > "\$marker"' "$TEST_TMPDIR/mutated_supervisor.sh"
+    if grep -q ': > "\$marker"' "$TEST_TMPDIR/mutated_supervisor.sh"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     bash "$TEST_TMPDIR/harness.sh" "$TEST_TMPDIR/mutated_supervisor.sh" 12 \
         2> "$TEST_TMPDIR/err_mut.log"
     [ "$(_legacy_count "$TEST_TMPDIR/err_mut.log")" -eq 12 ]

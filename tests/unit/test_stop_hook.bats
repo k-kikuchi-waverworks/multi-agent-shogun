@@ -127,7 +127,9 @@ messages:
 YAML
     run_hook '{"stop_hook_active": false, "last_assistant_message": "タスク完了した。report YAML updated。"}'
     [ "$status" -eq 0 ]
-    [ -z "$output" ] || ! echo "$output" | grep -q '"block"'
+    # cmd_1401: 旧 `[ -z "$output" ] || ! echo … | grep -q` は ★行途中の否定も set -e 免除★
+    # ゆえ当たっても緑であった (2026-07-27 実測)。★出力が在って且つ block を含む★時のみ落とす形へ。
+    if [ -n "$output" ] && echo "$output" | grep -q '"block"'; then return 1; fi
     [ -f "$TEST_TMP/inbox_write_calls.log" ]
     grep -q "report_completed" "$TEST_TMP/inbox_write_calls.log"
 }

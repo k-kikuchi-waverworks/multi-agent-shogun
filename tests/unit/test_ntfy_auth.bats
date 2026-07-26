@@ -89,7 +89,7 @@ teardown() {
     result=$(ntfy_get_auth_args /dev/null)
 
     echo "$result" | grep -q 'Bearer tk_priority_token'
-    ! echo "$result" | grep -q 'should_not_use'
+    if echo "$result" | grep -q 'should_not_use'; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-AUTH-005: env file読み込み ---

@@ -221,6 +221,13 @@ scripts/seo_qc.sh
 !scripts/gate_replacement_char.py
 !config/replacement_char_roster.yaml
 
+# cmd_1401 (2026-07-27): ★刃を持たぬ負の主張★を止める門 (bats の `! cmd` は set -e 免除)。
+# ★据えた其の場で git check-ignore -v を撃ち、.gitignore:7 の * に弾かれておることを実測してから
+#  此処へ書いた★ (現に弾かれており、書かねば「配られておる」と思い込む所であった = 本日 9 度目)。
+# ★門の試験 (tests/unit/test_bats_negation_guard.bats) は tests/ が既に許されておるゆえ追記不要★
+#  = 実測で確かめた (git status に ?? として現れた = 追跡されうる状態に在る)。
+!scripts/gate_bats_negation.py
+
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)
 !scripts/idle_revive_scan.py

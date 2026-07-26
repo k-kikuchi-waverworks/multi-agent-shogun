@@ -183,7 +183,7 @@ MOCK
     [ "$status" -eq 0 ]
 
     # No nudge send-keys should have occurred
-    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
+    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
 
     echo "$output" | grep -q "SKIP"
 }
@@ -228,8 +228,8 @@ MOCK
     [ "$status" -eq 0 ]
 
     # These should never be used
-    ! grep -q "paste-buffer" "$MOCK_LOG"
-    ! grep -q "set-buffer" "$MOCK_LOG"
+    if grep -q "paste-buffer" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "set-buffer" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
 
     # send-keys IS expected
     grep -q "send-keys" "$MOCK_LOG"
@@ -303,8 +303,8 @@ MOCK
     echo "$executable_lines" | grep -q "send-keys"
 
     # paste-buffer and set-buffer are NOT used
-    ! echo "$executable_lines" | grep -q "paste-buffer"
-    ! echo "$executable_lines" | grep -q "set-buffer"
+    if echo "$executable_lines" | grep -q "paste-buffer"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if echo "$executable_lines" | grep -q "set-buffer"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-ESC-001: no unread → FIRST_UNREAD_SEEN stays 0 ---
@@ -343,7 +343,7 @@ MOCK
     echo "$output" | grep -q "PHASE1_NUDGE"
     grep -q "send-keys.*inbox2" "$MOCK_LOG"
     # No Escape-based nudge
-    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-ESC-003: unread 2-4min → Escape+nudge ---
@@ -411,7 +411,7 @@ MOCK
     grep -q "send-keys.*C-c" "$MOCK_LOG"
     grep -q "send-keys.*Escape" "$MOCK_LOG"
     grep -q "send-keys.*inbox4" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-BUSY-001: agent_is_busy detects "Working" ---
@@ -450,7 +450,7 @@ MOCK
     echo "$output" | grep -qi "SKIP.*busy"
 
     # No nudge should have been sent
-    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
+    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-BUSY-004: send_wakeup_with_escape skips when agent is busy ---
@@ -465,7 +465,7 @@ MOCK
     echo "$output" | grep -qi "SKIP.*busy"
 
     # No nudge should have been sent
-    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
+    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-CODEX-001: codex /clear → /new conversion ---
@@ -480,7 +480,7 @@ MOCK
 
     # Should send /new, NOT /clear
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-CODEX-002: codex /model → skip ---
@@ -494,7 +494,7 @@ MOCK
     [ "$status" -eq 0 ]
 
     # No tmux send-keys for /model
-    ! grep -q "send-keys.*/model" "$MOCK_LOG"
+    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
 
     # Stderr indicates skip
     echo "$output" | grep -q "not supported on codex"
@@ -515,9 +515,9 @@ MOCK
     # /clear is converted to /new after clearing stale input — no Escape or C-c sent.
     grep -q "send-keys.*C-u" "$MOCK_LOG"
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
-    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-OPENCODE-002: opencode /model → skip with restart-only note ---
@@ -530,7 +530,7 @@ MOCK
     '
     [ "$status" -eq 0 ]
 
-    ! grep -q "send-keys.*/model" "$MOCK_LOG"
+    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     echo "$output" | grep -q "restart-only"
 }
 
@@ -543,7 +543,7 @@ MOCK
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*/new" "$MOCK_LOG"
+    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 @test "T-ANTIGRAVITY-002: send_cli_command skips /model for antigravity" {
@@ -554,7 +554,7 @@ MOCK
     '
     [ "$status" -eq 0 ]
 
-    ! grep -q "send-keys.*/model" "$MOCK_LOG"
+    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     echo "$output" | grep -q "Antigravity model changes are restart-only"
 }
 
@@ -605,7 +605,7 @@ MOCK
     '
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "C_U_SKIPPED"
-    ! grep -q "C-u" "$MOCK_LOG"
+    if grep -q "C-u" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-CODEX-005: claude /clear passes through as-is ---
@@ -620,7 +620,7 @@ MOCK
 
     # Should send /clear directly (not /new)
     grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "/new" "$MOCK_LOG"
+    if grep -q "/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-CODEX-006: inbox_watcher.sh has agent_is_busy and Codex/Copilot handlers ---
@@ -657,8 +657,8 @@ MOCK
 
     grep -q "send-keys.*inbox2" "$MOCK_LOG"
     # Codex: Escape escalation is suppressed (avoid interrupting work / human typing)
-    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
-    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-CODEX-008: pane cli overrides stale CLI_TYPE in /clear path ---
@@ -673,8 +673,8 @@ MOCK
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-CODEX-009: invalid model_switch payload is rejected ---
@@ -700,8 +700,8 @@ MOCK
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-CODEX-011: clear_command auto-recovery injection ---
@@ -795,8 +795,8 @@ PY
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "OK"
 
-    ! grep -q "send-keys.*/new" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-OPENCODE-003: OpenCode Phase 2 falls back to plain nudge ---
@@ -811,8 +811,8 @@ PY
     '
     [ "$status" -eq 0 ]
 
-    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
-    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     grep -q "send-keys.*C-u" "$MOCK_LOG"
     grep -q "send-keys.*inbox3" "$MOCK_LOG"
 }
@@ -933,8 +933,8 @@ YAML
     grep -q "send-keys.*C-c" "$MOCK_LOG"
     grep -q "send-keys.*copilot --yolo" "$MOCK_LOG"
     # NOT /clear or /new
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*/new" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }
 
 # --- T-COPILOT-002: copilot /model → skip ---
@@ -947,7 +947,7 @@ YAML
     '
     [ "$status" -eq 0 ]
 
-    ! grep -q "send-keys.*/model" "$MOCK_LOG"
+    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     echo "$output" | grep -q "not supported on copilot"
 }
 
@@ -1002,7 +1002,7 @@ YAML
     [ "$status" -eq 0 ]
 
     # Should NOT show display-message path
-    ! echo "$output" | grep -q "DISPLAY"
+    if echo "$output" | grep -q "DISPLAY"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
 
     # Should have used send-keys
     grep -q "send-keys.*inbox2" "$MOCK_LOG"
@@ -1295,7 +1295,7 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "cli=codex"
-    ! echo "$output" | grep -q "nudge text still visible"
+    if echo "$output" | grep -q "nudge text still visible"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
     [ "$(grep -c "send-keys -t test:0.0 inbox1" "$MOCK_LOG")" -eq 1 ]
 }
 
@@ -1310,7 +1310,7 @@ YAML
     [ "$status" -eq 0 ]
 
     # No send-keys should have occurred
-    ! grep -q "send-keys" "$MOCK_LOG"
+    if grep -q "send-keys" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
 
     # SKIP message in stderr
     echo "$output" | grep -q "SKIP.*karo"
@@ -1327,7 +1327,7 @@ YAML
     [ "$status" -eq 0 ]
 
     # No send-keys should have occurred
-    ! grep -q "send-keys" "$MOCK_LOG"
+    if grep -q "send-keys" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
 
     # SKIP message in stderr
     echo "$output" | grep -q "SKIP.*gunshi"
@@ -1362,7 +1362,7 @@ YAML
     # C-u for input clear, then /new — no Escape (function removed)
     grep -q "send-keys.*C-u" "$MOCK_LOG"
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
-    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
-    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
 }

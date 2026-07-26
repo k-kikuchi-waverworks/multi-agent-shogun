@@ -702,8 +702,14 @@ mutations:
       家老の掟「免除は【いつ返すか】が決まって初めて免除じゃ」が骨抜きになる。
       ★免除は消えるのでなく【返る】もの★ — その「返る」機構が生きておるかの牙である。
     paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1382 是正 (六号の anchor 監査)★= 旧版の anchor は綴りが coverage() と tree_census() の
+    #   2 箇所で byte 一致ゆえ、sed が【両方の期限判定を同時に折っておった】(規律(8)型(b))。
+    #   red_needle は coverage 側の T28 を名乗るが、tree_census 側の赤と区別できておらなんだ。
+    # ⇒ ★def coverage(…) から def tree_census(…) までへ範囲を絞る★= 撃つのは coverage 側 1 箇所のみ。
+    #   ★この範囲指定を「冗長」と読んで外すな = 外した途端に着弾が 2 箇所へ黙って戻る★。
+    #   (両 def 行は repo 内で各 1 件と実測・絞った後の着弾も 1 箇所と実測: 2026-07-26)
     mutate: |
-      sed -i 's/^            if due is not None and today > due:/            if False:/' scripts/gate_mutation_replay.py
+      sed -i '/^def coverage(/,/^def tree_census(/ s/^            if due is not None and today > due:/            if False:/' scripts/gate_mutation_replay.py
     test: |
       python3 scripts/gate_mutation_replay.py --selftest
     expect: nonzero

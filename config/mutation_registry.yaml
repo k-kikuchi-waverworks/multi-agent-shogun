@@ -1703,6 +1703,109 @@ mutations:
     expect: '0'
     timeout: 300
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 変異 entry — cmd_1401 (足軽五号の門・★代筆=足軽六号★) の 3 件。
+#
+# ■ ★誰の疑いを、誰の名で載せたか★ = ★suspected_by: ashigaru5★ (門を設計し 94 箇所を掘ったのは五号)。
+#   ★六号は代筆★ (台帳の単独書込権 RACE-001)。★但し mutate の綴りは五号の案が散文ゆえ【六号が起こした】★
+#   ⇒ ★起こした変異は「己が書いた物」ゆえ、六号が己の手で偽にして赤を見た★ (家老 02:53 の枷どおり)。
+#
+# ■ ★六号が登録を一度 見合わせ、其の後に載せた経緯 (隠さず記す)★
+#   ★02:3x の実測では paths 2 本とも配られておらなんだ★ = gate_bats_negation.py は .gitignore:7 の
+#   `*` に弾かれ、試験は未追跡 ⇒ ★載せれば毎朝の gate は作業ツリーを読むゆえ緑を返し続け、
+#   fresh clone では paths 欠★ = ★「手元では通る」の最も静かな形★ゆえ止めた。
+#   ★02:41 に五号が己で commit し (41ab3a5)、白名簿へ通った★ ⇒ ★家老の号令 (02:53) を受けて載せた★。
+#   ★双方 正しく、刻が行き違うておっただけである★ (六号が見たのは 02:17/02:23 の mtime)。
+#
+# ■ ★★六号の実測が五号の見立てを一箇所 正した★★ = ★G1 の赤は T-NEG-002 でなく T-NEG-001 から出る★。
+#   詳細は G1 の註に書いた。★「赤ならば良い」ではない = 赤の【出所】まで見よ★ (家老の線) の適用にござる。
+#   ★G2/G3 は五号の見立てどおり★ (T-NEG-003 / T-NEG-005 を名指しで落とす)。
+#
+# ■ ★六号の独立実測 (2026-07-27 03:1x)★
+#   ・baseline = ★6/6 緑★ (paths 2 本だけを写した複製木にて)
+#   ・★3 本とも「変異後 赤 + 名指し」まで実見★ ⇒ 台帳の形で ★3/3 PASS★
+#   ・★門自身が「作業ツリー = HEAD」と名乗った★ = ★此の 3 本は配られる物についても言えておる★。
+# ─────────────────────────────────────────────────────────────────────────────
+  - id: MUT-1401-G1
+    desc: "門が【見る所】を狭める退行 = 走査から tests/unit を外すと T-NEG-001 が赤くなること。★赤の出所は【見落とし】でなく【分母 0 の canary】である★ (下の註を見よ) = ★0 件の緑が「走査しておらぬ」に化ける形★を捕える"
+    origin: cmd_1401
+    suspected_by: ashigaru5
+    paths: [scripts/gate_bats_negation.py, tests/unit/test_bats_negation_guard.bats]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_bats_negation.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'EXCLUDE_PARTS = ("test_helper/bats-assert", "test_helper/bats-support")'
+      new = 'EXCLUDE_PARTS = ("test_helper/bats-assert", "test_helper/bats-support", "tests/unit")'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_bats_negation_guard.bats
+    expect: nonzero
+    # ★★六号の実測が五号の見立てを正した (2026-07-27 03:1x)★★
+    #   ★五号の案は red_needle: T-NEG-002 (新しく書いた `! cmd` を見落とす形) であった★。
+    #   ★而して現に鳴るのは T-NEG-001 である★ = 機序が違う:
+    #     ・T-NEG-002/003/005 は fixture を $TEST_TMPDIR/tests/ へ書いて門を撃つ =
+    #       ★其の path は "tests/unit" を含まぬゆえ、除外を足しても素通りする★。
+    #     ・鳴るのは ★T-NEG-001 の canary (「走査 [1-9][0-9]* file」)★ =
+    #       ★台帳の複製木では .bats が tests/unit の 1 本のみ ⇒ 除外すると走査 0 file★。
+    #   ⇒ ★之は五号の落ちではない = 五号自身が据えた canary が、五号の見立てより先に当たった形★。
+    #   ★「赤ならば良い」ではない。赤の【出所】まで見よ★ (家老の線) ゆえ、出所を此処へ書き残す。
+    red_needle: "not ok 1 T-NEG-001"
+    timeout: 300
+
+  - id: MUT-1401-G2
+    desc: "判定を【末尾の `!` は許す】へ緩めると T-NEG-003 が赤くなること = ★明日 1 行 足された瞬間に音もなく死ぬ形★を再び許す退行 (末尾の否定は【今日は】効くが、其の後ろへ 1 行 書かれた刹那に刃を失う)"
+    origin: cmd_1401
+    suspected_by: ashigaru5
+    paths: [scripts/gate_bats_negation.py, tests/unit/test_bats_negation_guard.bats]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_bats_negation.py")
+      s = p.read_text(encoding="utf-8")
+      old = ("            if LEAD.match(line) or INLINE.search(line):\n"
+             "                hits.append((p, i, stripped))")
+      new = ("            if LEAD.match(line) or INLINE.search(line):\n"
+             "                nxt = next((l.strip() for l in lines[i:] if l.strip()), \"\")\n"
+             "                if nxt.startswith(\"}\"):\n"
+             "                    continue\n"
+             "                hits.append((p, i, stripped))")
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_bats_negation_guard.bats
+    expect: nonzero
+    red_needle: "not ok 3 T-NEG-003"  # 実測 2026-07-27 03:1x (六号が mutate を起こして当てた)
+    timeout: 300
+
+  - id: MUT-1401-G3
+    desc: "行途中の否定を見る INLINE を削る (行頭のみ見る) と T-NEG-005 が赤くなること = ★五号の初回の数えが現に此の形であった★ = `A || ! B` の族を数の外へ置く退行 (此の形も set -e の免除に掛かり、当たっても緑である)"
+    origin: cmd_1401
+    suspected_by: ashigaru5
+    paths: [scripts/gate_bats_negation.py, tests/unit/test_bats_negation_guard.bats]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_bats_negation.py")
+      s = p.read_text(encoding="utf-8")
+      old = "            if LEAD.match(line) or INLINE.search(line):"
+      new = "            if LEAD.match(line):"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_bats_negation_guard.bats
+    expect: nonzero
+    red_needle: "not ok 5 T-NEG-005"  # 実測 2026-07-27 03:1x (六号が mutate を起こして当てた)
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -1312,21 +1312,27 @@ def parse_iso_to_naive_local(s):
     return dt
 
 
-def report_shows_completion(report_path: Path, task_id):
-    """True if the latest report record for task_id records a completion status.
+def report_completion_state(report_path: Path, task_id):
+    """report が完遂を記しておるかを★三値★で返す: "done" | "not_done" | "unreadable".
 
-    Used for the (b) 未完 gate: a task whose report already says done is a
-    bookkeeping omission (stall_watchdog territory), not an idle-stuck task.
+    ★cmd_1394 (3): 【読めなんだ】は【働いておらぬ】ではない★ (軍師一号の具申・家老下命)。
+    従来は parse 落ちを False (=未完) へ倒しており、★観測が成り立たなんだ区間を
+    観測値として合算しておった★ (cmd_1392 の病の別の面) =
+    ★働いておる agent の report が壊れておるだけで、番人が /clear を撃ちうる形★。
+    実測: logs/idle_revive_scan.log に "report YAML parse failed" が多数・書き手は 8 名全員。
+    ⇒ 呼び手が「判じられぬ」を第三の値として受け取れるようにする。
+
+    "not_done" は ★読めた上での「まだ」★ である (file 不在も含む = 未提出は読めておる)。
     """
     if not report_path.is_file():
-        return False
+        return "not_done"
     try:
         with report_path.open(encoding="utf-8") as f:
             docs = list(yaml.safe_load_all(f))
     except (yaml.YAMLError, OSError) as e:
         print(f"[idle_revive] WARN: report YAML parse failed: {report_path}: {e}",
               file=sys.stderr)
-        return False
+        return "unreadable"
     latest_status = None
     latest_dt = None
     for doc in docs:
@@ -1344,8 +1350,15 @@ def report_shows_completion(report_path: Path, task_id):
             latest_status = inner.get("status")
     if isinstance(latest_status, str):
         # report 側 status も同じ注記慣行がありうる — task 側と同じ正規形で読む。
-        return normalize_status(latest_status) in COMPLETION_STATUSES
-    return False
+        return "done" if normalize_status(latest_status) in COMPLETION_STATUSES else "not_done"
+    return "not_done"
+
+
+def report_shows_completion(report_path: Path, task_id):
+    """後方互換の薄い皮 (True/False)。★unreadable は False へ倒れる★ゆえ、
+    「読めなんだ」を区別せねばならぬ呼び手は report_completion_state を直に使え。
+    """
+    return report_completion_state(report_path, task_id) == "done"
 
 
 def _newest_mtime_in_dir(root: Path, cap: int = 2000):
@@ -1725,8 +1738,11 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
             # quorum 集計: busy は「系が健全」の証拠として分母のみ。absent は
             # 出力も止まっておれば分子にも数える (tmux server 消失 = 全 pane absent
             # の 2026-07-25 22:3x 型を同じ網に掛ける)。clear 発行対象にはしない。
-            if task.get("status") in ACTIVE_STATUSES and not report_shows_completion(
-                    reports_dir / f"{agent}_report.yaml", task.get("task_id")):
+            # cmd_1394 (3): "unreadable" は分母にも数えぬ (判じられぬ物を分母へ入れれば
+            # quorum の割合が薄まる)。★黙って外すのではない★ — parse 落ちの WARN 行は
+            # report_completion_state が毎回 印字しておる。
+            if task.get("status") in ACTIVE_STATUSES and report_completion_state(
+                    reports_dir / f"{agent}_report.yaml", task.get("task_id")) == "not_done":
                 eligible_count += 1
                 if state == "absent":
                     newest = newest_output_mtime(agent, task, tasks_dir, reports_dir, repo_root)
@@ -1751,7 +1767,28 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
 
         # (b) 未完: report が既に done → bookkeeping 漏れ(stall_watchdog 領分)ゆえ除外。
         report_path = reports_dir / f"{agent}_report.yaml"
-        if report_shows_completion(report_path, task.get("task_id")):
+        completion = report_completion_state(report_path, task.get("task_id"))
+        if completion == "done":
+            continue
+        if completion == "unreadable":
+            # ★cmd_1394 (3): 【読めなんだ】と【沈黙】を混ぜぬ★ —
+            # 此処で従来どおり「未完」へ倒せば、★report が壊れておるだけの
+            # 働いておる agent へ /clear が飛ぶ★ (観測の失敗を観測値に混ぜる病)。
+            # ⇒ revive 候補にせず・stalled にも eligible にも数えず・★書き手を名指す★。
+            # 家老へ inbox は上げぬ (3分毎ゆえ spam になる = cmd_1280 の轍)。
+            # 名指しは本行が担い、行は決定 (ACTION=) として log の同じ高さに出る。
+            results.append({
+                "agent": agent,
+                "task_id": task.get("task_id"),
+                "parent_cmd": task.get("parent_cmd"),
+                "idle_min": None,
+                "consecutive": int(entry.get("consecutive", 0) or 0),
+                "action": "report_unreadable",
+                "detail": (f"report YAML を読めなんだ ({report_path.name}) ⇒ "
+                           f"★【読めなんだ】は【働いておらぬ】ではない★ゆえ revive 対象から外し、"
+                           f"quorum の分母からも外した。★書き手 {agent} が report を直すまで"
+                           f"番人は此の agent を判じられぬ★ (cmd_1394 (3))"),
+            })
             continue
 
         eligible_count += 1
@@ -1956,6 +1993,7 @@ PRE_SUPPRESSED_REASONS = {
     "blackout_suppressed": "blackout_quorum",
     "rate_limited": "rate_limit",
     "alert_cooldown": "alert_cooldown",
+    "report_unreadable": "report_unreadable",   # cmd_1394 (3): 判じられぬゆえ撃たぬ
 }
 
 
@@ -1971,6 +2009,7 @@ def outcome_base(r):
         a = r.get("suppressed_action") or "revive"
     return {"revive": "revive",
             "rate_limited": "revive",
+            "report_unreadable": "revive",
             "escalation_stop": "escalation",
             "alert_cooldown": "escalation",
             "blackout_alert": "blackout_alert"}.get(a, str(a))
@@ -2231,7 +2270,7 @@ def main(argv=None):
                   f"(本来={r.get('suppressed_action')}) — {r['detail']}", file=sys.stderr)
             emit_outcome(r, False, PRE_SUPPRESSED_REASONS["blackout_suppressed"])
             continue
-        if r["action"] in ("rate_limited", "alert_cooldown"):
+        if r["action"] in ("rate_limited", "alert_cooldown", "report_unreadable"):
             # scan() 段階で抑止が決しており発行相では何もせぬ action。
             # ★決定 1 件 : OUTCOME 1 行★ を破らぬため此処でも名乗る (cmd_1394)。
             emit_outcome(r, False, PRE_SUPPRESSED_REASONS[r["action"]])

@@ -130,6 +130,22 @@ _refute_file() {   # $1=file $2=pattern (file 不在は「無い」と読む)
     return 0
 }
 
+# scan() を直に呼び ★分母 (eligible_count) を数える★ (印字に頼らぬ側の観測口)。
+_scan_eligible_py() {
+    "$VENV_PY" - <<'PY'
+import importlib.util, os
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
+irs = importlib.util.module_from_spec(spec); spec.loader.exec_module(irs)
+q = Path(os.environ["Q"])
+panes = irs.load_pane_state_file(Path(os.environ["TEST_TMPDIR"]) / "pane_state.yaml")
+results, _, eligible = irs.scan(q / "tasks", q / "reports", Path("."), panes, {},
+                                stall_min=15, min_interval_min=5, max_consecutive=3)
+print(f"ELIGIBLE={eligible}")
+print("ACTIONS=" + ",".join(r["action"] for r in results))
+PY
+}
+
 _run_main_py() {
     "$VENV_PY" - "$@" <<'PY'
 import importlib.util, os, sys
@@ -304,6 +320,63 @@ PY
     echo "$output" | grep -Eq '^ACTION=revive AGENT=ashigaru93 TASK_ID=subtask_log_ashigaru93 IDLE_MIN=[0-9.]+ CONSECUTIVE=[0-9]+ '
     # 既存 test (T-STA-001 等) と同じ grep が今も通る
     echo "$output" | grep -q "ACTION=revive AGENT=ashigaru93"
+}
+
+# ---------------------------------------------------------------------------
+# T-LOG-009 (cmd_1394 (3)): ★【読めなんだ】を【沈黙】と混ぜぬ★。
+# report YAML が壊れておる idle 固着 agent へは ★/clear を撃たず★、★書き手を名指す★。
+# ★何故これが要るか★= 従来は parse 落ちを「未完」へ倒しており、
+# ★働いておる agent の report が壊れておるだけで番人が /clear を撃ちうる★ 形であった
+# (実測: logs/idle_revive_scan.log の "report YAML parse failed" は書き手 8 名全員に前科)。
+# ---------------------------------------------------------------------------
+@test "T-LOG-009: unreadable report is NOT silence — no clear fired, writer named (mutation proof: MUT-1394-006)" {
+    _write_stuck_task ashigaru93
+    _write_pane_states ashigaru93:idle
+    # ★YAML として壊れた report★ (tab 混入 + 閉じぬ引用符 = safe_load_all が上げる)
+    printf 'report:\n\tstatus: "done\n  task_id: subtask_log_ashigaru93\n' \
+        > "$Q/reports/ashigaru93_report.yaml"
+    touch -d '2 hours ago' "$Q/reports/ashigaru93_report.yaml"
+
+    run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "report YAML parse failed"
+    echo "$output" | grep -q "^ACTION=report_unreadable AGENT=ashigaru93"
+    echo "$output" | grep -q "書き手 ashigaru93"          # ★名指しておる★
+    echo "$output" | grep -q "OUTCOME=revive_not_fired AGENT=ashigaru93 TASK_ID=subtask_log_ashigaru93 REASON=report_unreadable"
+    # ★撃っておらぬ★ (本病の実害はこれ)
+    _refute_file "$INBOX_STUB_RECORD" "^ashigaru93|clear_command|"
+    # ★分母にも数えておらぬ★ = 判じられぬ物を quorum の割合へ混ぜぬ。
+    # 「対象なし」行は results が空の時しか出ぬゆえ、★scan() を直に呼んで分母を数える★
+    # (印字に頼れば、印字が無いことを「0 であった」と読み違える)。
+    run _scan_eligible_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "ELIGIBLE=0"
+    echo "$output" | grep -q "ACTIONS=report_unreadable"
+}
+
+# ---------------------------------------------------------------------------
+# T-LOG-010 (cmd_1394 (3) 逆向き): ★除外が過剰でない★。
+# 同じ盤面で report が★健全★なら従前どおり revive を撃つ。
+# (これが無ければ「全部を読めぬ扱いにして黙る」実装でも T-LOG-009 は緑になる)
+# ---------------------------------------------------------------------------
+@test "T-LOG-010: a healthy report on the same board still fires revive (the exclusion is not over-broad)" {
+    _write_stuck_task ashigaru93
+    _write_pane_states ashigaru93:idle
+    cat > "$Q/reports/ashigaru93_report.yaml" <<'EOF'
+report:
+  task_id: subtask_log_ashigaru93
+  agent: ashigaru93
+  status: in_progress
+  timestamp: '2026-07-27T00:00:00'
+EOF
+    touch -d '2 hours ago' "$Q/reports/ashigaru93_report.yaml"
+
+    run _run_main_py
+    [ "$status" -eq 0 ]
+    _refute_output "ACTION=report_unreadable"
+    echo "$output" | grep -q "^ACTION=revive AGENT=ashigaru93"
+    echo "$output" | grep -q "OUTCOME=revive_fired AGENT=ashigaru93"
+    grep -q "^ashigaru93|clear_command|" "$INBOX_STUB_RECORD"
 }
 
 # ---------------------------------------------------------------------------

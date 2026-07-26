@@ -223,6 +223,8 @@ Race condition is eliminated: the context reset wipes old context. Agent re-read
 | Karo → Gunshi | YAML + inbox_write | Strategic task or quality check delegation |
 | Top → Down | YAML + inbox_write | Standard wake-up |
 
+**report YAML は書いた直後に機械が検める (cmd_1395)**: `scripts/report_validate.py` が PostToolUse hook で自動起動し、壊れた report を**書き手の画面へ即座に名指す**（報告を出す前に落ちる）。★hook は session 開始時の snapshot ゆえ、配線後に開いた session からしか効かぬ★ — 手検めは `python3 scripts/report_validate.py queue/reports/{自分のid}_report.yaml`、門が生きておるかは `--liveness`。**壊れた report = 家老に完遂が届かぬ**（番人が「働いておるのに idle」と誤判定する／非 canonical な report は archive へ攫われる）。詳細は `docs/content/ops/cmd_1395_report_validate.md`。
+
 ## File Operation Rule
 
 **Always Read before Write/Edit.** Kimi K2 CLI rejects Write/Edit on unread files.

@@ -695,8 +695,22 @@ mutations:
       ★勧めた逃げ道が、そのまま新しい口になりうる★。塞がねば「安全な書き方」と
       教えた形で事故が起きる = 最も質の悪い再発になる。
     paths: [scripts/shell_expansion_guard.py, scripts/inbox_write.sh]
+    # ★2026-07-27 01:2x = 錨を現物へ追随させた (所有者=足軽一号の裁可・六号が代筆)★
+    #   ★旧錨★ = 'for m in _UNQUOTED_HEREDOC_RE.finditer(command):' ⇒ ★実測 hit=0★。
+    #   ★何が起きたか★ = ★六号の cmd_1388 是正 (4a59ab5) が此の一行を書き換えた★
+    #     (関所が【書いてある物】を【走る物】と読む欠陥を直し、heredoc 本文を伏せた写し
+    #      = scanned の上で検める形にしたゆえ command → scanned へ)。
+    #   ⇒ ★牙は折れておらぬが【空を撃って】UNDETERMINED を返す形になっておった★。
+    #   ★捕まえたのは三号の pre-commit 門 (cmd_1387) である★ = commit の其の場で鈍りを名指し、
+    #     queue/state/anchor_dulling_history.yaml へ焼いた = ★門は建てた其の日に家中の者を捕らえた★。
+    #   ★一号の言 (そのまま残す)★ = ★「錨が鈍ったのは【直したから】であって【誤ったから】ではない」★
+    #     = ★咎むべきは人ではなく、牙が己の錨の消滅に気付けぬ形の方である★。
+    #   ★案B (呼び手の変数名に依らぬ綴りへ切り詰める) を採らなんだ理由★ =
+    #     切り詰めても _UNQUOTED_HEREDOC_RE という名への依存は残る = 堅さの利が小さい ⇒
+    #     ★ならば読んで意味の通る方を採る★ (一号の裁可)。
+    #   ★実測 (六号)★ = 新錨 hit=1 / 実射 PASS (変異後 exit 1 の赤 + 名指し「引用符なし」確認)。
     mutate: |
-      sed -i 's/for m in _UNQUOTED_HEREDOC_RE.finditer(command):/for m in []:/' scripts/shell_expansion_guard.py
+      sed -i 's/for m in _UNQUOTED_HEREDOC_RE.finditer(scanned):/for m in []:/' scripts/shell_expansion_guard.py
     test: |
       python3 scripts/shell_expansion_guard.py --selftest
     expect: nonzero
@@ -1287,6 +1301,59 @@ mutations:
       python3 scripts/gate_ntfy_alive.py --selftest
     expect: nonzero
     red_needle: "★NG★ T24 run() 既定 now"  # 実測 2026-07-26: 固定日時を T24 が捕える (旧版は 0 NG であった)
+
+  - id: MUT-1395-001
+    origin: cmd_1395
+    suspected_by: gunshi1
+    desc: |
+      report 自己検めの R1 (番人 2 体が使う safe_load_all) の牙を折ると、selftest M1 が
+      赤くなるべき。M1 = ★軍師一号が本夜 現に踏んだ機序★ = list の途中へ mapping を挿し
+      込み最後の list 要素が孤児になる形。折っても緑なら、此の門は「壊れた report を
+      家老が読む前に落とす」という当の役目を果たしておらぬ。
+      ★M1 は R2 でも鳴る (2 つ鳴るが機序は 1 つ)★ = ゆえに red_needle は「赤が出たか」
+      でなく ★M1 が期待の needle [R1] を出せなくなったか★ を見る位置に置いた。
+    # ★slim_yaml も写す★ = R2 の除外表を其処から借りておるゆえ、写さねば scratch では
+    #   借り損ね ⇒ R2 が消え ⇒ ★baseline から赤★ になり検出力が測れぬ (実測で踏んだ)。
+    paths: [scripts/report_validate.py, scripts/slim_yaml.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/report_validate.py"
+      s = open(p, encoding="utf-8").read()
+      old = "docs = list(yaml.safe_load_all(text))"
+      assert s.count(old) == 1, f"MUT-1395-001: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "docs = []", 1))
+      PY
+    test: |
+      python3 scripts/report_validate.py --selftest
+    expect: nonzero
+    red_needle: "NG  M1"  # 実測 2026-07-27: 牙折り時は M1 が「期待した needle が出ておらぬ」で落ちる
+
+  - id: MUT-1395-002
+    origin: cmd_1395
+    suspected_by: ashigaru1
+    desc: |
+      R2 (slim_yaml が使う単一 document の safe_load) の牙を折ると、selftest M2 が赤く
+      なるべき。R2 が守っておるのは ★壊れた report が queue/reports/ から archive へ
+      攫われる★ 経路 (cmd_1395 で sandbox 実走にて実証。同条件の健全 file は残り、
+      壊れた方だけが移った)。★R1 と違い此の害は【番人が黙る】のではなく【file が消える】★
+      ゆえ、R1 の牙だけでは覆えぬ。
+      ★M2 は R2 のみで鳴る形にしてある★ (多 document は safe_load_all を通るゆえ) =
+      牙を折れば M2 は ★赤が一つも出ぬ★ = 着弾が一点に絞れておる。
+    # ★slim_yaml も写す★ = R2 の除外表を其処から借りておるゆえ、写さねば scratch では
+    #   借り損ね ⇒ R2 が消え ⇒ ★baseline から赤★ になり検出力が測れぬ (実測で踏んだ)。
+    paths: [scripts/report_validate.py, scripts/slim_yaml.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/report_validate.py"
+      s = open(p, encoding="utf-8").read()
+      old = "            yaml.safe_load(text)\n"
+      assert s.count(old) == 1, f"MUT-1395-002: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "            None\n", 1))
+      PY
+    test: |
+      python3 scripts/report_validate.py --selftest
+    expect: nonzero
+    red_needle: "NG  M2"  # 実測 2026-07-27: 牙折り時は M2 が赤を一つも出せず落ちる
 
 coverage_waivers: []
 

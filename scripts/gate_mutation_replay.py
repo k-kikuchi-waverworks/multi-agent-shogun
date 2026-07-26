@@ -498,10 +498,32 @@ def skip_evidence(out: str):
 # docstring が台帳 ID を「実射で確認済」と名指すのに台帳に実在せぬ = 申告と実在の食い違い。
 # 四号は M6 で同じ抜けをやっており M9 で二度目 — 人の注意力では二度破れた。機械で拾う。
 # 対象は tracked COVERAGE_EXTS file 中の完全形 ID 言及のみ。★限界 (正直に)★: 「M9」の
-# ような略記の申告は拾えぬ (完全形で書く規律とセットで効く)。照合先は本 repo の台帳のみ
-# (repo 跨ぎ言及は 2026-07-26 実測ゼロ)。
+# ような略記の申告は拾えぬ (完全形で書く規律とセットで効く)。
+#
+# ★★cmd_1408 (2026-07-27) = 「幽霊 63 件」の一語を三語へ割る + 物差しを是正した★★
+#   ① ★物差しの是正★: 旧 REGISTRY_ID_RE (下に DISCARDED として残す) は
+#      ★足軽三号が cmd_1386 (scripts/ledger_id_census.py) で【壊れておると証して捨てた綴り】
+#      その物★が、門の中で生き残っておった形である。破れ方は二つ:
+#        (a) ★枝を 1 つしか読まぬ★ = 「MUT-<cmd>-R3-M1〜M5」が全て「MUT-<cmd>-R3」へ潰れる
+#        (b) ★先読みが無い★ = 「XMUT-<cmd>-001」の綴りの途中から id を拾う
+#      ★(a) は偽陰性を作る★: 台帳に「MUT-<cmd>-R3」が在れば、実在せぬ「…-R3-M9」の申告を
+#      門は「MUT-<cmd>-R3」と読んで【幽霊でない】と黙る。★2026-07-27 07:57 実測では現物 0 件★
+#      = 之は説明であって実測ではない ⇒ ★selftest T71 が fixture で現に落ちることを示す★。
+#      ⇒ census と同じ綴りへ揃えた。★是正の結果 幽霊は 63 → 64 件へ【増えた】★
+#      (07:57 実測・shogun 木) = ★数を良くする動きではない★ことを数で示せる形。
+#   ② ★出所の別を名乗らせる★: 幽霊を A / C / C? の三語へ割る。
+#        A  = ★別台帳 (backend/app/web/engine 等) に実在★ = 申告は真・記録が他木に在るだけ
+#        C  = ★何処の台帳にも無い (真に未登録)★ = 所有者の借財
+#        C? = ★別台帳の一部が読めなんだ★ ⇒ ★「真に未登録」とは言わぬ★ (fail-closed)
+#      ★verdict は動かさぬ★ = A も従来どおり FAIL の中に数える。★門を静かにする為に数を
+#      消す形は禁★ (家老下命 cmd_1408) = 分けて名乗るだけである。
+#   ③ ★旧物差しとの読みの差を毎朝 数える★ = [RULER-SHADOW]。是正が黙って巻き戻された時や、
+#      新しい綴りの形が現れた時に、★門が己の物差しについて口を利く★形にしておく。
 # ─────────────────────────────────────────────────────────────────────────────
-REGISTRY_ID_RE = re.compile(r"MUT-\d{3,4}-[A-Za-z0-9]+")
+# 物差し (census scripts/ledger_id_census.py:35 の ID_RE と ★同一★ — 二つ持てば必ずずれる)
+REGISTRY_ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*(?:-[A-Za-z0-9]+)+")
+# ★捨てた綴り★ = 今も影を数える為だけに残す (これで判定してはならぬ)
+REGISTRY_ID_RE_DISCARDED = re.compile(r"MUT-\d{3,4}-[A-Za-z0-9]+")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # gate-2 付帯4: ★視野計★ (--coverage に相乗り・cmd_1370)
@@ -991,14 +1013,19 @@ def scan_mutation_test_candidates(repo: Path):
 
 
 def scan_registry_id_refs(repo: Path):
-    """tracked COVERAGE_EXTS file 中の台帳 ID 完全形言及 ([(rel, line_no, id)], error) を返す。
+    """tracked COVERAGE_EXTS file 中の台帳 ID 完全形言及を返す。
 
+    返り = ([(rel, line_no, id)], [(rel, line_no, 旧読み, 新読み or None)], error)
+      第2 = ★物差しの影★ (cmd_1408) = 同じ位置を ★捨てた綴り★ と ★今の綴り★ が別々に読む所。
+            ★判定には一切使わぬ★ = 数えて名乗る為だけの器 (是正が黙って巻き戻る/新しい綴りの
+            形が現れる、の二つを門が己の口で言える形にしておく)。
     幽霊 ID 検分 (四号 M9 型) の材料。読めぬ追跡 file は沈黙せず error (coverage scan と同じ掟)。
     """
     tracked, err = ls_files(repo)
     if err:
-        return None, err
+        return None, None, err
     refs: list[tuple[str, int, str]] = []
+    shadows: list[tuple[str, int, str, str | None]] = []
     for rel in tracked:
         if Path(rel).suffix not in COVERAGE_EXTS:
             continue
@@ -1008,15 +1035,76 @@ def scan_registry_id_refs(repo: Path):
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
-            return None, f"読めぬ追跡 file: {rel} ({e}) — 黙って飛ばさぬ (沈黙禁)"
+            return None, None, f"読めぬ追跡 file: {rel} ({e}) — 黙って飛ばさぬ (沈黙禁)"
         for i, line in enumerate(text.splitlines(), 1):
-            for m in REGISTRY_ID_RE.finditer(line):
-                refs.append((rel, i, m.group(0)))
-    return refs, None
+            now = {m.start(): m.group(0) for m in REGISTRY_ID_RE.finditer(line)}
+            for st, mid in sorted(now.items()):
+                refs.append((rel, i, mid))
+            for m in REGISTRY_ID_RE_DISCARDED.finditer(line):
+                if now.get(m.start()) != m.group(0):
+                    shadows.append((rel, i, m.group(0), now.get(m.start())))
+    return refs, shadows, None
 
 
-def coverage(registry: Path, repo: Path) -> int:
+def peer_registry_paths(own: Path) -> list[tuple[str, Path]]:
+    """★幽霊 ID の出所照合先★ = 他木の台帳 (cmd_1408)。
+
+    既定は gate_nightly.sh と ★同じ path・同じ env★ で解く (二つ持てば必ずずれるゆえ)。
+    ★己の台帳は除く★ (解決後の path で照合) — 己を「別台帳」と呼ばぬ。
+    """
+    home = Path.home()
+    backend = Path(os.environ.get("GATE_BACKEND_ROOT") or (home / "aituber-project" / "backend"))
+    app = Path(os.environ.get("GATE_APP_ROOT") or (home / "aituber-project"))
+    engine = Path(os.environ.get("GATE_ENGINE_ROOT")
+                  or "/mnt/c/Users/k-kikuchi/development/ai-automate-engine")
+    cands = [
+        ("shogun", DEFAULT_REGISTRY),
+        ("backend", backend / "config" / "mutation_registry.yaml"),
+        ("app", app / "config" / "mutation_registry.yaml"),
+        ("web", REPO_ROOT / "config" / "mutation_registry.web.yaml"),
+        ("engine", engine / "config" / "mutation_registry.yaml"),
+    ]
+
+    def _r(p: Path) -> Path:
+        try:
+            return p.resolve()
+        except OSError:
+            return p
+
+    ownr = _r(own)
+    return [(n, p) for n, p in cands if _r(p) != ownr]
+
+
+def load_peer_ids(peers: list[tuple[str, Path]]):
+    """(id → [台帳名], 読めた台帳の名札, 読めなんだ [(名, 理由)]) を返す。
+
+    ★読めぬ台帳を 0 件へ倒さぬ★ = 読めなんだ台帳が 1 つでも在れば、呼び手は
+    「何処にも無い (真に未登録)」と断ずる資格を失う (下の C? へ倒れる)。
+    """
+    ids: dict[str, list[str]] = {}
+    read: list[str] = []
+    unread: list[tuple[str, str]] = []
+    for name, p in peers:
+        doc, err, present = resolve_registry_doc(p)
+        if not present:
+            unread.append((name, f"{p} が無い"))
+            continue
+        if err or not isinstance(doc, dict) or not isinstance(doc.get("mutations"), list):
+            unread.append((name, f"{p}: {err or '台帳に mutations: リストが無い'}"))
+            continue
+        n = 0
+        for e in doc["mutations"]:
+            if isinstance(e, dict) and e.get("id"):
+                ids.setdefault(str(e["id"]), []).append(name)
+                n += 1
+        read.append(f"{name}({n})")
+    return ids, read, unread
+
+
+def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int:
     """gate-2 付帯 (cmd_1352b): 変異testらしき file が台帳に登録されておるかの検知層。
+
+    peers = 幽霊 ID の出所照合先 (別台帳)。None なら既定 (peer_registry_paths) を解く。
 
     FAIL は「block」でなく「家老へ警告」を意味する (gate_nightly が既存の家老 inbox
     警告経路へ相乗りする)。免除は coverage_waivers (同じ台帳 file 内・理由必須) のみ =
@@ -1100,15 +1188,52 @@ def coverage(registry: Path, repo: Path) -> int:
     for wp in sorted(set(wmap) - set(cands)):
         print(f"  注   免除の空撃ち   {wp} (候補に居らぬ = file 削除/規則変更済か。waiver を掃除せよ)")
     # 幽霊 ID 検分 (付帯3・四号 M9 型): docstring の申告と台帳の実在の食い違いを名指し
-    refs, rerr = scan_registry_id_refs(repo)
+    refs, shadows, rerr = scan_registry_id_refs(repo)
     if rerr:
         print(f"[gate-2 coverage] UNDETERMINED: {rerr}")
         return 2
     known = {str(e.get("id")) for e in entries}
     ghosts = [(rel, ln, mid) for rel, ln, mid in refs if mid not in known]
+    # ── ★出所の別 (cmd_1408)★ = 「幽霊 N 件」の一語を A / C / C? の三語へ割る ──
+    #   ★verdict は動かさぬ★ = A も C も従来どおり FAIL の中に数える (門を静かにする為に
+    #   数を消す形は禁 — 家老下命)。★割るのは【誰の手番か】を画面から読ませる為である★:
+    #     A  = 別台帳に実在 = ★申告は真・記録が他木に在るだけ★ (処方は「登録」ではない)
+    #     C  = 何処の台帳にも無い = ★所有者の借財★
+    #     C? = 別台帳の一部が読めなんだ = ★「真に未登録」と断ずる資格が無い★
+    peer_list = peer_registry_paths(registry) if peers is None else [(p.name, p) for p in peers]
+    peer_ids, peer_read, peer_unread = load_peer_ids(peer_list)
+    print(f"  [照合] 幽霊の出所照合先 = 別台帳 {len(peer_read)} 件"
+          f" [{'/'.join(peer_read) if peer_read else 'なし'}]"
+          f" — ★読めなんだ台帳 {len(peer_unread)} 件★"
+          + (f" ({'; '.join(f'{n}: {why}' for n, why in peer_unread)})" if peer_unread else ""))
+    n_a = n_c = n_unk = 0
     for rel, ln, mid in ghosts:
-        print(f"  ★NG★ [GHOST-ID]     {rel}:{ln} が {mid} を名指すが台帳に実在せぬ"
-              " (docstring 申告と台帳の食い違い = 四号 M9 型。登録するか申告を消せ)")
+        if mid in peer_ids:
+            n_a += 1
+            print(f"  ★NG★ [GHOST-ID/A]   {rel}:{ln} が {mid} を名指す。本 repo の台帳には無いが"
+                  f" ★別台帳 {'/'.join(peer_ids[mid])} に実在★ = 申告は真・記録が他木に在る"
+                  " (処方は【登録】ではなく、木を跨ぐ引用と判る書き方か、其の木の gate で見ること)")
+        elif peer_unread:
+            n_unk += 1
+            print(f"  ★NG★ [GHOST-ID/C?]  {rel}:{ln} が {mid} を名指すが本 repo の台帳に無い。"
+                  f" ★別台帳 {len(peer_unread)} 件が読めなんだゆえ【真に未登録】とは言わぬ★"
+                  " (判別不能 = 照合先を直してから断ぜよ)")
+        else:
+            n_c += 1
+            print(f"  ★NG★ [GHOST-ID/C]   {rel}:{ln} が {mid} を名指すが"
+                  " ★本 repo にも別台帳にも実在せぬ (真に未登録)★"
+                  " (docstring 申告と台帳の食い違い = 四号 M9 型。登録するか申告を消せ)")
+    # ── ★物差しの影 (cmd_1408)★ = 捨てた綴りと今の綴りが別々に読む所を数える ──
+    #   ★判定には使わぬ★。是正が黙って巻き戻る/新しい綴りの形が現れる を門が己で言う為の器。
+    for rel, ln, old, new in shadows[:10]:
+        print(f"  注   [RULER-SHADOW] {rel}:{ln} ★捨てた綴りなら「{old}」と読む所を、"
+              f"今の物差しは「{new if new else '(id と読まぬ)'}」と読む★")
+    if shadows:
+        print(f"  注   [RULER-SHADOW] 計 {len(shadows)} 件"
+              + (f" (上は先頭 10 件のみ)" if len(shadows) > 10 else "")
+              + " — ★二つの綴りが現に別々に読んでおる = 是正 (cmd_1408) が効いておる★"
+                " (0 件になった時の意味は二つ = 木から其の形の綴りが消えたか、"
+                "★物差しが巻き戻ったか★ — 見分けは selftest T71/T72 が持つ)")
 
     # ── ★視野計★ (付帯4・cmd_1370): 検知規則の recall を台帳で測り、盲を数字で言わせる ──
     named, nerr = registry_named_test_bodies(entries, repo)
@@ -1145,12 +1270,15 @@ def coverage(registry: Path, repo: Path) -> int:
     if unregistered or ghosts or expired:
         print(f"[gate-2 coverage] FAIL: 候補 {len(cands)} 件中 ★台帳に無い変異test"
               f" {len(unregistered)} 件★ / ★期限切れ免除 {len(expired)} 件★"
-              f" / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件★"
+              f" / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件"
+              f" (A 別台帳に実在 {n_a} / C 真に未登録 {n_c} / C? 判別不能 {n_unk})★"
               f" (視野: {vision})")
         print("  処方: 「赤を一度確認した」変異を config/mutation_registry.yaml へ登録せよ")
         print("        (登録の書式は本 file 冒頭 docstring)。登録すべきでない正当な理由が在るなら")
         print("        coverage_waivers へ【理由つきで】免除を書け (黙って外す道は無い)。")
         print("        幽霊 ID は台帳へ登録するか docstring の申告を消せ (申告≠実在を残すな)。")
+        print("        ★但し出所で手番が違う★= C=所有者が登録 / A=他木の台帳に在る引用ゆえ"
+              "登録では消えぬ / C?=先に照合先を直せ (★数を減らす為に消すな★ — cmd_1408)。")
         return 1
     # ★PASS の文言に視野を刻む★ = 「候補すべて登録済」を【全部検査した】と読ませぬための限定
     #   (cmd_1364 の「検査した と 全部検査した を混同させぬ」を、検知器自身へ当てたもの)
@@ -1160,6 +1288,7 @@ def coverage(registry: Path, repo: Path) -> int:
     print(f"[gate-2 coverage] PASS: ★規則に見えた★候補 {len(cands)} 件 ="
           f" ★登録 {n_reg} 件 / 免除 {n_waived} 件 (うち★無期限 {n_open_ended} 件★)★"
           f" — 免除は可視・期限切れ 0 件・ID言及 {len(refs)} 件に幽霊なし"
+          f" (照合先 = 別台帳 {len(peer_read)} 件・読めなんだ {len(peer_unread)} 件)"
           f" — ★但し視野は全域でない: {vision}★")
     return 0
 
@@ -2025,6 +2154,68 @@ def selftest() -> int:
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
         expect("T22 実在ID言及=幽霊扱いせぬ", 0, rc, "幽霊なし", out)
 
+        # ── ★cmd_1408 selftests★: 幽霊の【出所を割る】+ ★捨てた綴りの偽陰性を fixture で落とす★
+        #   ID は T21 と同じ理由で ★必ず動的に組む★ (literal を書けば本 file 自身が幽霊言及になる)
+        peer_only = "MUT-" + "8801-001"   # ★別台帳にのみ在る★ id
+        nowhere = "MUT-" + "8802-001"     # ★何処の台帳にも無い★ id
+        peer_reg = T / "t70peer.yaml"
+        _write_reg(peer_reg, [_cov_entry(peer_only, ["other_tree/test.bats"])])
+        t70_files = {ctl: _COV_CONTROL_BODY,
+                     "tests/rogue_mutation.bats":
+                         _COV_ROGUE_BATS + f"# 実射で確認済: {peer_only} と {nowhere}\n"}
+        reg = T / "t70reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-ROGUE", ["tests/rogue_mutation.bats"])])
+
+        # T70: ★A (別台帳に実在) と C (真に未登録) を分けて名乗る★ = 「幽霊」の一語を割る
+        repo = _mk_git_repo(T / "t70", t70_files)
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
+                           "--peer-registry", str(peer_reg)])
+        expect("T70 出所A=別台帳に実在と名乗る", 1, rc, "[GHOST-ID/A]", out)
+        expect("T70b 出所C=真に未登録と名乗る", 1, rc, "[GHOST-ID/C]", out)
+        expect("T70c 締めの数で A と C を分ける", 1, rc, "A 別台帳に実在 1 / C 真に未登録 1", out)
+        # ★verdict は動かさぬ★ = A が在っても FAIL のまま (門を静かにする為に数を消さぬ)
+        expect("T70d 出所を割っても verdict は動かさぬ (A も FAIL の中)", 1, rc,
+               "幽霊 2 件", out)
+
+        # T70e: ★照合先が読めなんだ時に【真に未登録】と断ぜぬ (fail-closed)★
+        #   = 「読めぬ」を「無い」へ倒せば ★C の数が水増しされ、他人へ在らぬ借財を負わせる★
+        repo = _mk_git_repo(T / "t70e", t70_files)
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
+                           "--peer-registry", str(T / "no_such_peer.yaml")])
+        expect("T70e 読めぬ台帳=判別不能 (C?) と名乗る", 1, rc, "[GHOST-ID/C?]", out)
+        expect("T70f 読めぬ間は【真に未登録】と言わぬ", 0, 1 if "実在せぬ (真に未登録)" in out else 0)
+
+        # T71: ★捨てた綴り (旧 REGISTRY_ID_RE) の偽陰性を fixture で現に落とす★
+        #   台帳に「…-R3」が在る木で、実在せぬ「…-R3-M9」を「確認済」と申告した盤面。
+        #   ★捨てた綴りは枝を 1 つしか読まぬゆえ「…-R3」と読み【幽霊でない】と黙る★
+        #   ⇒ ★物差しが巻き戻れば本 test は rc0 へ落ちて赤くなる★ = 是正そのものの牙。
+        base = "MUT-" + "8803-R3"
+        branch = base + "-M9"
+        repo = _mk_git_repo(T / "t71", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats":
+                                            _COV_ROGUE_BATS + f"# 実射で確認済: {branch}\n"})
+        reg = T / "t71reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry(base, ["tests/rogue_mutation.bats"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
+                           "--peer-registry", str(peer_reg)])
+        expect("T71 枝つき幽霊を名指す (捨てた綴りなら黙る形)", 1, rc, branch, out)
+        expect("T71b 影の計器が読みの差を数える", 1, rc, "[RULER-SHADOW]", out)
+
+        # T72: ★綴りの途中を拾わぬ★ = 捨てた綴りの二つ目の破れ (先読みが無い) の負例。
+        #   ★捨てた綴りなら鳴り、今の物差しなら鳴らぬ★ = 誤検知の側からも物差しを縛る。
+        stray = "MUT-" + "8804-001"
+        repo = _mk_git_repo(T / "t72", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats":
+                                            _COV_ROGUE_BATS + f"# 綴りの途中: X{stray} は id にあらず\n"})
+        reg = T / "t72reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-ROGUE", ["tests/rogue_mutation.bats"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
+                           "--peer-registry", str(peer_reg)])
+        expect("T72 綴りの途中は id と読まぬ=幽霊なし", 0, rc, "幽霊なし", out)
+
         # ── ★期限つき免除 (cmd_1374)★ = 免除は【いつ返すか】が決まって初めて免除 ──
         # 素材は共通: 対照 + 未登録の変異test 1本を、免除の書き方だけ変えて撃つ。
         def _waiver_repo(tag: str):
@@ -2474,7 +2665,9 @@ def selftest() -> int:
                                    "HEAD については何も言うておらぬ",
                                    "interpreter に届かぬ",
                                    # 付帯5 (負の主張の刃・2026-07-27)
-                                   "誰も証しておらぬ", "対象なし")
+                                   "誰も証しておらぬ", "対象なし",
+                                   # 付帯3 幽霊の出所割り + 物差し是正 (cmd_1408・2026-07-27)
+                                   "別台帳に実在", "真に未登録", "判別不能", "捨てた綴り")
                        if w not in doc_txt]
             expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
                    0, len(missing))
@@ -2498,6 +2691,10 @@ def main() -> int:
                     help="付帯5: 負の主張に刃が在るかの段1/段2 を単独で撃つ (未登録を全数 印字)")
     ap.add_argument("--coverage", action="store_true",
                     help="cmd_1352b: 変異testらしき file が台帳に登録されておるかの検知層")
+    ap.add_argument("--peer-registry", type=Path, action="append", default=None,
+                    help="cmd_1408: 幽霊 ID の出所照合先 (別台帳) を明示する。★与えねば"
+                         " gate_nightly と同じ既定を解く★。読めぬ台帳が在れば幽霊は"
+                         " 【真に未登録】でなく【判別不能】と名乗る (fail-closed)")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--tree-census", action="store_true",
                     help="cmd_1374: 牙を持つのに どの gate も見ておらぬ repo を名指す")
@@ -2521,7 +2718,7 @@ def main() -> int:
     if a.sanity:
         return sanity(a.registry, a.repo_root)
     if a.coverage:
-        return coverage(a.registry, a.repo_root)
+        return coverage(a.registry, a.repo_root, a.peer_registry)
     return run_all(a.registry, a.repo_root)
 
 

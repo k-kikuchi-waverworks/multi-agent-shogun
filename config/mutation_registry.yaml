@@ -157,6 +157,14 @@ mutations:
       python3 scripts/idle_revive_scan.py --selftest-upstream
     expect: nonzero
     red_needle: "★NG★ U1b"  # 実測 2026-07-26: pattern 削除で U1b が banner 行を名指しで落とす
+    # ★anchor_sites は【書いた時の性質】でなく【今の盤面の性質】である (cmd_1382・六号 実測)★
+    #   本 entry が書かれた 2026-07-26 昼、綴り 「"session limit",」 は repo に 1 箇所であった。
+    #   ★同日 21:11 の 7d35e40 (cmd_1385・三号) が 170 行目に2本目を足した其の瞬間に非一意へ転じた★
+    #   (150 行目 = cmd_1355 の元の pattern / 170 行目 = UPSTREAM_TIMED_HEAD_PATTERNS)。
+    #   sed は行削除ゆえ ★2 行とも消える★ = 実測 2 箇所 (己の手で grep -c して数え直した)。
+    #   ⇒ ★他人の commit が、他人の牙を黙って鈍らせうる★ = 同じ事は明日また起こる。
+    #     ★防ぐ形 (共有台帳を構造で断つ) は本任の外であり cmd_1386 (三号) へ渡してある★。
+    anchor_sites: 2
 
   - id: MUT-1355-002
     origin: cmd_1355
@@ -260,7 +268,15 @@ mutations:
       機序: 続き行は主文の2行下にぶら下がる断片ゆえ、続き行が見えて主文が見えぬのは
       banner が画面上端へ流れた (= その後に出力が在った) 以外に起こりようが無い。
       実害 = 家老が残渣を live と読み 19:30 に殿へ誤った3択を迫りかけた (19:39 撤回)。
-    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    # ★fixture を paths へ追加 (2026-07-26 22:2x・六号が単独書き手として代筆)★
+    #   ★機序 = 牙の baseline は paths に挙げた file だけを写した木で走る (copy_paths)★ ゆえ、
+    #   test (--selftest-upstream) が読む tests/fixtures/upstream_session_limit_pane.txt が
+    #   ★木に無く U0 が「fixture 読めず」で倒れ、そこから 6 件 NG へ連鎖しておった★=
+    #   ★baseline が赤ゆえ検出力を測れず、此の牙は UNDETERMINED (緑でも赤でもない札) であった★。
+    #   ★書き漏れであって意図でないことの証 = 同じ test を使う同著者の MUT-1385-002 は宣言しておる★
+    #   (MUT-1355-001/002・MUT-1355-005/006 も宣言済 = 8 件中 5 件が既に宣言 = 之が慣例)。
+    #   ★宣言済の bats は test 本文から呼ばれておらぬが、除くのは六号の判ずる所でないゆえ残す★。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats, tests/fixtures/upstream_session_limit_pane.txt]
     mutate: |
       sed -i 's|^UPSTREAM_CONTINUATION_PATTERNS = ("/usage-credits",)$|UPSTREAM_CONTINUATION_PATTERNS = ()|' scripts/idle_revive_scan.py
     test: |
@@ -295,7 +311,15 @@ mutations:
       ★断定の門を常時開く★ = episode_has_live_wall を無条件 True にすると、selftest U8i
       (残渣のみの episode で断定の門が開かぬ) が赤くなるべき。折っても緑なら
       「抑止は広く・断定は狭く」の分離が死に、残渣でも家老へ上流障害を断定する旧挙動へ戻る。
-    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    # ★fixture を paths へ追加 (2026-07-26 22:2x・六号が単独書き手として代筆)★
+    #   ★機序 = 牙の baseline は paths に挙げた file だけを写した木で走る (copy_paths)★ ゆえ、
+    #   test (--selftest-upstream) が読む tests/fixtures/upstream_session_limit_pane.txt が
+    #   ★木に無く U0 が「fixture 読めず」で倒れ、そこから 6 件 NG へ連鎖しておった★=
+    #   ★baseline が赤ゆえ検出力を測れず、此の牙は UNDETERMINED (緑でも赤でもない札) であった★。
+    #   ★書き漏れであって意図でないことの証 = 同じ test を使う同著者の MUT-1385-002 は宣言しておる★
+    #   (MUT-1355-001/002・MUT-1355-005/006 も宣言済 = 8 件中 5 件が既に宣言 = 之が慣例)。
+    #   ★宣言済の bats は test 本文から呼ばれておらぬが、除くのは六号の判ずる所でないゆえ残す★。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats, tests/fixtures/upstream_session_limit_pane.txt]
     mutate: |
       sed -i 's|^        if e.get("verdict", UPSTREAM_LIVE) == UPSTREAM_LIVE:$|        if True:|' scripts/idle_revive_scan.py
     test: |
@@ -312,7 +336,15 @@ mutations:
       赤くなるべき。折っても緑なら ★本物の枠切れを家老へ一言も報せぬ番人★ が出来る —
       cmd_1355 の北極星 (枠が戻った時に誰かが起こす) が黙って死ぬ。
       ★偽陽性を潰す変更は、必ず此の側も同時に縛らねばならぬ★ (家老下命(3))。
-    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    # ★fixture を paths へ追加 (2026-07-26 22:2x・六号が単独書き手として代筆)★
+    #   ★機序 = 牙の baseline は paths に挙げた file だけを写した木で走る (copy_paths)★ ゆえ、
+    #   test (--selftest-upstream) が読む tests/fixtures/upstream_session_limit_pane.txt が
+    #   ★木に無く U0 が「fixture 読めず」で倒れ、そこから 6 件 NG へ連鎖しておった★=
+    #   ★baseline が赤ゆえ検出力を測れず、此の牙は UNDETERMINED (緑でも赤でもない札) であった★。
+    #   ★書き漏れであって意図でないことの証 = 同じ test を使う同著者の MUT-1385-002 は宣言しておる★
+    #   (MUT-1355-001/002・MUT-1355-005/006 も宣言済 = 8 件中 5 件が既に宣言 = 之が慣例)。
+    #   ★宣言済の bats は test 本文から呼ばれておらぬが、除くのは六号の判ずる所でないゆえ残す★。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats, tests/fixtures/upstream_session_limit_pane.txt]
     mutate: |
       sed -i 's|^        if e.get("verdict", UPSTREAM_LIVE) == UPSTREAM_LIVE:$|        if False:|' scripts/idle_revive_scan.py
     test: |
@@ -764,6 +796,16 @@ mutations:
       python3 scripts/gate_mutation_replay.py --selftest
     expect: nonzero
     red_needle: "NG T24"  # 実測 2026-07-26: 視野計を倒すと T24 (盲の名指し) が落ちる
+    # ★anchor_sites: 2 = 【意図した編集が 2 箇所】(2026-07-26 22:4x・六号が単独書き手として代筆)★
+    #   ★2 つの sed の anchor はいずれも repo に 1 hit ずつ (六号が grep -c で個別に数え直した)★
+    #   = ★非一意ゆえ余所へ流れたのではなく、視野計を【二箇所とも】倒す意図である★
+    #     (① blind を空辞書へ ② non_ctl を空 list へ = 片方だけでは T24/T25 の両方を落とせぬ)。
+    #   ★数が 1 でなくなった機序 = cmd_1382 差し戻し (i) の第二の物差し【行の塊】ゆえ★ (綴り 1 / 行の塊 2)。
+    #   ★申し送り = 本 entry は 21:5x〜22:4x の間【赤い baseline の裏に隠れておった】★=
+    #   ★六号の T50 が docs 無き木で赤を出しておったゆえ、門は baseline で引き返し anchor 検分へ
+    #   到達しておらなんだ★。★門は「baseline が赤」と申すゆえ、読む者は code の退行と読む★=
+    #   ★一つの欠陥が、別の欠陥を隠す★。T50 の是正で表へ出た。
+    anchor_sites: 2
 
   - id: MUT-1374-001
     origin: cmd_1374

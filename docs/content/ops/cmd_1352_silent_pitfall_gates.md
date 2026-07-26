@@ -124,10 +124,14 @@ git 追跡下 (`git ls-files`) かつ拡張子 `.sh` `.bash` `.py` `.bats` の f
   負規則: `(without|no|not)\s+mutation` に当たる行は除く (データ変異の意の英語を誤検知せぬ)。
 - **D2**: selftest 宣言 (`--selftest` / `def selftest` / `selftest()`) と変異 keyword の
   **同一 file 内共起** (selftest に変異試験を内蔵する本 repo の流儀を捕まえる)。
+- **D3** (cmd_1355 で追加): pytest 型 test 定義 (`def test_`) と変異 keyword の共起
+  (.py のみ)。backend の `test_cmd_1350_*` 等は bats でも selftest 宣言でもないゆえ
+  D1/D2 の網に掛からなかった — 実測 2026-07-26: この規則で backend 7 件 / shogun 0 件
+  (既存運用の誤検知増ゼロ)。
 
 **限界 (正直に)**: prose (*.md) と YAML は対象外 (実行可能な test のみ)・untracked の
-変異testは見えぬ (commit されて初めて守れる)・内容は worktree を読む・pytest 流の
-mutation test (上記 marker を持たぬもの) は届かぬ。規則を変える時は誤検知率を再実測せよ。
+変異testは見えぬ (commit されて初めて守れる)・内容は worktree を読む。
+規則を変える時は誤検知率を再実測せよ。
 
 **誤検知の実測 (2026-07-26)**: 素朴な keyword 全文一致では 8 file 中 4 件が誤検知 (50% —
 言及のみの `gate_nightly.sh`/`gate_precommit.sh`/`idle_revive_scan.py`、データ変異の意の
@@ -146,6 +150,58 @@ mutation test (上記 marker を持たぬもの) は届かぬ。規則を変え�
 
 **他 agent の変異testを見つけた時**: 勝手に登録するな (他人の test へ mutate を書くのは
 所有者の手番)。`coverage_waivers` へ理由つきで置き、所有者へ登録を申し送れ。
+
+## harness 内 SKIP=FAIL (gate-2 付帯2・2026-07-26 四号の申し送り)
+
+**なぜ在るか — 実例 (2026-07-26 朝・足軽四号)**: 四号の STT 署名 canary は、変異を撃っても
+最初【緑】であった。機序 = gate-2 の scratch は entry の `paths` だけの repo コピーであり、
+**corpus は .gitignore ゆえ付いて来ぬ → 番人が skip → skip は緑に見える** =
+**【見張っておらぬ番人が「異常なし」と報告する形】**。四号は STT_CORPUS_WATCH_DB の口を
+開けて撃ち直し、赤を実測した。四号の申し送り (家老が採り、台帳所有者が受けた) =
+**「SKIP=FAIL の掟 (CLAUDE.md Test Rules 1) は変異試験の harness 内でも成り立つ。
+scratch で skip する番人は、台帳に載っていても何も守っておらぬ」**。
+
+**何を検るか (正本 = `gate_mutation_replay.py` の `_SKIP_EVIDENCE`)**: baseline と変異後の
+**両方**の test 出力から、skip の機械痕跡を拾い **UNDETERMINED** に畳む (skip は緑でも
+赤でもない):
+
+- TAP/bats の `ok N … # skip` — skip した test は ok の顔をする (緑の顔をした不在)
+- TAP 空計画 `1..0` — `bats --filter` の空振り (test 名の rename 等) は 1 本も走らずに
+  exit 0 する
+- pytest 要約の `N skipped` (N≥1)
+
+変異後出力の skip も判定を汚す扱いとする — skip した試験の混じった赤は「当てた変異の赤」の
+保証にならぬ (red_needle の名指しと同じ理路)。
+
+**全台帳の実測 (2026-07-26)**: 導入後の全件再走 = **shogun 台帳 23 件 + backend 台帳
+30 件 = 53 entry すべて skip 痕跡なしで PASS**。四号の是正済 canary (backend 台帳の署名
+watch) も新検分の下で健全 = 「coverage PASS が嘘」は現状ゼロと機械で確認した。
+
+**限界 (正直に)**: bash selftest が内部 guard で**黙って何もせず exit 0** する無痕跡形は
+拾えぬ — その全滅形は既存の「変異後も緑=FAIL」が捕まえる (baseline 緑 + 変異後緑)。残余は
+【痕跡を出さぬ部分 skip】のみ (手動検分 2026-07-26: shogun 台帳の bash/python selftest 系
+entry に該当なし)。五号の教訓の一般形と同根 =「操作を撃ったこと」を成功の証拠にするな —
+skip 検知は「test が走ったこと」すら証拠にせず、**走らなかった痕跡**を探す側から塞ぐ。
+
+**変異試験**: MUT-1352-006 (skip 検知を折る → selftest T19 が名指しで赤・実測済)。
+
+## 幽霊 ID 検分 (gate-2 付帯3・四号 M9 型)
+
+**なぜ在るか — 実例 (2026-07-26・足軽四号の自白)**: M9 は台帳に無いのに「実射で確認済」と
+docstring に書いてあった — M6 で同じ抜けを一度やっており**二度目** = docstring の申告と
+台帳の実在の食い違いは、人の注意力では二度破れた。
+
+**何を検るか**: `--coverage` に相乗り。tracked な test file (COVERAGE_EXTS) 中の台帳 ID
+**完全形言及** (`MUT-xxxx-nnn` / `MUT-xxxx-Mn` 形) を全数拾い、台帳に実在せぬものを
+`[GHOST-ID]` として **file:行 で名指し** (FAIL = 家老へ警告・block せぬ)。
+
+**実測 (2026-07-26)**: shogun ID言及 23 件・backend 13 件 — **幽霊ゼロ** (導入時点の
+食い違いは無し)。
+
+**限界 (正直に)**: 略記の申告 (「M9 は実射で確認済」) は拾えぬ — **完全形 ID で書く規律**と
+セットで効く。照合先は各 repo 自身の台帳のみ (repo 跨ぎ言及は実測ゼロ・現れたら規則を再考)。
+
+**変異試験**: MUT-1352-007 (ID 抽出を折る → selftest T21 が名指しで赤・実測済)。
 
 ## 逃がし口 (隠さぬ・使ったら理由を残せ)
 

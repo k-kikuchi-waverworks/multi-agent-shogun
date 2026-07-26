@@ -39,7 +39,9 @@
   FAIL         = ★変異後も緑 = 変異が静かに無効化された★ (名指しで報告) /
                  赤いが red_needle 不在 = 別の理由で偶然赤い疑い
   UNDETERMINED = baseline が赤 / mutate 失敗 / ★mutate 空振り (何も変えておらぬ=sed の
-                 当たり損ねも沈黙する★) / 台帳 0 件 / schema 不備 / timeout
+                 当たり損ねも沈黙する★) / 台帳 0 件 / schema 不備 / timeout /
+                 ★出力に skip 痕跡 (scratch で試験が見張っておらぬ=SKIP=FAIL は harness
+                 内でも成り立つ — 四号の申し送り 2026-07-26)★
 exit: 0 PASS / 1 FAIL あり / 2 UNDETERMINED あり (FAIL 優先)
 
 使い方:
@@ -94,6 +96,43 @@ COVERAGE_POSITIVE_CONTROL = "scripts/gate_mutation_replay.py"
 
 PASS, FAIL, UNDET = "PASS", "FAIL", "UNDETERMINED"
 _IGNORE = shutil.ignore_patterns("__pycache__", "*.pyc")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gate-2 付帯2: harness 内 SKIP=FAIL (四号の申し送り 2026-07-26 09:45・台帳所有者が受領)
+# scratch は entry の paths だけのコピーゆえ、.gitignore'd な依存 (corpus 等) は付いて来ぬ。
+# 依存を欠いた test が skip して緑を返すと【見張っておらぬ番人が「異常なし」と報告する形】
+# になる — 実例 = 四号の STT 署名 canary (backend 台帳): scratch に corpus が付いて来ず
+# 番人が skip → 変異を撃っても緑に見えた。四号は DB の口を開けて撃ち直し赤を実測した。
+# 掟 = CLAUDE.md Test Rules 1「SKIP=FAIL」は変異試験の harness 内でも成り立つ。
+# 検知は出力の機械痕跡のみ:
+#   ・TAP/bats の「ok N … # skip」 (skip した test は ok に見える = 緑の顔をした不在)
+#   ・TAP 空計画「1..0」 (bats --filter の空振り = 1 本も走っておらぬのに exit 0)
+#   ・pytest 要約の「N skipped」 (N≥1。0 skipped は skip 無しゆえ拾わぬ)
+# ★限界 (正直に)★: bash selftest が内部 guard で黙って何もせず exit 0 する無痕跡形は
+# 拾えぬ — その全滅形は「変異後も緑=FAIL」が捕まえる。残余は【痕跡を出さぬ部分 skip】のみ。
+# ─────────────────────────────────────────────────────────────────────────────
+_SKIP_EVIDENCE = re.compile(
+    r"(?im)^(?:not )?ok\s+\d+[^\n]*#\s*skip"  # TAP/bats: ok N … # skip
+    r"|^\s*1\.\.0\s*$"                        # TAP 空計画: 1 本も走っておらぬ
+    r"|\b[1-9]\d*\s+skipped\b"                # pytest 要約: N skipped (N≥1)
+)
+
+
+def skip_evidence(out: str):
+    """test 出力中の skip 痕跡を返す (無ければ None)。"""
+    m = _SKIP_EVIDENCE.search(out or "")
+    return m.group(0).strip() if m else None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gate-2 付帯3: 幽霊 ID 検分 (--coverage に相乗り・四号 M9 型 2026-07-26)
+# docstring が台帳 ID を「実射で確認済」と名指すのに台帳に実在せぬ = 申告と実在の食い違い。
+# 四号は M6 で同じ抜けをやっており M9 で二度目 — 人の注意力では二度破れた。機械で拾う。
+# 対象は tracked COVERAGE_EXTS file 中の完全形 ID 言及のみ。★限界 (正直に)★: 「M9」の
+# ような略記の申告は拾えぬ (完全形で書く規律とセットで効く)。照合先は本 repo の台帳のみ
+# (repo 跨ぎ言及は 2026-07-26 実測ゼロ)。
+# ─────────────────────────────────────────────────────────────────────────────
+REGISTRY_ID_RE = re.compile(r"MUT-\d{3,4}-[A-Za-z0-9]+")
 
 
 def load_registry(path: Path):
@@ -183,6 +222,12 @@ def evaluate_entry(e, repo: Path, work: Path):
         tail = " / ".join(out.strip().splitlines()[-2:])[:200] if out.strip() else ""
         return UNDET, f"baseline が赤 (exit {rc}) = 変異前から落ちており検出力を測れぬ" + (
             f" | {tail}" if tail else "")
+    # ①b ★skip 痕跡検分★: 緑でも skip 混じりなら「見張っておらぬ番人が異常なしと報告する形」
+    #     (SKIP=FAIL は harness 内でも成り立つ — 四号の申し送り 2026-07-26)
+    ev = skip_evidence(out)
+    if ev:
+        return UNDET, (f"baseline が skip 混じりの緑 (痕跡「{ev}」) = scratch で試験が"
+                       "見張っておらぬ。paths に依存を足すか test の口を開けよ (SKIP=FAIL)")
 
     # ② mutate をコピーへ当てる
     rc, out = run_sh(e["mutate"], mut, timeout)
@@ -200,6 +245,12 @@ def evaluate_entry(e, repo: Path, work: Path):
     rc, out = run_sh(e["test"], mut, timeout)
     if rc is None:
         return UNDET, "変異後 test が timeout"
+    # ④b skip 痕跡は赤緑どちらの顔をしておっても判定を汚す (skip した試験の赤は
+    #     「当てた変異の赤」の保証にならず、緑は「異常なし」の保証にならぬ)
+    ev = skip_evidence(out)
+    if ev:
+        return UNDET, (f"変異後の出力に skip 痕跡 (「{ev}」) = 見張っておらぬ試験が混じり"
+                       "判定を保証できぬ (SKIP=FAIL は harness 内でも成り立つ)")
     red = (rc != 0) if expect == "nonzero" else (rc == int(expect))
     if not red:
         if expect != "nonzero":
@@ -322,6 +373,35 @@ def scan_mutation_test_candidates(repo: Path):
     return cands, None
 
 
+def scan_registry_id_refs(repo: Path):
+    """tracked COVERAGE_EXTS file 中の台帳 ID 完全形言及 ([(rel, line_no, id)], error) を返す。
+
+    幽霊 ID 検分 (四号 M9 型) の材料。読めぬ追跡 file は沈黙せず error (coverage scan と同じ掟)。
+    """
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"git ls-files が走らぬ: {e}"
+    if r.returncode != 0:
+        return None, f"git ls-files 失敗 (exit {r.returncode}): {r.stderr.strip()[:200]}"
+    refs: list[tuple[str, int, str]] = []
+    for rel in filter(None, r.stdout.split("\0")):
+        if Path(rel).suffix not in COVERAGE_EXTS:
+            continue
+        p = repo / rel
+        if not p.is_file():
+            continue
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            return None, f"読めぬ追跡 file: {rel} ({e}) — 黙って飛ばさぬ (沈黙禁)"
+        for i, line in enumerate(text.splitlines(), 1):
+            for m in REGISTRY_ID_RE.finditer(line):
+                refs.append((rel, i, m.group(0)))
+    return refs, None
+
+
 def coverage(registry: Path, repo: Path) -> int:
     """gate-2 付帯 (cmd_1352b): 変異testらしき file が台帳に登録されておるかの検知層。
 
@@ -375,14 +455,26 @@ def coverage(registry: Path, repo: Path) -> int:
             print(f"  ★NG★ [UNREGISTERED] {rel}: {cands[rel]}")
     for wp in sorted(set(wmap) - set(cands)):
         print(f"  注   免除の空撃ち   {wp} (候補に居らぬ = file 削除/規則変更済か。waiver を掃除せよ)")
-    if unregistered:
-        print(f"[gate-2 coverage] FAIL: 候補 {len(cands)} 件中 ★台帳に無い変異test {len(unregistered)} 件★")
+    # 幽霊 ID 検分 (付帯3・四号 M9 型): docstring の申告と台帳の実在の食い違いを名指し
+    refs, rerr = scan_registry_id_refs(repo)
+    if rerr:
+        print(f"[gate-2 coverage] UNDETERMINED: {rerr}")
+        return 2
+    known = {str(e.get("id")) for e in entries}
+    ghosts = [(rel, ln, mid) for rel, ln, mid in refs if mid not in known]
+    for rel, ln, mid in ghosts:
+        print(f"  ★NG★ [GHOST-ID]     {rel}:{ln} が {mid} を名指すが台帳に実在せぬ"
+              " (docstring 申告と台帳の食い違い = 四号 M9 型。登録するか申告を消せ)")
+    if unregistered or ghosts:
+        print(f"[gate-2 coverage] FAIL: 候補 {len(cands)} 件中 ★台帳に無い変異test"
+              f" {len(unregistered)} 件★ / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件★")
         print("  処方: 「赤を一度確認した」変異を config/mutation_registry.yaml へ登録せよ")
         print("        (登録の書式は本 file 冒頭 docstring)。登録すべきでない正当な理由が在るなら")
         print("        coverage_waivers へ【理由つきで】免除を書け (黙って外す道は無い)。")
+        print("        幽霊 ID は台帳へ登録するか docstring の申告を消せ (申告≠実在を残すな)。")
         return 1
     print(f"[gate-2 coverage] PASS: 変異testらしき候補 {len(cands)} 件すべて台帳登録済"
-          f" (免除 {n_waived} 件・免除は可視)")
+          f" (免除 {n_waived} 件・免除は可視・ID言及 {len(refs)} 件に幽霊なし)")
     return 0
 
 
@@ -609,6 +701,49 @@ def selftest() -> int:
         _write_reg(reg, [e16])
         rc, out = _invoke(["--registry", str(reg), "--repo-root", str(repo)])
         expect("T16 needle不在=FAIL (偶然の赤を通さぬ)", 1, rc, "名指しが無い", out)
+
+        # ── 付帯2/3 selftests: harness 内 SKIP=FAIL + 幽霊 ID (四号の申し送り 2026-07-26) ──
+
+        # T19: ★scratch で skip する番人 = UNDETERMINED★ (四号の署名 canary の再現:
+        #      依存が scratch に付いて来ず skip → 緑の顔をした「見張っておらぬ」)
+        repo = _mk_playground(T / "t19")
+        (repo / "check.sh").write_text(
+            "#!/bin/bash\necho '1..1'\necho 'ok 1 canary # skip corpus missing in scratch'\nexit 0\n")
+        reg = T / "t19reg.yaml"
+        _write_reg(reg, [_entry("MUT-T19", "sed -i 's/exit 0/exit 1/' tool.sh")])
+        rc, out = _invoke(["--registry", str(reg), "--repo-root", str(repo)])
+        expect("T19 scratchでskip=UNDETERMINED (緑にせぬ)", 2, rc, "skip 混じり", out)
+
+        # T20: ★TAP 空計画 1..0 (bats --filter 空振り = 1本も走らず exit 0) = UNDETERMINED★
+        repo = _mk_playground(T / "t20")
+        (repo / "check.sh").write_text("#!/bin/bash\necho '1..0'\nexit 0\n")
+        reg = T / "t20reg.yaml"
+        _write_reg(reg, [_entry("MUT-T20", "sed -i 's/exit 0/exit 1/' tool.sh")])
+        rc, out = _invoke(["--registry", str(reg), "--repo-root", str(repo)])
+        expect("T20 filter空振り1..0=UNDETERMINED", 2, rc, "1..0", out)
+
+        # T21: ★幽霊 ID 言及 (台帳に実在せぬ ID を「確認済」と申告) = FAIL + 名指し★
+        #      ID は動的に組む — literal を書くと本 file 自身が幽霊言及になる (自縄自縛)
+        ghost_id = "MUT-" + "9999-999"
+        real_id = "MUT-" + "1111-001"
+        repo = _mk_git_repo(T / "t21", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats":
+                                            _COV_ROGUE_BATS + f"# 実射で確認済: {ghost_id}\n"})
+        reg = T / "t21reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-ROGUE", ["tests/rogue_mutation.bats"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T21 幽霊ID言及=FAIL+名指し (四号M9型)", 1, rc, ghost_id, out)
+
+        # T22: 実在 ID の言及は幽霊扱いせぬ (誤検知抑止の負例)
+        repo = _mk_git_repo(T / "t22", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats":
+                                            _COV_ROGUE_BATS + f"# 実射で確認済: {real_id}\n"})
+        reg = T / "t22reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry(real_id, ["tests/rogue_mutation.bats"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T22 実在ID言及=幽霊扱いせぬ", 0, rc, "幽霊なし", out)
 
     print("----")
     if ng == 0:

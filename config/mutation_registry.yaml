@@ -409,6 +409,47 @@ mutations:
     expect: nonzero
     red_needle: "not ok 1 T-RECOV-005"
 
+  - id: MUT-1352-006
+    origin: cmd_1350
+    suspected_by: ashigaru4
+    desc: |
+      gate-2 の harness 内 SKIP 検知 (skip_evidence = TAP「ok N # skip」/ 空計画 1..0 /
+      pytest「N skipped」を UNDETERMINED に畳む) を折る (常に None 返し = skip を見ぬ) と、
+      selftest T19 (scratch で skip する番人 = UNDETERMINED) が赤くなるべき。折っても
+      緑なら【見張っておらぬ番人が「異常なし」と報告する形】が gate-2 の scratch 内で
+      再び沈黙する。
+      由来 = ★四号の申し送り (2026-07-26 09:45)★: 署名 canary の変異が最初【緑】であった —
+      機序 = scratch は entry の paths だけのコピーゆえ .gitignore'd な corpus が付いて来ず
+      番人が skip → skip は緑に見えた。四号は DB の口を開けて撃ち直し赤を実測した。
+      掟 =「SKIP=FAIL は変異試験の harness 内でも成り立つ」(CLAUDE.md Test Rules 1 の拡張)。
+      台帳所有者 (ashigaru1) が自分では疑わなんだ場所 = 他者の疑いを台帳へ写す型。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^    return m.group(0).strip() if m else None$/    return None/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T19"
+
+  - id: MUT-1352-007
+    origin: cmd_1350
+    suspected_by: ashigaru4
+    desc: |
+      --coverage の幽霊 ID 検分 (REGISTRY_ID_RE で tracked test file 中の台帳 ID 完全形
+      言及を拾い、台帳に実在せぬものを名指し) を折る (言及を一切拾わぬ prefix へ退行) と、
+      selftest T21 (幽霊 ID 言及 = FAIL + 名指し) が赤くなるべき。
+      由来 = ★四号の自白 (2026-07-26)★: M9 は台帳に無いのに「実射で確認済」と docstring に
+      書いてあった — M6 で同じ抜けを一度やっており二度目 = 申告と実在の食い違いは人の
+      注意力では二度破れた。機械で拾う (拾えるのは完全形 ID の言及のみ・略記「M9」は
+      拾えぬ = 完全形で書く規律とセット)。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^REGISTRY_ID_RE = re.compile(r"MUT-/REGISTRY_ID_RE = re.compile(r"MUTNEVER-/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T21"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

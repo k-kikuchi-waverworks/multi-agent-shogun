@@ -65,6 +65,61 @@ _OPERATORS = {"|", "||", "&&", ";", "&", "\n", "(", ")", "{", "}", "|&"}
 # (?<!<) で <<< (herestring) を除く。
 _UNQUOTED_HEREDOC_RE = re.compile(r"(?<!<)<<-?[ \t]*(?P<delim>[A-Za-z_][A-Za-z0-9_]*)")
 
+# ★heredoc の【始まり】を、引用符の有無ごと拾う (cmd_1388)★
+#   <<EOF / <<-EOF / <<'EOF' / <<"EOF" / <<\EOF のいずれも delim を取り出す。
+_HEREDOC_START_RE = re.compile(
+    r"(?<!<)<<(?P<dash>-?)[ \t]*"
+    r"(?:'(?P<sq>[^'\n]+)'"
+    r"|\"(?P<dq>[^\"\n]+)\""
+    r"|\\(?P<bs>[A-Za-z_][A-Za-z0-9_]*)"
+    r"|(?P<bare>[A-Za-z_][A-Za-z0-9_]*))"
+)
+
+
+def mask_heredoc_bodies(command: str) -> str:
+    r"""★heredoc の本文を空白へ伏せた写しを返す (cmd_1388)★
+
+    ★何を直すか★ = ★関所は【command の記述】と【command の実行】を見分けておらなんだ★。
+    ★実例は同日に二度★:
+      ・軍師一号 22:27 = ★本文中に書いた ntfy.sh の呼び出し【例】★を実際の呼び出しと読んで止めた
+      ・家老     01:15 = ★本文中で【引用して説明した】裸のヒアドキュメント記法★を実物と読んで止めた
+    ★実害は無かった (両者とも file 渡しへ回避した)★。★然れど危うさは別に在る★ =
+    ★正当な安全経路が塞がれると、書き手が位置引数 (真に危うい口) へ逃げる誘因になる★。
+
+    ★機序★ = analyze() は ★生の command 文字列★ を tokenize / 正規表現に掛けておった ⇒
+    ★heredoc の本文 (= shell が一切手を触れぬ data) が、評価される位置と同列に読まれた★。
+
+    ★処方★ = ★「実行される位置に在るか」で分けよ★ = 本文を伏せた写しの上で検める。
+    ★本文を伏せてよい理由を、引用の有無ごとに分けて申す★:
+      ・★<<'EOF' / <<"EOF" / <<\EOF★ = 本文は shell に触れられぬ ⇒ 検める意味が無い
+      ・★<<EOF (引用符なし)★ = ★本文は現に展開へ晒される★。★但し其の危うさは
+        【本文の中身】でなく【裸の口を開けた事】そのもの★ゆえ、R4 が operator の側で既に咎める
+        ⇒ 本文を二度読む要は無い (咎めは消えておらぬ。負例 H3 が之を縛る)。
+
+    ★射程を名乗る (この伏せ方が【見なくなる】もの)★:
+      ★本 guard は inbox_write.sh / ntfy.sh の【散文引数】だけを見る関所であり、
+        heredoc 本文が別の道具 (例: bash <<'EOF' … EOF) で実行される形は元より見ておらぬ★。
+      ★本変更は其の射程を広げも狭めもせぬ★ = ★元から見ておらぬ物を、見ておらぬままにする★。
+    """
+    out: list[str] = []
+    pending: list[tuple[str, bool]] = []   # [(delim, dash つきか)]
+    for line in command.splitlines(keepends=True):
+        if pending:
+            delim, dash = pending[0]
+            probe = line.rstrip("\n").rstrip("\r")
+            if (probe.lstrip("\t") if dash else probe) == delim:
+                pending.pop(0)          # 終端行は伏せぬ (構造を保つ)
+                out.append(line)
+                continue
+            # ★本文 = 伏せる★。改行だけ残して桁を保ち、位置がずれぬようにする
+            out.append(re.sub(r"[^\n\r]", " ", line))
+            continue
+        for m in _HEREDOC_START_RE.finditer(line):
+            d = m.group("sq") or m.group("dq") or m.group("bs") or m.group("bare")
+            pending.append((d, bool(m.group("dash"))))
+        out.append(line)
+    return "".join(out)
+
 # ★shell を通らぬ本文受け口の綴り★ — inbox_write.sh 側の実装と【必ず一致させよ】。
 #   食い違えば「guard は逃げ道と認めたのに道具は受け取らぬ」= 逃げ場の無い関所になる。
 #   一致は selftest の contract 検査が機械で見張る (推測で足すな)。
@@ -295,7 +350,11 @@ def analyze(command: str) -> dict:
     戻り値: {"verdict": "ALLOW"|"DENY", "findings": [ {...} ]}
     """
     findings: list[dict] = []
-    tokens = tokenize(command)
+    # ★検めるのは【shell が評価する位置】だけである (cmd_1388)★ =
+    #   heredoc 本文は data ゆえ伏せた写しの上で読む。★伏せる理由と射程は
+    #   mask_heredoc_bodies() の docstring に実例つきで記した★。
+    scanned = mask_heredoc_bodies(command)
+    tokens = tokenize(scanned)
 
     # R4: ★引用符なし heredoc★ (cmd_1363 後段で足した口)
     #   本 guard は逃げ道として --content-file / --stdin を勧める。だが stdin へ本文を
@@ -307,7 +366,7 @@ def analyze(command: str) -> dict:
         for tok in tokens
         if not tok.is_operator
     ):
-        for m in _UNQUOTED_HEREDOC_RE.finditer(command):
+        for m in _UNQUOTED_HEREDOC_RE.finditer(scanned):
             delim = m.group("delim")
             findings.append(
                 {
@@ -498,6 +557,48 @@ _CASES: list[tuple[str, str, str]] = [
         'cat f | bash scripts/ntfy.sh "🚨 滞留" "$(cat /tmp/x)" <<<"herestring"',
         "ALLOW",
         "<<< (herestring) は heredoc でない — 誤って拾わぬ",
+    ),
+    # ── ★cmd_1388: 【command の記述】と【command の実行】を見分ける★ ──────
+    #   ★同日に二度 実際に踏まれた形である (偶発でなく形である裏づけ)★:
+    #     軍師一号 22:27 / 家老 01:15 — いずれも実害無し (file 渡しへ回避) だが、
+    #     ★正当な安全経路が塞がれると書き手が位置引数 (真に危うい口) へ逃げる★。
+    (
+        "bash scripts/inbox_write.sh karo --body-stdin task_assigned karo <<'EOF'\n"
+        "★裸のヒアドキュメント (<<EOF) を使うな★と説明しておるだけの本文である\nEOF",
+        "ALLOW",
+        "★H1: 家老 01:15 の実物型 — 本文で【引用して説明した】記法を実物と読まぬ★",
+    ),
+    (
+        "bash scripts/inbox_write.sh karo --body-stdin task_assigned karo <<'EOF'\n"
+        'たとえば bash scripts/ntfy.sh "題" "本文に `code` が在る" と書けば止まる\nEOF',
+        "ALLOW",
+        "★H2: 軍師一号 22:27 の実物型 — 本文中の呼び出し【例】を実際の呼び出しと読まぬ★",
+    ),
+    (
+        "bash scripts/inbox_write.sh karo --body-stdin task_assigned karo <<EOF\n"
+        "本文で <<'EOF' の書き方を説明しておる\nEOF",
+        "DENY",
+        "★H3: 危うい側は今も止まる — 本文を伏せても【裸の口を開けた事】は咎める★",
+    ),
+    (
+        'bash scripts/inbox_write.sh karo "残 `wc -l < f` 行" report ashigaru6',
+        "DENY",
+        "★H4: 本文を伏せても【実引数】の目は塞がらぬ (伏せ方が広すぎぬことの証)★",
+    ),
+    (
+        'bash scripts/inbox_write.sh karo "残 `wc -l < f` 行" report ashigaru6 --body-stdin',
+        "ALLOW",
+        "★H4b: ★★既知の穴★★ — 逃げ道が1つでも在れば其の呼出を一切検めぬ造りゆえ、"
+        "同じ行の位置引数の backtick を見逃す。★shell は現に其れを食う★。"
+        "★HEAD 版でも同じ = cmd_1388 の変更が作った物ではない (実測で確かめた)★。"
+        "★免除でなく【穴として名指した札】である★ = 家老へ具申済・別 cmd の種",
+    ),
+    (
+        "bash scripts/inbox_write.sh karo --body-stdin task_assigned karo <<'A'\n"
+        "説明の本文\nA\nbash scripts/inbox_write.sh gunshi1 --body-stdin report karo <<B\n"
+        "二本目は裸である\nB",
+        "DENY",
+        "★H5: 一本目が引用つきでも、二本目の裸の口を見失わぬ★",
     ),
 ]
 

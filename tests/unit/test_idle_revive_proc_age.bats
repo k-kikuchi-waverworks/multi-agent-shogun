@@ -146,7 +146,11 @@ def fake_age(agent):
 irs.agent_proc_age_sec = fake_age
 argv = ["--queue-root", os.environ["Q"],
         "--pane-state-file", os.environ["TEST_TMPDIR"] + "/pane_state.yaml",
-        "--stall-min", "15", "--no-karo-check"] + sys.argv[1:]
+        # ★本番の値でも撃てる口★ (家老 04:01・cmd_1392)= ★既定は従前どおり 15★。
+        # ★之が無ければ「15 でしか赤くならぬ牙 = 本番では死んでおる牙」を誰も見つけられぬ★
+        # (★本番の cron は --stall-min 45 で走っておる★= T-AGE-014 が其の差を名乗る)。
+        "--stall-min", os.environ.get("STALL_MIN_UNDER_TEST", "15"),
+        "--no-karo-check"] + sys.argv[1:]
 rc = irs.main(argv)
 print(f"MAIN_RC={rc}")
 PY
@@ -312,17 +316,21 @@ PY
 # 併せて ★連続の数珠が切れる★ (切れねば一度 3 回続いた agent が永久に鳴り続ける)。
 # ---------------------------------------------------------------------------
 @test "T-AGE-008: suppression is a DELAY not an exemption — once the age outgrows the claim, the clear fires" {
-    _write_stuck_task ashigaru91 '20 minutes ago'
+    # ★沈黙 95 分★ — ★20 分では【本番の閾 45 分】に届かず slow-gen へ落ちる★ =
+    # ★本牙が本番では一度も此の枝へ入らぬ盤面であった (2026-07-27 04:0x 実測)★。
+    # ⇒ ★閾を実行時に読んで合わせるのではなく、両方の閾の上に在る値を焼き付ける★
+    #   (15 でも 45 でも同じ枝を通る = ★試験が閾と一緒に動かぬ★)。
+    _write_stuck_task ashigaru91 '95 minutes ago'
     _write_pane_states ashigaru91:idle
 
-    # 齢 5 分 < 沈黙 20 分 → 抑止 (連続 1)
+    # 齢 5 分 < 沈黙 95 分 → 抑止 (連続 1)
     FAKE_PROC_AGE=300 run _run_main_py
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "^ACTION=impossible_claim_suppressed AGENT=ashigaru91"
     grep -q "impossible_consecutive: 1" "$Q/state/clear_log.yaml"
 
-    # 齢 40 分 > 沈黙 20 分 → 従来判定へ戻り、現に撃つ
-    FAKE_PROC_AGE=2400 run _run_main_py
+    # 齢 120 分 > 沈黙 95 分 → 従来判定へ戻り、現に撃つ
+    FAKE_PROC_AGE=7200 run _run_main_py
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "^ACTION=revive AGENT=ashigaru91"
     grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
@@ -511,4 +519,39 @@ PY
         return 1
     fi
     echo "OK cron override: 既定 $declared_default → cron $actual (現に上書きしておる)"
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-015 (家老 04:01 の下命への直の答)★★
+# ★★本番の閾 (45) と試験の既定 (15) では【入る枝そのものが違う】ことを固定する★★
+#
+# ★由来★= 04:0x の実測 = 本 suite を 45 で撃ち直したところ ★T-AGE-008 が赤★ になった =
+#   ★沈黙 20 分の盤面は、本番では slow-gen として判定の手前で捨てられておった★ =
+#   ★★牙は生きておるが、其の牙が守る盤面が本番には存在せなんだ★★。
+#   (★守りが死んでおるのではない = 守りの【的】が本番の外に在った★ — 別の形の空虚である)
+#
+# ★本牙が縛るもの★= ★沈黙 30 分 (15 と 45 の間) の盤面★:
+#   閾 15 → 判定へ入る (何らかの ACTION が出る)
+#   閾 45 → ★判定の手前で捨てられる (ACTION は一つも出ぬ)★
+# ⇒ ★之が壊れる時 = 誰かが既定か cron を動かした時★ (T-AGE-013/014 と対を成す)。
+# ★併せて本牙は STALL_MIN_UNDER_TEST の口が現に効いておることの canary でもある★=
+#   ★口が死んでおれば両者は同じ結果になり、本牙は落ちる★。
+# ---------------------------------------------------------------------------
+@test "T-AGE-015: the production threshold (45) and the suite default (15) enter DIFFERENT branches" {
+    _write_stuck_task ashigaru91 '30 minutes ago'
+    _write_pane_states ashigaru91:idle
+
+    # (1) 試験の既定 15 → 沈黙 30 分は閾を越えており、判定へ入る
+    FAKE_PROC_AGE=390 STALL_MIN_UNDER_TEST=15 run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "^ACTION=impossible_claim_suppressed AGENT=ashigaru91"
+
+    # (2) ★本番の値 45★ → 同じ盤面が slow-gen として判定の手前で捨てられる
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/clear_log.yaml"
+    FAKE_PROC_AGE=390 STALL_MIN_UNDER_TEST=45 run _run_main_py
+    [ "$status" -eq 0 ]
+    _refute_output "^ACTION=impossible_claim_suppressed AGENT=ashigaru91"
+    _refute_output "^ACTION=revive AGENT=ashigaru91"
+    # ★判定へ入っておらぬのだから、抑止の総量も 0 と名乗る★ (0 を canary の後に読む)
+    echo "$output" | grep -q "IMPOSSIBLE_CLAIM 抑止 = 0 体"
 }

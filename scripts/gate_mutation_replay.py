@@ -546,15 +546,91 @@ def registry_named_test_bodies(entries, repo: Path):
     return out, None
 
 
+def registry_shard_dir(path: Path) -> Path:
+    """台帳 file から、族 shard 置場の名を導く。
+
+    config/mutation_registry.yaml     → config/mutation_registry.d
+    config/mutation_registry.web.yaml → config/mutation_registry.web.d
+    """
+    return path.with_suffix(".d")
+
+
+def resolve_registry_doc(path: Path):
+    """★cmd_1386 手1★ 台帳の二形 (単一 file / 族 shard 群) を、読む側で吸収する。
+
+    返り = (doc, error, present)
+      doc     = YAML 最上位 mapping 相当 (旧形=そのまま / 新形=shard を束ねた結果)
+      error   = 非 None なら UNDETERMINED (呼び手が己の接頭辞をつけて出す)
+      present = 台帳が【在る】か (旧 file も .d も無ければ False)
+
+    ★迷う形は全て UNDETERMINED へ倒す (fail-closed)★ =
+    「読めぬ」を「0 件」や「緑」へ倒さぬ (EMPTY_REGISTRY_IS_UNDETERMINED の流儀)。
+    """
+    import yaml
+    d = registry_shard_dir(path)
+    has_file, has_dir = path.is_file(), d.is_dir()
+
+    # ★新旧同時存在が最も危うい★ = どちらを正とするかを黙って選べば、
+    #   人が開いた file の中身が実効値でなくなる (cmd_1350 の食い違いと同型の罠)。
+    if has_file and has_dir:
+        return None, (f"台帳が新旧 同時に存在する: {path} と {d} —"
+                      " どちらを正とするかを黙って選ばぬ (移行が中途である疑い)"), True
+    if not has_file and not has_dir:
+        return None, None, False
+    if has_file:
+        try:
+            return yaml.safe_load(path.read_text(encoding="utf-8")), None, True
+        except Exception as e:  # parse 不能は「0件」ではなく「未判定」
+            return None, f"台帳が parse 不能: {e}", True
+
+    # ── 族 shard 形 ── ★1 つの shard が読めぬだけで全件を落とさぬ★ ではなく、
+    #   束ねた結果を 1 つの台帳として扱う以上、読めぬ shard が在れば未判定を返す
+    #   (どの shard かを必ず名指す = 家老が誰へ回すべきかが判る)。
+    shards = sorted(d.glob("*.yaml"))
+    if not shards:
+        return None, (f"台帳の .d が空: {d}"
+                      " (shard が 1 つも無い = 0 件ではなく未判定)"), True
+    merged: dict = {}
+    mutations: list = []
+    saw_mutations = False
+    origin: dict[str, str] = {}
+    for s in shards:
+        try:
+            data = yaml.safe_load(s.read_text(encoding="utf-8"))
+        except Exception as e:
+            return None, f"shard が parse 不能: {s.name}: {e}", True
+        if data is None:
+            return None, f"shard が空: {s.name} (空の shard は 0 件ではなく未判定)", True
+        if not isinstance(data, dict):
+            return None, f"shard が mapping でない: {s.name}", True
+        for k, v in data.items():
+            if k == "mutations":
+                if not isinstance(v, list):
+                    return None, f"shard の mutations が list でない: {s.name}", True
+                saw_mutations = True
+                mutations.extend(v)
+            elif isinstance(v, list):
+                merged.setdefault(k, []).extend(v)
+            else:
+                # ★同じ key を 2 つの shard が別の値で名乗ったら、黙って片方を採らぬ★
+                if k in origin and merged.get(k) != v:
+                    return None, (f"shard 間で {k} が食い違う: {origin[k]} と {s.name}"
+                                  " (黙って片方を採らぬ)"), True
+                merged[k] = v
+                origin[k] = s.name
+    if saw_mutations:
+        # ★id 重複の検分は束ねた後に行う★ (族を跨いだ重複を見逃さぬ) = load_registry 側
+        merged["mutations"] = mutations
+    return merged, None, True
+
+
 def load_registry(path: Path):
     """(entries, error) を返す。error が非 None なら UNDETERMINED。"""
-    import yaml
-    if not path.is_file():
+    data, rerr, present = resolve_registry_doc(path)
+    if rerr:
+        return None, rerr
+    if not present:
         return None, f"台帳が無い: {path}"
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except Exception as e:  # parse 不能は「0件」ではなく「未判定」
-        return None, f"台帳が parse 不能: {e}"
     if not isinstance(data, dict) or not isinstance(data.get("mutations"), list):
         return None, "台帳に mutations: リストが無い"
     entries = data["mutations"]
@@ -830,14 +906,14 @@ def coverage(registry: Path, repo: Path) -> int:
     警告経路へ相乗りする)。免除は coverage_waivers (同じ台帳 file 内・理由必須) のみ =
     免除は可視 (WAIVED 表示)・黙って外す道は無い。
     """
-    import yaml
-    if not registry.is_file():
+    import yaml  # noqa: F401  (免除簿の日付検分は datetime 側・yaml は下流の互換用)
+    # ★cmd_1386 手1★: 単一 file / 族 shard 群 の二形を同じ口で読む
+    data, rerr, present = resolve_registry_doc(registry)
+    if not present:
         print(f"[gate-2 coverage] UNDETERMINED: 台帳が無い: {registry}")
         return 2
-    try:
-        data = yaml.safe_load(registry.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"[gate-2 coverage] UNDETERMINED: 台帳が parse 不能: {e}")
+    if rerr:
+        print(f"[gate-2 coverage] UNDETERMINED: {rerr}")
         return 2
     if not isinstance(data, dict) or not isinstance(data.get("mutations"), list):
         print("[gate-2 coverage] UNDETERMINED: 台帳に mutations: リストが無い")
@@ -1068,11 +1144,16 @@ def tree_census(registry: Path, watched_file: Path | None, projects: Path,
     # ── 免除簿 (期限つき・登録検知の免除と同じ掟) ──
     wmap: dict[str, str] = {}
     w_until: dict[str, datetime.date] = {}
-    if registry.is_file():
-        try:
-            data = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
-        except Exception as e:
-            print(f"[木の点呼] UNDETERMINED: 台帳が parse 不能: {e}")
+    # ★cmd_1386 手1★: 単一 file / 族 shard 群 の二形を同じ口で読む
+    _doc, _rerr, _present = resolve_registry_doc(registry)
+    if _rerr:
+        print(f"[木の点呼] UNDETERMINED: {_rerr}")
+        return 2
+    if _present:
+        data = _doc or {}
+        if not isinstance(data, dict):
+            print("[木の点呼] UNDETERMINED: 台帳の最上位が mapping でない"
+                  " (免除簿を読めぬ = 読めぬを緑へ倒さぬ)")
             return 2
         for w in (data.get("tree_census_waivers") or []):
             if not isinstance(w, dict) or not w.get("path") or not w.get("reason"):
@@ -1311,6 +1392,9 @@ def _write_projects(path: Path, paths: list[str]) -> None:
 
 def selftest() -> int:
     ok = ng = 0
+    # ★検分せなんだ事を名乗る器 (cmd_1382 差し戻し後の実害から)★ — 下の T50 の注を見よ。
+    #   ★空にせず必ず summary へ刷る = 黙った検分を緑の中へ埋めぬ★。
+    na: list[str] = []
 
     def expect(name: str, want_rc: int, got_rc: int, needle: str = "", output: str = ""):
         nonlocal ok, ng
@@ -1836,19 +1920,35 @@ def selftest() -> int:
         # T50: ★gate の実出力の語が docs に在ること★ (cmd_1382 差し戻し・軍師二号)
         #   ★書いた場所と読まれる場所を揃える★ = 赤を見た者が docs を grep して辿り着けるか。
         #   ★語が食い違えば此処が赤くなる★ ゆえ、次に出力を整理する者が黙って道を切れぬ。
+        #   ★此処に境が要る (2026-07-26 21:5x 実測の自傷)★:
+        #   本 T50 は【repo 全体の不変条件】であって、変異が動かす類の物ではない。
+        #   然れど台帳の牙は `paths:` に挙げた file だけを写した scratch 木で baseline を
+        #   撃つゆえ (copy_paths)、★docs 木がそこに存在せぬ★。
+        #   初版は其れを「語が5つ欠けておる」と読んで赤くし、★--selftest を baseline に
+        #   持つ牙 10 件が丸ごと UNDETERMINED へ落ちた★ (実測: MUT-1352-003/005/006/007・
+        #   MUT-1370-001/002・MUT-1374-001/002・MUT-1382-001/002)。
+        #   = ★己の docs 検分が、他人の牙 10 本を黙って計測不能にしておった★。
+        #   ⇒ ★境 = docs 木その物が無いか (scratch 木) / 在って file だけ無いか (真の退行)★。
+        #     前者は検分の主題が此の木に無いゆえ判ぜず、★名乗る★ (summary へ必ず刷る)。
+        #     後者は docs を消した/移した退行ゆえ ★従来どおり赤★ = 道は切れておらぬ。
         doc = REPO_ROOT / "docs" / "content" / "ops" / "cmd_1352_silent_pitfall_gates.md"
-        doc_txt = doc.read_text(encoding="utf-8") if doc.exists() else ""
-        missing = [w for w in ("同一の綴り置換", "過大申告", "撃たなんだ候補",
-                               "着弾を測れなんだ", "行の塊")
-                   if w not in doc_txt]
-        expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
-               0, len(missing))
+        if not (REPO_ROOT / "docs").is_dir():
+            na.append("T50 (docs 木を持たぬ木ゆえ検分せず — repo では検分される)")
+        else:
+            doc_txt = doc.read_text(encoding="utf-8") if doc.exists() else ""
+            missing = [w for w in ("同一の綴り置換", "過大申告", "撃たなんだ候補",
+                                   "着弾を測れなんだ", "行の塊")
+                       if w not in doc_txt]
+            expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
+                   0, len(missing))
 
     print("----")
+    # ★検分せなんだ物は、緑の行にも赤の行にも必ず名を出す★ = 黙って消える道を作らぬ。
+    na_note = f" / ★検分せず {len(na)} 件★: {'; '.join(na)}" if na else ""
     if ng == 0:
-        print(f"[gate-2 selftest] {ok}/{ok} ALL PASS")
+        print(f"[gate-2 selftest] {ok}/{ok} ALL PASS{na_note}")
         return 0
-    print(f"[gate-2 selftest] FAIL: ok={ok} ng={ng}")
+    print(f"[gate-2 selftest] FAIL: ok={ok} ng={ng}{na_note}")
     return 1
 
 

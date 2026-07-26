@@ -157,6 +157,14 @@ scripts/seo_qc.sh
 # 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
 !scripts/gate_artifact_capture.sh
 !scripts/gate_mutation_replay.py
+# cmd_1386 (2026-07-26): 台帳の id を数える物差し (手2 の 178/178 突合で使う)。
+# ★またしても .gitignore:7 の * に黙って弾かれておった★ = 本日 同型の 4 度目ゆえ明示で通す。
+#   ★手2 で台帳を .d へ割る時は【shard も同じ穴に落ちる】= 実測済 (2026-07-26T22:37)★:
+#   `git add --dry-run config/mutation_registry.d/*.yaml` が ignored を返し、
+#   且つ 手2 は旧 file を消すゆえ ★HEAD から台帳が丸ごと消え、作業ツリーだけ緑のまま★になる。
+#   ⇒ 割る commit と同じ commit で次の 2 行 (web 台帳を割るなら 4 行) を足すこと:
+#     !config/mutation_registry.d/  /  !config/mutation_registry.d/*.yaml
+!scripts/ledger_id_census.py
 # cmd_1363 (2026-07-26): 「道具へ渡す前に shell が食う」関所 (PreToolUse hook)。
 # ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
 #   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。

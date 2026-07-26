@@ -420,3 +420,95 @@ PY
     echo "$output" | grep -q "OUTCOME=revive_fired AGENT=ashigaru91"
     grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
 }
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-013 (家老 03:54 の規・第三の形)★★
+#
+# ★本 suite は契約の値を【引数で上書きして】撃っておる★ (_run_main_py の --stall-min 15) =
+#   ★焼き付けても居らず、実行時に読んでも居らぬ = 契約の値が試験の目の外に在る★
+#   = ★試験が production を一度も見ておらぬ★ (拙者が stall_watchdog で実測した第三の形)。
+# ⇒ ★契約の値を此処に【宣言】し、production と突合する★。
+#   ★意図して動かすなら下の DECLARED も直せ★= ★其の一行が【意図の記録】になる★。
+# ★割れたら、どちらへも寄らず【割れを名乗る】★ (宣言と実装の両方を印字する)。
+# ---------------------------------------------------------------------------
+@test "T-AGE-013: idle_revive's contract values are declared here and must match production" {
+    run "$VENV_PY" - <<'PY'
+import importlib.util, os
+spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
+irs = importlib.util.module_from_spec(spec); spec.loader.exec_module(irs)
+
+# ★契約 (焼き付ける = 動けば赤くなるのが正しい)★
+DECLARED = {
+    # 「出力が N 分 動かねば固着とみなす」= 番人の最も重い約束。
+    # ★但し cron は之を 45 で上書きしておる★ (T-AGE-014 が其の差を名乗る)。
+    "DEFAULT_STALL_MIN": 15,
+    # cmd_1392: 「不可能な主張が N 回 続いたら起き直り loop と見て警報」=
+    # ★閾 3 の根拠 = cron 180秒 × 3 = 9分 < stall_min 15分★ ゆえ、
+    # ★stall_min を動かす日は此の 3 も一緒に検め直さねばならぬ★ (根拠が崩れる)。
+    "DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD": 3,
+}
+bad = []
+for name, want in DECLARED.items():
+    got = getattr(irs, name, None)
+    if got != want:
+        bad.append(f"{name}: 宣言 {want} ≠ 実装 {got}")
+if bad:
+    raise SystemExit(
+        "★契約と実装が割れておる★ (どちらへも寄らず、割れを名乗る):\n  "
+        + "\n  ".join(bad)
+        + "\n  ⇒ 意図して動かしたのなら、本試験の DECLARED も直せ"
+          " (其の一行が【意図の記録】になる)"
+        + "\n  ⇒ ★DEFAULT_STALL_MIN を動かすなら、閾 3 の根拠 (cron 180秒×3 < stall_min)"
+          " も併せて検め直せ★")
+print("OK contract values match:", DECLARED)
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OK contract values match"
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-014 (家老 03:54 の下命)★★
+# ★★cron の上書き (45) と既定 (15) の差そのものを名乗らせる★★
+#
+# ★之が無ければ、次の者は「既定 15 が効いておる」と読む★ =
+#   ★番人の本体が、己の契約の値を一度も検めておらぬことになる★。
+# ★本試験は【差が在ること】を契約として持ち、【実物の cron】と突合する★。
+# ★読めぬ時は緑にせぬ★ = 同 repo の先例 (T-WIR-003「crontab 自体が見えぬ時は
+#   UNDETERMINED 側へ倒す」) と同じ流儀 = ★検められぬ物を「検めた」と読ませぬ★。
+# ---------------------------------------------------------------------------
+@test "T-AGE-014: the cron override (45) is declared, differs from the default (15), and matches the real crontab" {
+    local declared_default=15 declared_cron=45
+    # (1) ★上書きしておる、という事実そのものを契約にする★
+    if [ "$declared_default" -eq "$declared_cron" ]; then
+        echo "★宣言が上書きの事実を失うておる (既定と cron が同値になっておる)★" >&2
+        return 1
+    fi
+    # (2) ★実物の cron と突合する★
+    run crontab -l
+    if [ "$status" -ne 0 ]; then
+        echo "★crontab を読めなんだ = 上書きの事実を検められぬ★" >&2
+        echo "★之を緑にすれば「既定が効いておる」と次の者が読む★ (先例 = T-WIR-003)" >&2
+        return 1
+    fi
+    local line actual
+    line="$(echo "$output" | grep 'idle_revive_scan' || true)"
+    if [ -z "$line" ]; then
+        echo "★cron に idle_revive_scan の行が無い = 番人が誰にも呼ばれておらぬ★" >&2
+        echo "$output" >&2
+        return 1
+    fi
+    actual="$(echo "$line" | grep -oE '\-\-stall-min[= ]+[0-9]+' | grep -oE '[0-9]+' | head -1)"
+    if [ -z "$actual" ]; then
+        echo "★cron の行に --stall-min が無い = 実際には【既定】で走っておる★" >&2
+        echo "  cron 行: $line" >&2
+        echo "  ⇒ 宣言 ($declared_cron) と実物が割れておる。どちらかを直せ" >&2
+        return 1
+    fi
+    if [ "$actual" != "$declared_cron" ]; then
+        echo "★宣言と実物が割れておる★: 宣言 $declared_cron ≠ 実物 $actual" >&2
+        echo "  cron 行: $line" >&2
+        echo "  ⇒ どちらへも寄らず割れを名乗る。意図して動かしたなら本試験の宣言も直せ" >&2
+        return 1
+    fi
+    echo "OK cron override: 既定 $declared_default → cron $actual (現に上書きしておる)"
+}

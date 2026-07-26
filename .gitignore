@@ -175,6 +175,15 @@ scripts/seo_qc.sh
 # ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
 #   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。
 !scripts/shell_expansion_guard.py
+# cmd_1395 (2026-07-27): report YAML の自己検め (PostToolUse hook + 手検めCLI)。
+# ★本日 同型の 6 度目★ = .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
+#   ★併せて cmd_1395 で判った第二の顔★ = 此の shell の `grep` は ugrep --ignore-files 包み
+#   (bash function) ゆえ ★.gitignore を尊ぶ★ ⇒ 白名簿に無い新造 file は
+#   ★`grep -rn ... .` の再帰から黙って消える★ (実測: 同じ pattern が `./scripts` 指定では 14 件、
+#   `.` 指定では 13 件)。⇒ ★anchor の一意性 (規律8) や「全数当たり」を再帰 grep で数える者は、
+#   【登録しようとしておる当の新造 file】を数え落とす★ = 0 件を「安心」と読む道が此処にも在る。
+#   ⇒ 数える時は explicit path か `git ls-files` を使い、★未追跡の物は別勘定で数えよ★。
+!scripts/report_validate.py
 # cmd_1339/1354 (2026-07-25夜〜07-26朝): 恋の本番TTS(port 9100)を構造的に守る道具。
 # 保護portを実測判定して拒否し、意図的停止は3条件 (意思明示 + 20字以上の理由 + port名指し承認)
 # でのみ通す。★家老裁定 2026-07-26 10:43 = 追跡下へ入れよ★ = fresh clone に渡らねば
@@ -192,6 +201,12 @@ scripts/seo_qc.sh
 # ★之を whitelist へ書き忘れれば、通知路の番人自身が clone へ配られず、
 #  fresh clone の毎朝は「通知路=見ておらぬ」に静かに戻る★ = cmd_1367 が名指した当の族ゆえ明示で通す。
 !scripts/gate_ntfy_alive.py
+# cmd_1381 段5b (2026-07-27): ★我らが現に撃った矢★ (logs/ntfy_send.log) を読む第二の口。
+# ★段3 の兄弟は engine 側の自己試験を読む★ = engine が緑でも scripts/ntfy.sh が死んでおれば
+#  殿へは届かぬ ⇒ ★見ておる物が別ゆえ、両方 clone へ渡らねば片目になる★。
+# ★本日 同型の 7 度目★ (cmd_1395 の申告が 6 度目) = .gitignore:7 の * に黙って弾かれておった
+#  (git check-ignore -v で実測: `.gitignore:7:*  scripts/gate_ntfy_sendlog.py`)。
+!scripts/gate_ntfy_sendlog.py
 
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)

@@ -852,6 +852,74 @@ def evaluate_entry(e, repo: Path, work: Path):
     return PASS, f"変異後 exit {rc} (赤) = 契約どおり (red_needle 未設定=名指し検分なし)"
 
 
+def _clock() -> str:
+    """★走行の刻 (境を後から機械で割る鍵)★ — cmd_1408・六号"""
+    import datetime
+    return datetime.datetime.now().strftime("%H:%M:%S")
+
+
+def paths_digest(repo: Path, entries) -> tuple[str, dict]:
+    """★台帳 paths の【中身】を畳んだ digest を返す (cmd_1408・六号)★
+
+    ★何を塞ぐか★= ★門は走行の始めに一度だけ盤面を名乗り、其の名乗りを走行の終わりまで
+    有効であるかの如く残しておった★。★93 件の走行は 40 分を要する★ゆえ、
+    ★其の間に他者の commit が paths の中身を入れ替えれば、一行目の名乗りは黙って偽になる★。
+    ★2026-07-27 の実例★= 六号の走行 (07:50 開始) の最中に三号の 4076bdf (08:10:59) が着き、
+      ★先に測った entry は旧盤面・後は新盤面★を見ておった。★出力からは境が割れなんだ★。
+    ⇒ ★之は「一度 真であった名乗りが、いつまで真かを名乗っておらぬ」形★である。
+
+    ★mtime でなく中身の digest を採る理由★= ★mtime は touch でも動き、内容が同じでも食い違う★=
+      ★偽の警報を出す門は外される★ゆえ、★中身が現に変わった時だけ鳴る★形にした。
+    """
+    import hashlib
+    rels = sorted({str(x) for e in entries if isinstance(e, dict)
+                   for x in (e.get("paths") or [])})
+    per: dict[str, str] = {}
+    h = hashlib.sha256()
+    for rel in rels:
+        t = repo / rel
+        try:
+            if t.is_dir():
+                # ★dir も copy_paths が写す対象ゆえ数える★ (写す物と数える物を割らぬ)
+                hh = hashlib.sha256()
+                for f in sorted(t.rglob("*")):
+                    if f.is_file() and "__pycache__" not in f.parts:
+                        hh.update(str(f.relative_to(t)).encode())
+                        hh.update(f.read_bytes())
+                d = hh.hexdigest()
+            elif t.is_file():
+                d = hashlib.sha256(t.read_bytes()).hexdigest()
+            else:
+                d = "<実体なし>"
+        except OSError as e:
+            # ★読めなんだ事を黙って飛ばさぬ★= 読めぬ事自体を digest の一部にする
+            d = f"<読めぬ:{type(e).__name__}>"
+        per[rel] = d
+        h.update(rel.encode("utf-8"))
+        h.update(d.encode("utf-8"))
+    return h.hexdigest(), per
+
+
+def window_declaration(before: dict, after: dict, started: str, ended: str) -> str:
+    """★走行が【瞬間】を見たのか【窓】を見たのかを、門が己で名乗る (cmd_1408・六号)★
+
+    ★exit code は動かさぬ★= ★盤面が動く度に門が赤くなれば【常に鳴る門】になり、必ず外される★
+      (本夜ずっと退けてきた形)。★退くのは【一行目の名乗り】だけで足る★。
+    """
+    moved = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    if not moved:
+        return ("  [窓] 走行の始め ({s}) と終わり ({e}) で台帳 paths の中身は ★動いておらぬ★ = "
+                "★此の走行は【瞬間】を見た★ = 一行目の盤面の名乗りは走行の全体について真である"
+                ).format(s=started, e=ended)
+    names = ", ".join(moved[:6]) + (" ほか" if len(moved) > 6 else "")
+    return ("  [窓] ★★走行中に盤面が動いた ({n} file)★★ ({s} → {e}) = {names}\n"
+            "       ⇒ ★★一行目の盤面の名乗りは【走行の始まり】についてのみ真である★★ = "
+            "★此の走行は【瞬間】でなく【窓】を見た★\n"
+            "       ⇒ ★各 entry を、其れを測った時の盤面へ当てた★ = "
+            "★境は各行 末尾の [刻] で割れる★ (動いた commit の刻と突き合わせよ)"
+            ).format(n=len(moved), s=started, e=ended, names=names)
+
+
 def board_declaration(repo: Path, entries) -> str:
     """★本 gate が読んだ盤面を名乗る (事例15・軍師一号の名指し)★
 
@@ -901,6 +969,9 @@ def run_all(registry: Path, repo: Path) -> int:
         print("  処方: 台帳 config/mutation_registry.yaml を検めよ。空にする変更をしたなら、その変更こそ疑え。")
         return 2
     print(board_declaration(repo, entries))
+    # ★cmd_1408 (丙)★= 走行の入口で盤面を焼く (出口で採り直し、動いておれば門が己で名乗る)
+    _started = _clock()
+    _digest0, _per0 = paths_digest(repo, entries)
     n_pass = n_fail = n_undet = 0
     for e in entries:
         eid = e.get("id", "?") if isinstance(e, dict) else "?"
@@ -909,7 +980,11 @@ def run_all(registry: Path, repo: Path) -> int:
         mark = {PASS: "ok  ", FAIL: "★NG★", UNDET: "未定 "}[verdict]
         who = e.get("suspected_by") if isinstance(e, dict) else None
         tag = f" [疑い:{who}]" if who else ""
-        print(f"  {mark} {verdict:12s} {eid}:{tag} {why}")
+        # ★刻は【行末】へ置く★= ★行頭へ置けば、此の出力を読む二人が黙って盲になる★:
+        #   gate_verdict_drift.py VERDICT_RE = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…` /
+        #   gate_nightly.sh:300 の `grep -vE '^\s*ok\s'` (PASS 行を除く口)
+        #   ⇒ ★形を変える時は【読む者】を先に数える★ (2026-07-27 六号が実測して確かめた)
+        print(f"  {mark} {verdict:12s} {eid}:{tag} {why} [刻 {_clock()}]")
         if verdict == PASS:
             n_pass += 1
         elif verdict == FAIL:
@@ -926,6 +1001,9 @@ def run_all(registry: Path, repo: Path) -> int:
             by_who[k] = by_who.get(k, 0) + 1
     if any(k != "(未記名)" for k in by_who):
         print("  [疑いの出所] " + " / ".join(f"{k}={v}" for k, v in sorted(by_who.items())))
+    # ★cmd_1408 (丙)★= 出口で盤面を採り直す (動いておれば名乗る・exit code は動かさぬ)
+    _digest1, _per1 = paths_digest(repo, entries)
+    print(window_declaration(_per0, _per1, _started, _clock()))
     if n_fail:
         print(f"[gate-2] FAIL: {total} 件中 ★無効化された変異 {n_fail} 件★ (PASS {n_pass} / UNDETERMINED {n_undet})")
         print("  処方: 名指しされた変異の test を仕様変更へ追随させ、再び赤くなることを確認して台帳を維持せよ。")

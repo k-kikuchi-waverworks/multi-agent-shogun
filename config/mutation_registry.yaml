@@ -2475,6 +2475,114 @@ mutations:
     red_needle: "not ok 1 T-LOG-011"
     timeout: 300
 
+  # ═══════════════════════════════════════════════════════════════════════════
+  # ★cmd_1408 (丙) — ★門に【己の走行の刻】と【盤面が動いた事】を名乗らせた★ (六号・08:45)
+  #   出所 = ★六号自身の走行 (07:50〜08:31) が三号の 4076bdf (08:10:59) を跨いだ★=
+  #   ★出力から境が一片も割れなんだ★ ⇒ ★事例15 (六号が 01:39 に建てた口) の射程の穴★。
+  #   ★paths に兄弟 2 本を併記★= test が gate_verdict_drift.py と当の bats を読むゆえ
+  #   (★本朝の未判定 10 件が嵌った当の穴を、登録の前に己で測って避けた★= baseline 5/5 緑を実測)。
+  # ═══════════════════════════════════════════════════════════════════════════
+  - id: MUT-1408-W1
+    desc: |
+      ★entry 行末の刻を落とす★= ★境を後から機械で割る鍵が消える★。
+      ★之が無ければ、走行が二つの盤面を跨いだ時に「どの entry が どちらを見たか」が永久に判らぬ★
+      = ★本朝 六号が手で観測 (wc を二度撃つ) して漸く区間を絞った其の手間が、毎度 要る形へ戻る★。
+      ★実測 (08:44 六号)★= baseline 5/5 緑 → 変異後 rc=1・★not ok 1 T-WIN-001★。
+    suspected_by: ashigaru6
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_mutation_replay.py"
+      s = open(p, encoding="utf-8").read()
+      a = ' [刻 {_clock()}]'
+      assert a in s, "MUT-1408-W1: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(a, "", 1))
+      PY
+    test: |
+      bats tests/unit/test_gate_run_window.bats --filter T-WIN-001
+    expect: nonzero
+    red_needle: "not ok 1 T-WIN-001"
+    timeout: 600
+
+  - id: MUT-1408-W2
+    desc: |
+      ★盤面が動いても「動いた」と名乗らぬようにする★= ★門が窓を黙って呑む★。
+      ★★之が最も静かな壊れ方である★★= ★出力は今までどおり綺麗で、一行目の名乗り
+      (作業ツリー = HEAD) だけが黙って偽になる★= ★読む者は【瞬間を見た】と読み続ける★。
+      ★実測 (08:44 六号)★= baseline 5/5 緑 → 変異後 rc=1・★not ok 2 T-WIN-002★。
+    suspected_by: ashigaru6
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_mutation_replay.py"
+      s = open(p, encoding="utf-8").read()
+      a = "    moved = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))\n"
+      assert a in s, "MUT-1408-W2: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(a, a + "    moved = []  # MUT-1408-W2\n", 1))
+      PY
+    test: |
+      bats tests/unit/test_gate_run_window.bats --filter T-WIN-002
+    expect: nonzero
+    red_needle: "not ok 1 T-WIN-002"
+    timeout: 600
+
+  - id: MUT-1408-W3
+    desc: |
+      ★★負の主張の側の牙★★= ★盤面が動いておらぬ時にも「動いた」と名乗らせる★。
+      ★之は「守りが弱まる」向きでなく「門が【常に鳴る】」向きの壊れ方である★=
+      ★★常に鳴る門は読まれなくなり、必ず外される★★ (cmd_1388 の族・家老 08:39 が最も重く見た点)。
+      ⇒ ★「名乗る門」を建てる時は、【名乗らぬ事】も同じ強さで縛らねばならぬ★。
+      ★実測 (08:44 六号)★= baseline 5/5 緑 → 変異後 rc=1・★not ok 3 T-WIN-003★。
+    suspected_by: ashigaru6
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_mutation_replay.py"
+      s = open(p, encoding="utf-8").read()
+      a = "    moved = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))\n"
+      assert a in s, "MUT-1408-W3: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(a, a + "    moved = moved or ['?']  # MUT-1408-W3\n", 1))
+      PY
+    test: |
+      bats tests/unit/test_gate_run_window.bats --filter T-WIN-003
+    expect: nonzero
+    red_needle: "not ok 1 T-WIN-003"
+    timeout: 600
+
+  - id: MUT-1408-W4
+    desc: |
+      ★★出力の【形】の契約を守る牙 — 本群で最も値打ちが在る★★。
+      ★刻を行末から【行頭】へ移す★= ★人の目には何も壊れておらぬ★。
+      ★而して此の出力には読み手が二人 居る★:
+        (1) scripts/gate_verdict_drift.py VERDICT_RE = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…`
+            ⇒ ★退行の見張りが【全ての牙を初見】と読み、退行を一件も名指せなくなる★
+        (2) scripts/gate_nightly.sh:300 の `grep -vE '^\s*ok\s'` (PASS 行を除く口)
+            ⇒ ★毎朝の家老への警報本文へ、全 PASS 行が漏れ出す★
+      ★★どちらも「黙って盲になる」= 門は緑のまま★★ゆえ、機械で縛る他に道が無い。
+      ★実測 (08:44 六号)★= 変異後 ★T-WIN-001 / T-WIN-004 / T-WIN-005 の三つが同時に落ちた★
+      = ★契約の検が現に二人の読み手を守っておる証★。
+    suspected_by: ashigaru6
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
+    anchor_sites: 1
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_mutation_replay.py"
+      s = open(p, encoding="utf-8").read()
+      a = 'print(f"  {mark} {verdict:12s} {eid}:{tag} {why} [刻 {_clock()}]")'
+      b = 'print(f"  [刻 {_clock()}] {mark} {verdict:12s} {eid}:{tag} {why}")'
+      assert a in s, "MUT-1408-W4: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(a, b, 1))
+      PY
+    test: |
+      bats tests/unit/test_gate_run_window.bats --filter T-WIN-004
+    expect: nonzero
+    red_needle: "not ok 1 T-WIN-004"
+    timeout: 600
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

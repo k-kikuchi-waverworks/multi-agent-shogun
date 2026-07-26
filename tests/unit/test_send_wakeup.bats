@@ -326,24 +326,85 @@ MOCK
     echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"
 }
 
-# --- T-ESC-002: unread < 2min → standard nudge ---
+# --- T-ESC-002 (cmd_1404 書き替え + 帯): Phase 1 の境を【実物の梯子】で挟む ---
+#
+# ★何故 書き替えたか — 実測が根拠である (2026-07-27 04:01:15 / MUT-1404-111)★
+#   ★旧 T-ESC-002 は梯子の条件を試験の中へ書き写しておった★ =
+#   `if [ "$age" -lt "$ESCALATE_PHASE1" ]` を試験が己で書き、send_wakeup だけを呼ぶ形ゆえ、
+#   ★production の Phase 1 の門を `if false` へ潰しても【緑のまま】であった★
+#   = ★空虚に緑★ (負の主張「Escape が出ぬ」は、★Escape を送りようが無い口★ を撃っておった)。
+#   ⇒ 書き替え = ★process_unread (実物の梯子) を呼ぶ★ + ★閾の両側で挟む★。
+#   ★守っておるのは T-PU-P1-001 / T-PU-P2-001 と同じ枝であるが、彼らは【点】(age 0 と 150)★ =
+#   ★閾 120 の直下 [60,120) に一点も無い★ ⇒ 本試験が其の帯を埋める。
+#
+# ★契約の値 120 は【焼き付ける側】である★ (家老 03:46 の表) = 誰かが動かせば必ず赤くなる。
+# ★実行時に production から読んで挟む形は誤りである★ = 試験も一緒に動き、動かす変異が見えぬ
+#   (拙者が MUT-1404-014/015 で現に踏んだ)。★ゆえに declared を書き、実装と突き合わせ、
+#   割れたら【どちらへも寄らず割れを名乗る】★。★意図して動かす日は declared も直せ★。
+@test "T-ESC-002 (cmd_1404 帯): escalation Phase 1 の境 — 閾直下は素の nudge・閾ちょうどで escalation へ移る" {
+    # ★契約★ = Phase 1 (素の nudge) は 2 分。★動かすなら此の一行も直せ★ — 直さねば下で赤くなる。
+    local declared=120
+    local impl
+    impl=$(grep -oP 'ESCALATE_PHASE1=\$\{ESCALATE_PHASE1:-\K[0-9]+' "$WATCHER_SCRIPT" | head -n1)
+    if [ -z "$impl" ]; then
+        echo "★前提を立てられぬ★: $WATCHER_SCRIPT から ESCALATE_PHASE1 の既定を読めなんだ" >&2
+        echo "  (綴りが変わったか、既定が消えた。★黙って skip すれば帯は再び空く★)" >&2
+        return 1
+    fi
+    if [ "$impl" != "$declared" ]; then
+        echo "★契約と実装が割れた★: 契約 ${declared}s / 実装 ${impl}s" >&2
+        echo "  ⇒ 意図して動かしたのなら ★此の試験の declared も直せ★ (= 意図を記録せよ)。" >&2
+        echo "  ⇒ 意図せぬのなら ★之が【閾が黙って動いた】の当の徴である★。" >&2
+        return 1
+    fi
 
-@test "T-ESC-002: escalation Phase 1 — unread under 2min uses standard nudge" {
+    cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
+messages:
+  - id: msg_norm
+    from: karo
+    timestamp: "2026-07-02T12:00:00+09:00"
+    type: report_received
+    content: hello
+    read: false
+YAML
+    touch "$TEST_TMPDIR/shogun_idle_ashigaru9"   # idle (梯子へ入る前提)
+
+    # ── 直下 = 閾-1 秒 → ★まだ Phase 1★ (escalating と名乗らぬ) ──
+    # ★時計を止めて撃つ★ = 1 秒跨ぎの気紛れを作らぬ (T-BUSY-017 と同じ作法)
     run bash -c '
         source "'"$TEST_HARNESS"'"
-        now=$(date +%s)
-        FIRST_UNREAD_SEEN=$((now - 30))  # 30 seconds ago
-        age=$((now - FIRST_UNREAD_SEEN))
-        if [ "$age" -lt "$ESCALATE_PHASE1" ]; then
-            send_wakeup 2
-            echo "PHASE1_NUDGE"
-        fi
+        date() { echo 1000000; }
+        AGENT_ID="ashigaru9"
+        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
+        LOCKFILE="${INBOX}.lock"
+        FIRST_UNREAD_SEEN=$(( 1000000 - '"$((declared - 1))"' ))
+        LAST_CLEAR_TS=0
+        process_unread event
     '
     [ "$status" -eq 0 ]
-    echo "$output" | grep -q "PHASE1_NUDGE"
-    grep -q "send-keys.*inbox2" "$MOCK_LOG"
-    # No Escape-based nudge
-    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    grep -q "send-keys.*inbox1" "$MOCK_LOG"
+    if echo "$output" | grep -q "escalating"; then
+        echo "★閾が【下へ】動いた★: 経過 $((declared - 1))s は閾 ${declared}s の直下ゆえ Phase 1 である筈" >&2
+        return 1
+    fi
+
+    # ── 直上 = 閾ちょうど → ★Phase 2 へ移る★ (`-lt` ゆえ境界は escalation 側) ──
+    > "$MOCK_LOG"
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        date() { echo 1000000; }
+        AGENT_ID="ashigaru9"
+        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
+        LOCKFILE="${INBOX}.lock"
+        FIRST_UNREAD_SEEN=$(( 1000000 - '"$declared"' ))
+        LAST_CLEAR_TS=0
+        process_unread event
+    '
+    [ "$status" -eq 0 ]
+    if ! echo "$output" | grep -q "escalating"; then
+        echo "★閾が【上へ】動いた★: 経過 ${declared}s は閾 ${declared}s ゆえ escalation である筈 (-lt は境界を含まぬ)" >&2
+        return 1
+    fi
 }
 
 # --- T-ESC-003: unread 2-4min → Escape+nudge ---
@@ -392,26 +453,79 @@ MOCK
 
 # --- T-ESC-005: /clear cooldown → falls back to Escape+nudge ---
 
-@test "T-ESC-005: escalation /clear cooldown — falls back to Escape+nudge (copilot)" {
-    # Escape escalation is suppressed for claude/codex. Test with copilot.
-    export MOCK_PANE_CLI="copilot"
+# ★書き替えの理由 (2026-07-27 03:58:16 / MUT-1404-110)★
+#   ★旧 T-ESC-005 も梯子を書き写しておった★ = production の cooldown 門を `if true` へ
+#   常に開いても ★緑のまま★ = ★空虚に緑★ (負の主張「/clear が出ぬ」は、
+#   ★/clear を送りようが無い口 (send_wakeup_with_escape のみ) ★ を撃っておった)。
+# ★併せて帯の穴も実測で出た (MUT-1404-112)★ = ESCALATE_COOLDOWN を 300 → ★150 (半分)★ へ
+#   動かしても ★process_unread suite 17 本すべて緑★ =
+#   既存の点は「100 秒前」(比 0.33) と「LAST_CLEAR_TS=0」(常に期限切れ) の二つのみゆえ
+#   ★帯 [150, 300) に一点も無い★ = ★cooldown が黙って半分になっても誰も気付かなんだ★。
+# ⇒ 書き替え = ★process_unread (実物の梯子) を呼ぶ★ + ★閾の両側で挟む★ +
+#   ★契約の値 300 を焼き付け、実装と突き合わせ、割れたら割れを名乗る★。
+@test "T-ESC-005 (cmd_1404 帯): /clear cooldown の境 — 閾ちょうどは抑止・閾の直上で /clear が出る" {
+    # ★契約★ = /clear は 5 分に一度まで。★動かすなら此の一行も直せ★。
+    local declared=300
+    local impl
+    impl=$(grep -oP 'ESCALATE_COOLDOWN=\$\{ESCALATE_COOLDOWN:-\K[0-9]+' "$WATCHER_SCRIPT" | head -n1)
+    if [ -z "$impl" ]; then
+        echo "★前提を立てられぬ★: $WATCHER_SCRIPT から ESCALATE_COOLDOWN の既定を読めなんだ" >&2
+        echo "  (綴りが変わったか、既定が消えた。★黙って skip すれば帯は再び空く★)" >&2
+        return 1
+    fi
+    if [ "$impl" != "$declared" ]; then
+        echo "★契約と実装が割れた★: 契約 ${declared}s / 実装 ${impl}s" >&2
+        echo "  ⇒ 意図して動かしたのなら ★此の試験の declared も直せ★ (= 意図を記録せよ)。" >&2
+        echo "  ⇒ 意図せぬのなら ★之が【閾が黙って動いた】の当の徴である★。" >&2
+        return 1
+    fi
+
+    cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
+messages:
+  - id: msg_norm
+    from: karo
+    timestamp: "2026-07-02T12:00:00+09:00"
+    type: report_received
+    content: hello
+    read: false
+YAML
+    touch "$TEST_TMPDIR/shogun_idle_ashigaru9"
+
+    # ── 閾ちょうど = 前回 /clear から declared 秒 → ★まだ抑止★ (`-lt` は境界を含まぬ) ──
     run bash -c '
         source "'"$TEST_HARNESS"'"
-        now=$(date +%s)
-        FIRST_UNREAD_SEEN=$((now - 300))  # 5 minutes ago
-        LAST_CLEAR_TS=$((now - 60))  # /clear sent 1 min ago (within 5min cooldown)
-        age=$((now - FIRST_UNREAD_SEEN))
-        if [ "$age" -ge "$ESCALATE_PHASE2" ] && [ "$LAST_CLEAR_TS" -ge "$((now - ESCALATE_COOLDOWN))" ]; then
-            send_wakeup_with_escape 4
-            echo "COOLDOWN_FALLBACK"
-        fi
+        date() { echo 1000000; }
+        AGENT_ID="ashigaru9"
+        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
+        LOCKFILE="${INBOX}.lock"
+        FIRST_UNREAD_SEEN=$(( 1000000 - 400 ))          # age 400 >= ESCALATE_PHASE2 = Phase 3
+        LAST_CLEAR_TS=$(( 1000000 - '"$declared"' ))
+        process_unread event
     '
     [ "$status" -eq 0 ]
-    echo "$output" | grep -q "COOLDOWN_FALLBACK"
-    grep -q "send-keys.*C-c" "$MOCK_LOG"
-    grep -q "send-keys.*Escape" "$MOCK_LOG"
-    grep -q "send-keys.*inbox4" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then
+        echo "★閾が【下へ】動いた★: 前回から ${declared}s は境界ゆえ /clear は抑止される筈 (-lt)" >&2
+        return 1
+    fi
+    echo "$output" | grep -q "/clear cooldown, using Escape+nudge"
+
+    # ── 直上 = declared+1 秒 → ★抑止されぬ★ (/clear が現に出る) ──
+    > "$MOCK_LOG"
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        date() { echo 1000000; }
+        AGENT_ID="ashigaru9"
+        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
+        LOCKFILE="${INBOX}.lock"
+        FIRST_UNREAD_SEEN=$(( 1000000 - 400 ))
+        LAST_CLEAR_TS=$(( 1000000 - '"$((declared + 1))"' ))
+        process_unread event
+    '
+    [ "$status" -eq 0 ]
+    if ! grep -q "send-keys.*/clear" "$MOCK_LOG"; then
+        echo "★閾が【上へ】動いた★: 前回から $((declared + 1))s は閾 ${declared}s を越えておるゆえ /clear が出る筈" >&2
+        return 1
+    fi
 }
 
 # --- T-BUSY-001: agent_is_busy detects "Working" ---

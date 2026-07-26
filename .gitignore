@@ -18,6 +18,9 @@
 !README.md
 # plans/ directory whitelist leak fix (README.md全階層ルールの上書き — cmd_527 殿判断)
 plans/README.md
+# cmd_1386 (2026-07-26): 上の plans/README.md は最上位1本だけを閉じる。18行 !README.md は先頭 / が無いゆえ
+# 全階層を開く = plans/*/README.md が 10 file 漏れておった (dry-run で実測)。
+plans/**/README.md
 !README_ja.md
 !CHANGELOG.md
 !CONTRIBUTING.md

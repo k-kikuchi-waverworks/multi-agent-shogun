@@ -56,6 +56,58 @@ legacy_note_clear() {
     [ -e "$marker" ] && rm -f "$marker" 2>/dev/null || true
 }
 
+# ── cmd_1405 (2026-07-27): 「見張るべき者が 0 人」と「誰を見張るべきか読めぬ」を分ける ──
+# agent_list.sh は settings.yaml を読めぬ時 ★rc=3 + stderr 1行★ を返すようになった
+# (旧: rc=0 + 空出力 = 0 件と byte 単位で同一 → ★誰も見張らぬまま 5 秒 loop を回し、
+#  上位は「見張っておる」と読んだ★)。本 supervisor は其の 3 を其の場で刷る。
+# ★沈黙は「異常なし」ではない★ゆえ、marker で episode 化しつつ既定 60 秒毎に再掲する
+# (5 秒毎に刷れば 17K行/日 の spam になり、結局 誰も読まぬ = 名乗っておらぬのと同じ)。
+AGENT_LIST_MARKER_PREFIX="$SHOGUN_LOCK_DIR/agent_list_unreadable_"
+AGENT_LIST_RENOTE_SEC="${WATCHER_AGENT_LIST_RENOTE_SEC:-60}"
+_AL_STDERR_FILE="$SHOGUN_LOCK_DIR/agent_list_stderr.$$"
+
+# agent_list の関数を呼び、stdout / stderr / rc を分けて受ける。
+# ★stderr を素通しにすると理由行が 5 秒毎に log へ落ちて溢れる (実測 2 行/周回 ≒ 34K行/日)★ =
+# 溢れた log は誰も読まぬ = 名乗っておらぬのと同じ。ゆえに理由は throttle された 1 行の中へ畳む。
+# 呼び手は必ず `if _al_call …` の形で呼べ (set -e を条件文脈で殺すため)。
+_al_call() {
+    local fn="$1"; shift
+    _AL_OUT=$("$fn" "$@" 2>"$_AL_STDERR_FILE"); _AL_RC=$?
+    _AL_ERR=$(tr '\n' ' ' < "$_AL_STDERR_FILE" 2>/dev/null || true)
+    rm -f "$_AL_STDERR_FILE" 2>/dev/null || true
+    return "$_AL_RC"
+}
+
+agent_list_fail_note() {
+    local key="$1" rc="$2" reason="${3:-}"
+    local marker="${AGENT_LIST_MARKER_PREFIX}${key}"
+    local now prev=0
+    # ★lock dir が無ければ marker を書けず、throttle が黙って外れる★ (= 5 秒毎に刷る spam へ退行)。
+    # 本番では proc_lock_acquire が先に掘るが、其れに依存すると「掘る者が居らぬ経路」で崩れる。
+    mkdir -p "$SHOGUN_LOCK_DIR" 2>/dev/null || true
+    now=$(date +%s)
+    if [ -e "$marker" ]; then
+        prev=$(cat "$marker" 2>/dev/null || echo 0)
+        prev=${prev:-0}
+    fi
+    if [ $(( now - prev )) -ge "$AGENT_LIST_RENOTE_SEC" ]; then
+        printf '%s\n' "$now" > "$marker" 2>/dev/null || true
+        sup_log "[UNREADABLE] ${key} の列挙/解決が失敗した (agent_list rc=${rc}) — ★config/settings.yaml を読めておらぬ★。★之は【0 件】ではない★= 本周回は ${key} watcher を一体も起動せぬ = 是正するまで ${key} への nudge は死んでおると見做せ。理由=［${reason:-理由行なし}］ (同一状態につき ${AGENT_LIST_RENOTE_SEC} 秒に一度のみ再掲)"
+    fi
+}
+
+agent_list_fail_clear() {
+    local marker found=0 f
+    for f in "${AGENT_LIST_MARKER_PREFIX}"*; do
+        [ -e "$f" ] || continue
+        found=1
+        rm -f "$f" 2>/dev/null || true
+    done
+    marker=$found
+    [ "$marker" = "1" ] || return 0
+    sup_log "[RECOVERED] agent 列挙が回復した — config/settings.yaml を再び読めておる"
+}
+
 # ── cmd_1339 ②: supervisor lifetime lock (二重 supervisor 防止 + 生存 beacon) ──
 if [ "${__WATCHER_SUPERVISOR_TESTING__:-}" != "1" ]; then
     if ! proc_lock_acquire "watcher_supervisor" 208 "watcher_supervisor"; then
@@ -290,11 +342,18 @@ detect_pane_drift() {
 }
 
 # ─── main loop ───
-if [ "${__WATCHER_SUPERVISOR_TESTING__:-}" = "1" ]; then
+# ★WATCHER_SUPERVISOR_MAX_CYCLES = 試験用の縫い目 (cmd_1405)★
+# 既定 (空) は ★従前どおり永久 loop★ = 本番の挙動は 1 も変わらぬ。
+# 之を据えた理由 = ★__WATCHER_SUPERVISOR_TESTING__=1 は loop の【手前】で返るゆえ、
+# loop 本体 (= agent_list の rc を検める配線そのもの) が 1 度も走らぬ★ =
+# ★助手 (agent_list_fail_note) だけが緑で、配線は射程の外に在った★ = 軍師一号の T21 と同型の真空 PASS。
+# ⇒ 回数を切って loop 本体を実射できる形にし、配線へ牙が届くようにする。
+if [ "${__WATCHER_SUPERVISOR_TESTING__:-}" = "1" ] && [ -z "${WATCHER_SUPERVISOR_MAX_CYCLES:-}" ]; then
     return 0 2>/dev/null || exit 0   # test harness は関数を直接呼ぶ
 fi
 
 _drift_last_ts=0
+_cycle_count=0
 while true; do
     start_watcher_if_missing "shogun" "shogun:main.0" "logs/inbox_watcher_shogun.log"
     start_watcher_if_missing "karo" "multiagent:agents.0" "logs/inbox_watcher_karo.log"
@@ -303,24 +362,56 @@ while true; do
     start_ledger_guard_if_missing
 
     # cmd_652 (2026-05-16): ashigaru list を settings.yaml から動的取得
-    while IFS= read -r ash; do
-        [ -n "$ash" ] || continue
-        start_watcher_if_missing "$ash" "$(ashigaru_pane "$ash")" "logs/inbox_watcher_${ash}.log"
-    done < <(get_active_ashigaru_agents)
+    # cmd_1405: ★`< <(…)` は rc を捨てる★ゆえ、先に受けて rc を検める (捨てれば「読めなんだ」が 0 件に化ける)
+    _list_unreadable=0
+    if _al_call get_active_ashigaru_agents; then
+        while IFS= read -r ash; do
+            [ -n "$ash" ] || continue
+            start_watcher_if_missing "$ash" "$(ashigaru_pane "$ash")" "logs/inbox_watcher_${ash}.log"
+        done <<< "$_AL_OUT"
+    else
+        _list_unreadable=1
+        agent_list_fail_note "ashigaru" "$_AL_RC" "$_AL_ERR"
+    fi
 
     # cmd_652 (2026-05-16): active gunshi list を settings.yaml から動的取得 (deprecated 除外)
-    while IFS= read -r gun; do
-        [ -n "$gun" ] || continue
-        local_pane=$(gunshi_pane_resolved "$gun")   # cmd_1339: @agent_id 優先・settings.yaml は fallback
-        [ -n "$local_pane" ] || continue  # pane 未設定 gunshi はスキップ
-        start_watcher_if_missing "$gun" "$local_pane" "logs/inbox_watcher_${gun}.log"
-    done < <(get_active_gunshi_agents)
+    if _al_call get_active_gunshi_agents; then
+        _gun_list="$_AL_OUT"
+        while IFS= read -r gun; do
+            [ -n "$gun" ] || continue
+            # cmd_1339: @agent_id 優先・settings.yaml は fallback
+            # cmd_1405: fallback 側 (get_agent_pane) が rc=3 を返しうる。★set -e 下ゆえ受けねば supervisor ごと落ちる★
+            if ! _al_call gunshi_pane_resolved "$gun"; then
+                _list_unreadable=1
+                agent_list_fail_note "gunshi_pane" "$_AL_RC" "対象=${gun} / ${_AL_ERR}"
+                continue
+            fi
+            local_pane="$_AL_OUT"
+            [ -n "$local_pane" ] || continue  # pane 未設定 gunshi はスキップ
+            start_watcher_if_missing "$gun" "$local_pane" "logs/inbox_watcher_${gun}.log"
+        done <<< "$_gun_list"
+    else
+        _list_unreadable=1
+        agent_list_fail_note "gunshi" "$_AL_RC" "$_AL_ERR"
+    fi
+
+    if [ "$_list_unreadable" = "0" ]; then
+        agent_list_fail_clear
+    fi
 
     # cmd_1339 ①: drift 検知 (既定 60s 毎)
     _now_ts=$(date +%s)
     if [ $(( _now_ts - _drift_last_ts )) -ge "$DRIFT_EVERY_SEC" ]; then
         _drift_last_ts=$_now_ts
         detect_pane_drift || true
+    fi
+
+    # cmd_1405: 回数が切られておる時のみ抜ける (既定=空 では此の block は永久に偽=従前どおり)
+    if [ -n "${WATCHER_SUPERVISOR_MAX_CYCLES:-}" ]; then
+        _cycle_count=$(( _cycle_count + 1 ))
+        if [ "$_cycle_count" -ge "$WATCHER_SUPERVISOR_MAX_CYCLES" ]; then
+            break   # ★最後の周回では sleep せぬ★ = 試験が 5 秒 待たされぬ
+        fi
     fi
 
     # 208>&- : ループ待ちの sleep 子にも lifetime lock fd を相続させない

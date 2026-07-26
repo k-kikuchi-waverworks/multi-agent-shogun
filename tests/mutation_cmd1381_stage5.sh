@@ -84,6 +84,24 @@ mutate() {
     LAST_NG_KIND=anchor; NG=$((NG + 1)); return
   fi
 
+  # ── ★★(a2) baseline の検め (2026-07-27 08:5x 四号の是正)★★ ────────────────────
+  #   ■ ★何を塞ぐか★= ★素の盤面で既に赤いなら、変異後の赤は【変異ゆえ】と申せぬ★。
+  #     本 harness は「赤くなったか + 針が名指されたか」しか見ておらなんだゆえ、
+  #     ★元から赤い盤面では 12/12 ok を出し rc=0 (緑) を返しておった★。
+  #   ■ ★実測 (2026-07-27 08:53)★= ★追跡外の 2 file (config/settings.yaml /
+  #     logs/ntfy_send.log) を欠いた盤面 = fresh clone の姿★ では
+  #     ★bats -f 'A2' が変異前から `not ok 1 A2`★ (ntfy.sh が settings を読めぬ)。
+  #     其れでも本 harness は ★ok MUT-1381-201 — 赤 rc=1 / 名指し=[not ok 1 A2]★ と刷り、
+  #     ★rc=0 で緑を返した★ = ★配られた木では此の harness の緑は何も証しておらなんだ★。
+  #   ⇒ ★変異の前に素の盤面で一度 撃ち、緑でなければ ok を出さぬ (SKIP=FAIL の harness 版)★。
+  local bout brc
+  bout="$(eval "$testcmd" 2>&1)"; brc=$?
+  if [ $brc -ne 0 ]; then
+    echo "★NG★ $id: ★baseline が既に赤 (rc=$brc)★ = 変異後の赤は【変異ゆえ】と申せぬ (UNDETERMINED)"
+    echo "$bout" | tail -3 | sed 's/^/      /'
+    LAST_NG_KIND=baseline; NG=$((NG + 1)); return
+  fi
+
   backup "$rel"
   # ── 変異を当てる (python で固定文字列置換 = sed の正規表現事故を避ける) ──
   python3 - "$REPO/$rel" "$anchor" "$repl" <<'PY'

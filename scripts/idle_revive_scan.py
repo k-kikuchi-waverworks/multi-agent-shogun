@@ -121,6 +121,12 @@ DEFAULT_BLACKOUT_THROTTLE_MIN = 30 # 家老への停電型 warning の最小間�
 BLACKOUT_AGENT_KEY = "*fleet*"     # 停電型判定の合成 result entry が名乗る agent 名。
 BLACKOUT_STATE_FILE = "blackout_suppress"  # queue/state/ 配下の throttle 専用 state file。
 
+# ── cmd_1392: 観測者の不在 (process が名乗る沈黙の間 存在しておらなんだ) ──
+# ★閾 3 の根拠★: cron 周期 180 秒 × 3 = 9 分 < stall_min 15 分 ⇒
+#   ★正常な再起動 (1 回きり) では絶対に鳴らぬ★・★起き直り続ける agent は
+#   stall_min に達する前に鳴る★ = 「撃たぬ側へ倒すだけ」の永久免除の罠を塞ぐ。
+DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD = 3
+
 # ══════════════════════════════════════════════════════════════════════════
 # ★cmd_1394: 番人が【己の振舞い】を証す★ (2026-07-27 未明・家老が二度誤った)
 # ──────────────────────────────────────────────────────────────────────────
@@ -368,6 +374,79 @@ def agent_context_note(agent, reports_dir):
     except OSError:
         pass
     return f"直前pane末尾『{tail}』/ report最終更新={age}"
+
+
+# ─────────────────────────────────────────────────────────────
+# cmd_1392: ★観測者の不在を観測値に混ぜぬ★ — process の齢を測る
+# ─────────────────────────────────────────────────────────────
+# ★2026-07-27 00:24:04 の実害★: WSL2 が建て直り、tmux shell が 00:17:19 に生まれた。
+#   番人は其の 3 分 19 秒 前 (00:14) に実射へ戻されており、★己が 57 分 寝ておった事も、
+#   見張る相手が未だ生まれておらぬ事も知らぬまま★、空白を沈黙として数え始めた。
+#   ⇒ 00:24:04 に ★齢 6.5 分の process へ「91.5 分 / 95.4 分の沈黙」を名乗って /clear★
+#     (14.1 倍の不可能)。停電型 quorum は 00:15〜00:18 は現に効いておったが、
+#     ★agent が一体ずつ戻ると分子が 3 を割り、まだ戻らぬ 2 体が「少数の固着」に見えた★
+#     = ★復旧の途中には必ず穴が開く★。
+#
+# ★本層が問うのは真偽ではなく【存在】である★ =「本当に働いておったか」は問わぬ。
+#   「其の process は、名乗ろうとしておる沈黙の間、存在しておらなんだ」— 之だけを問う。
+#   ⇒ 世界知識も他 agent の状態も要らず ★agent 1 体で閉じる★ = quorum と独立に効く。
+#
+# ★齢の取得と矛盾の判定を別の口に分けてある★ — 混ぜると試験が実 process を
+#   起こさねば書けなくなる (設計 §6・軍師二号)。判定は scan() の側に在る。
+_PANE_PROC_AGE_BASH = r'''
+set -uo pipefail
+cd "$1"
+agent="$2"
+source lib/agent_registry.sh
+PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
+pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
+[ -n "$pane" ] || exit 0
+ppid=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null || echo "")
+[ -n "$ppid" ] || exit 0
+children=$(pgrep -P "$ppid" 2>/dev/null || true)
+[ -n "$children" ] || exit 0
+for c in $children; do
+    ps -o etimes= -p "$c" 2>/dev/null || true
+done
+'''
+
+
+def _oldest_child_age(stdout_text):
+    """`ps -o etimes=` の並びから ★最も古い子★ の齢を返す。1 件も無ければ None。
+
+    ★別の口にしてある理由★= 実 process を起こさずに【最大を取っておるか】
+    【子 0 件を齢 0 に化けさせておらぬか】を直に撃てるようにするため
+    (MUT-1392-002 / 005 の的)。
+    """
+    ages = [int(s.strip()) for s in stdout_text.splitlines() if s.strip().isdigit()]
+    return max(ages) if ages else None
+
+
+def agent_proc_age_sec(agent):
+    """agent の CLI process の齢 (秒)。判じられぬ時は None。
+
+    ★pane_pid そのものを見ぬ理由 (2026-07-27 02:03:45 実測)★:
+      全 pane の pane_pid の etime が ★一律 6,386 秒★ = tmux session の齢しか映さぬ =
+      ★/exit して CLI だけ起こし直した agent を見分けられぬ★。
+      ★直下の子★を見た時のみ ash2 が 5,435 秒 (他は ~6,370) と現に割れた。
+
+    ★`claude` と名を焼かぬ理由★: config/settings.yaml の CLI は可変ゆえ
+      (codex / opencode / kimi へ切替えた pane で ★黙って盲になる★)。
+
+    ★最大を取る理由★: 子が複数在る過渡 (旧 CLI が終いきらぬ等) で若い方を取れば
+      抑止が広がる。★抑止は狭い側へ倒す★ — 誤って抑止すれば真の固着を見逃すゆえ。
+
+    ★子 0 件は None (= 齢 0 ではない)★: CLI 不在は【固着】でも【矛盾】でもない
+      別の状態であり、齢 0 として扱えば ★何もかもを抑止する門★ になる。
+    """
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", _PANE_PROC_AGE_BASH, "_", str(REPO_ROOT), agent],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _oldest_child_age(proc.stdout)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1727,12 +1806,32 @@ def scan_karo_degrade(dashboard_path: Path, tasks_dir: Path, reports_dir: Path,
 # ─────────────────────────────────────────────────────────────
 # scan
 # ─────────────────────────────────────────────────────────────
+IMPOSSIBLE_STATE_KEYS = ("impossible_consecutive", "impossible_ages", "impossible_alerted")
+
+
+def _has_impossible_state(entry):
+    return any(entry.get(k) for k in IMPOSSIBLE_STATE_KEYS)
+
+
+def _clear_impossible_state(entry):
+    """cmd_1392: 矛盾でなかった走行で crash-loop の連番を落とす (dict は複写済前提)。
+
+    ★落とし忘れると永久に鳴る★ = 一度 3 回 続いた agent が、其の後 何ヶ月 健全でも
+    「起き直り続けておる」と名乗り続ける。★連続の意味を保つのは此の 3 行である★。
+    """
+    for k in IMPOSSIBLE_STATE_KEYS:
+        entry.pop(k, None)
+    return entry
+
+
 def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
          stall_min, min_interval_min, max_consecutive,
          alert_cooldown_min=DEFAULT_ALERT_COOLDOWN_MIN, now=None,
          quorum_min_stalled=DEFAULT_QUORUM_MIN_STALLED,
          quorum_ratio=DEFAULT_QUORUM_RATIO,
-         quorum_enabled=True):
+         quorum_enabled=True,
+         impossible_loop_threshold=DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD,
+         recent_scan_gap=False):
     """Evaluate every scanned agent and return (candidates, updated_clear_log).
 
     Each returned candidate dict carries the reason + the action decided
@@ -1775,10 +1874,12 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         # (a) spinner: busy/absent → 稼働 or 不在 → 触らない。復帰とみなし consecutive reset。
         # latch 解除ゆえ再警報 cooldown (last_alert_ts) もクリア (cmd_1280)。
         if state != "idle":
-            if entry.get("consecutive") or entry.get("last_alert_ts"):
+            if (entry.get("consecutive") or entry.get("last_alert_ts")
+                    or _has_impossible_state(entry)):
                 entry = dict(entry)
                 entry["consecutive"] = 0
                 entry.pop("last_alert_ts", None)
+                _clear_impossible_state(entry)   # cmd_1392: 稼働へ戻った = 連続は切れた
                 clear_log[agent] = entry
             # quorum 集計: busy は「系が健全」の証拠として分母のみ。absent は
             # 出力も止まっておれば分子にも数える (tmux server 消失 = 全 pane absent
@@ -1803,10 +1904,12 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         # (b) task status ∈ active。それ以外は対象外(復帰扱いで reset)。
         status = task.get("status")
         if status not in ACTIVE_STATUSES:
-            if entry.get("consecutive") or entry.get("last_alert_ts"):
+            if (entry.get("consecutive") or entry.get("last_alert_ts")
+                    or _has_impossible_state(entry)):
                 entry = dict(entry)
                 entry["consecutive"] = 0
                 entry.pop("last_alert_ts", None)
+                _clear_impossible_state(entry)   # cmd_1392: 対象外へ戻った = 連続は切れた
                 clear_log[agent] = entry
             continue
 
@@ -1848,14 +1951,85 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
             # 出力漸進中 → slow-gen → revive しない
             continue
 
+        idle_min_disp = round(idle_min, 1) if idle_min is not None else None
+
+        # ── cmd_1392: ★名乗ろうとしておる沈黙の間、其の process は存在したか★ ──
+        # ★之は真偽の判定ではない★ = 「働いておったか」は問わず【存在の有無】のみを問う。
+        # ★idle_min が None (出力が一つも無い) の時★= 番人は「stall_min 以上 黙っておる」
+        #   を暗に名乗って撃つゆえ、其の最小の主張 (stall_min) を claimed とする。
+        #   ★None を「主張が無い」と読んで素通りさせれば、最も強い主張が最も無検査になる★。
+        claimed_silence_sec = (idle_min * 60.0) if idle_min is not None else stall_min * 60.0
+        age_sec = agent_proc_age_sec(agent)
+        if age_sec is not None and age_sec < claimed_silence_sec:
+            age_min = age_sec / 60.0
+            ratio = (f"{idle_min / age_min:.1f}" if (idle_min is not None and age_min > 0)
+                     else "n/a")
+            entry = dict(entry)
+            streak = int(entry.get("impossible_consecutive", 0) or 0) + 1
+            ages = list(entry.get("impossible_ages") or [])[-(impossible_loop_threshold - 1):]
+            ages.append(int(age_sec))
+            entry["impossible_consecutive"] = streak
+            entry["impossible_ages"] = ages
+            # ★state 非消費★= consecutive / last_clear_ts を進めぬ = 齢が育った其の scan で
+            # 従来判定へ★自動で★戻る (抑止は【遅延】であって【免除】ではない・最大 stall_min)。
+            clear_log[agent] = entry
+            # ★分子から外す★= stalled は quorum の観測値であり、★成り立たぬ主張を
+            #   観測値へ混ぜるのは本病そのもの★ (家老へ「4体が同時に沈黙」と偽を上げ、
+            #   上流障害台帳にも其の 4 体を焼く)。分母 (eligible_count) には残す =
+            #   ★見ておらぬのではない。見た上で「言えぬ」と申しておる★。
+            results.append({
+                "agent": agent,
+                "task_id": task.get("task_id"),
+                "parent_cmd": task.get("parent_cmd"),
+                "idle_min": idle_min_disp,      # ★元の数を書き換えぬ★ (家老規律「前の数も残せ」)
+                "consecutive": int(entry.get("consecutive", 0) or 0),
+                "action": "impossible_claim_suppressed",
+                "proc_age_min": round(age_min, 1),
+                "claim_ratio": ratio,
+                "impossible_streak": streak,
+                "detail": (f"PROC_AGE_MIN={round(age_min, 1)} CLAIM_RATIO={ratio} "
+                           f"STREAK={streak} SCAN_GAP_BEFORE={'yes' if recent_scan_gap else 'no'} "
+                           f"— ★観測が存在せなんだ区間を含む★: process の齢 "
+                           f"{round(age_min, 1)}分 < 名乗る沈黙 "
+                           f"{idle_min_disp if idle_min_disp is not None else f'≥{stall_min}'}分。"
+                           f"★此の scan で言えるのは「齢の分だけ黙っておる」までである★ "
+                           f"(cmd_1392)"),
+            })
+            # ── 牙(2): 起き直り続ける agent を捕える (crash-loop の罠) ──
+            # ★之が無ければ、絶えず落ちて生まれ直す agent が永久に免除される★。
+            # ★別の口から出す★= revive ではなく警報 (/clear は撃たぬ = 撃っても直らぬ族)。
+            if streak >= impossible_loop_threshold and not entry.get("impossible_alerted"):
+                alerted = dict(entry)
+                alerted["impossible_alerted"] = True
+                results.append({
+                    "agent": agent,
+                    "task_id": task.get("task_id"),
+                    "parent_cmd": "cmd_1392",
+                    "idle_min": idle_min_disp,
+                    "consecutive": int(entry.get("consecutive", 0) or 0),
+                    "action": "restart_loop_alert",
+                    "ages": ages,
+                    "detail": (f"AGES={','.join(str(a) for a in ages)} "
+                               f"STREAK={streak} — ★齢が育たぬまま抑止が続いておる = "
+                               f"起き直り続けておる★ (連続{streak}回・閾{impossible_loop_threshold})。"
+                               f"★/clear は撃たぬ (撃っても直らぬ族ゆえ) = 家老へ回す★ (cmd_1392)"),
+                    "_new_state": alerted,
+                })
+            continue
+
+        if _has_impossible_state(entry):
+            # ★齢が育った / 判じられぬへ転じた★= 連続は切れた。
+            entry = dict(entry)
+            _clear_impossible_state(entry)
+            clear_log[agent] = entry
+
         stalled.append({
             "agent": agent,
-            "idle_min": round(idle_min, 1) if idle_min is not None else None,
+            "idle_min": idle_min_disp,
             "pane_state": "idle",
         })
 
         # ── ここまでで複合 AND 成立 = revive 候補 ──
-        idle_min_disp = round(idle_min, 1) if idle_min is not None else None
 
         # rate limit: 前回 clear からの間隔
         last_ts = entry.get("last_clear_ts")
@@ -2011,6 +2185,19 @@ def format_blackout_alert(hit, upstream_notes, throttle_min):
             f"本警報は{throttle_min}分に一度。")
 
 
+def format_restart_loop_alert(hit, threshold):
+    """cmd_1392 牙(2): 起き直り続ける agent を家老へ回す文面 (/clear は撃たぬ)。"""
+    ages = ", ".join(f"{a}秒" for a in hit.get("ages", []))
+    return (f"🚨起き直り続ける agent (idle_revive cmd_1392): {hit['agent']} は "
+            f"★連続{threshold}回 の scan で【名乗る沈黙より process が若い】状態が続いておる★"
+            f" (齢の推移: {ages})。"
+            f"★齢が育たぬまま抑止が続く = agent が落ちて生まれ直しておる公算★ "
+            f"(task {hit['task_id']})。"
+            f"★/clear は撃っておらぬ★ = 撃っても直らぬ族ゆえ (session を殺すだけ)。"
+            f"pane を実査し、CLI が crash-loop に陥っておらぬかを検められたい。"
+            f"★本警報は1 episode 1通★ = 齢が育てば自動で解け、其の後 再発すれば改めて鳴る。")
+
+
 def blackout_throttled(state_dir: Path, throttle_min, now):
     """前回 blackout 警報から throttle_min 分未満なら True (警報抑止)。"""
     p = state_dir / BLACKOUT_STATE_FILE
@@ -2039,6 +2226,8 @@ PRE_SUPPRESSED_REASONS = {
     "rate_limited": "rate_limit",
     "alert_cooldown": "alert_cooldown",
     "report_unreadable": "report_unreadable",   # cmd_1394 (3): 判じられぬゆえ撃たぬ
+    # cmd_1392: 名乗る沈黙の間 process が存在せなんだ = 主張が成り立たぬゆえ撃たぬ
+    "impossible_claim_suppressed": "impossible_claim",
 }
 
 
@@ -2055,8 +2244,12 @@ def outcome_base(r):
     return {"revive": "revive",
             "rate_limited": "revive",
             "report_unreadable": "revive",
+            # cmd_1392: 抑止された側の行為で名乗る = 「revive は撃たれたか」を
+            # grep する者に届く (blackout_suppressed と同じ流儀)。
+            "impossible_claim_suppressed": "revive",
             "escalation_stop": "escalation",
             "alert_cooldown": "escalation",
+            "restart_loop_alert": "restart_loop_alert",
             "blackout_alert": "blackout_alert"}.get(a, str(a))
 
 
@@ -2183,6 +2376,11 @@ def main(argv=None):
                     help=f"cmd_1339: 停電型判定の stall 割合下限 (default {DEFAULT_QUORUM_RATIO})。")
     ap.add_argument("--no-quorum-gate", action="store_true",
                     help="cmd_1339: 停電型 quorum gate を無効化 (個別判定のみ)。変異試験用。")
+    ap.add_argument("--impossible-loop-threshold", type=int,
+                    default=DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD,
+                    help=f"cmd_1392: 【名乗る沈黙より process が若い】が連続何回で "
+                         f"起き直り警報を上げるか (default "
+                         f"{DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD} = 9分 < stall_min)。")
     ap.add_argument("--blackout-throttle-min", type=int, default=DEFAULT_BLACKOUT_THROTTLE_MIN,
                     help=f"cmd_1339: 停電型 warning の最小間隔分 (default {DEFAULT_BLACKOUT_THROTTLE_MIN})。")
     ap.add_argument("--upstream-alert-throttle-min", type=int,
@@ -2256,8 +2454,25 @@ def main(argv=None):
         quorum_min_stalled=args.quorum_min_stalled,
         quorum_ratio=args.quorum_ratio,
         quorum_enabled=not args.no_quorum_gate,
+        impossible_loop_threshold=args.impossible_loop_threshold,
+        # cmd_1392 §4: ★閾は動かさぬ★ — 欠測の直後は【最も固着が溜まる刻】ゆえ
+        # 番人を鈍らせる向きは逆である。名乗りへ添えるだけ (朝の読み手が
+        # 「環境が建て直った夜であった」を1行で悟れる)。
+        recent_scan_gap=(gap_line is not None),
     )
     blackout = next((r for r in results if r["action"] == "blackout_alert"), None)
+
+    # ── cmd_1392 牙(3): ★抑止の総量を毎 scan 名乗らせる★ ──
+    # ★常に鳴る門が外されるのと同じく、常に抑止する門も外されるべきである★ =
+    # N が毎晩 0 でないなら環境が頻繁に建て直っておる証。人が数で見られる形にする。
+    # ★0 の時も出す★ = 「出ておらぬ」を「起きなんだ」とも「見ておらぬ」とも読める
+    # 沈黙にせぬため (本夜 全軍で潰してきた形)。
+    _imp = [r for r in results if r["action"] == "impossible_claim_suppressed"]
+    _imp_loop = [r for r in _imp
+                 if int(r.get("impossible_streak", 0) or 0) >= args.impossible_loop_threshold]
+    print(f"[idle_revive] IMPOSSIBLE_CLAIM 抑止 = {len(_imp)} 体 "
+          f"(うち連続 {args.impossible_loop_threshold} 回以上 = {len(_imp_loop)} 体)",
+          file=sys.stderr)
 
     # ── Task B: 家老 degrade 検知(同居)。scan() の clear_log を引き継ぐ。 ──
     # cmd_1339: 停電型成立中は家老 degrade 判定も抑止 — 上流障害中は家老の
@@ -2314,6 +2529,31 @@ def main(argv=None):
             print(f"[idle_revive] BLACKOUT抑止: {r['agent']} "
                   f"(本来={r.get('suppressed_action')}) — {r['detail']}", file=sys.stderr)
             emit_outcome(r, False, PRE_SUPPRESSED_REASONS["blackout_suppressed"])
+            continue
+        if r["action"] == "impossible_claim_suppressed":
+            # cmd_1392: 齢が名乗る沈黙に届かぬ = 主張が成り立たぬゆえ撃たぬ。
+            # ★state 非消費は scan() 側で済んでおる★ (consecutive を進めておらぬ) =
+            # ★齢が育った其の scan で従来判定へ自動で戻る★。
+            print(f"[idle_revive] IMPOSSIBLE_CLAIM抑止: {r['agent']} "
+                  f"(齢 {r.get('proc_age_min')}分 < 名乗る沈黙 {r['idle_min']}分・"
+                  f"比 {r.get('claim_ratio')}倍・連続 {r.get('impossible_streak')}回) "
+                  f"— {r['detail']}", file=sys.stderr)
+            emit_outcome(r, False, PRE_SUPPRESSED_REASONS["impossible_claim_suppressed"])
+            continue
+        if r["action"] == "restart_loop_alert":
+            # cmd_1392 牙(2): 起き直り続ける agent = /clear では直らぬゆえ家老へ回す。
+            body = format_restart_loop_alert(r, args.impossible_loop_threshold)
+            proc = send_inbox("karo", body, "warning", "idle_revive_scan")
+            if proc.returncode != 0:
+                # cmd_1338 流儀: 握り潰さぬ・alerted を立てぬ = 次 scan で再試行。
+                print(f"[idle_revive] ERROR: 起き直り警報の inbox_write 失敗: "
+                      f"{proc.stderr.strip()}", file=sys.stderr)
+                emit_outcome(r, False, "inbox_write_failed")
+                exit_code = 1
+            else:
+                new_clear_log[r["agent"]] = r["_new_state"]
+                state_dirty = True
+                emit_outcome(r, True, "karo_warning_sent")
             continue
         if r["action"] in ("rate_limited", "alert_cooldown", "report_unreadable"):
             # scan() 段階で抑止が決しており発行相では何もせぬ action。

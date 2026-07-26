@@ -197,6 +197,75 @@ printf '%s\n' "$census_out"
 ntfy_out="$(python3 "$SCRIPT_DIR/scripts/gate_ntfy_alive.py" 2>&1)"; ntfy_rc=$?
 printf '%s\n' "$ntfy_out"
 
+# ── ★三本の口に【呼ぶ者】を与える (2026-07-27 未明)★ ──────────────────────────
+# ★軍師二号の実測 (04:27:20〜04:28:00・canary 37 file つき) = 本夜 建てた七つの口は
+#   実体 7/7 在れど ★配線は 4/7★★ であった。呼ぶ者が居らなんだのは次の三本:
+#     ・registry_census.py    … ★台帳の点呼★ (冊と牙を機械が数え直す)
+#     ・fang_domain_census.py … ★牙の域の点呼★ (覆いの上限と【域外の検】を名乗る)
+#     ・gate_verdict_drift.py … ★牙の遷移★ (昨日 PASS であった牙が今 UNDETERMINED か)
+# ★之は cmd_1359 (stall_watchdog が3ヶ月 呼ばれなんだ) と同じ族である★ =
+#   ★番人は書いただけでは番をせぬ★。ゆえに此処 (毎朝 必ず走る場所) から呼ぶ。
+#
+# ★★二つの flag を分ける★★ (混ぜると【いつから門が落ちるようになったか】が判らなくなる):
+#   GATE_CENSUS_WIRING=1 … 三本を ★呼ぶ★            (既定 0 = 呼ばぬ)
+#   GATE_CENSUS_STRICT=1 … 其の rc を ★門へ入れる★  (既定 0 = ★報告のみ・門は落とさぬ★)
+# ★既定を 0 に据えた理由を隠さず記す★=
+#   ★配線した其の日の朝に門が騒げば、読む者は「夜のうちに壊れた」と読む★。
+#   而も fang_domain_census は ★今 現に rc=1 を返す★ (2026-07-27 04:36 実測) =
+#   ★之は欠陥ではなく【域内だが数えられぬ検が在る】という申告★ ゆえ、
+#   いきなり門へ入れれば ★初日から赤★ = ★毎朝鳴って誰も消せぬ札★ になる (免除より悪い形)。
+#   ⇒ ★先に数を刷り、人が読んで下限を決めてから門へ入れる★。号令は家老・殿が下す。
+# ★而して「呼ばぬ」を黙らぬ★= 呼ばぬ朝は其の旨を毎朝 1 行 刷る =
+#   ★眠っておる番人に【眠っておると自ら名乗らせる】★ (本件の当の教訓ゆえ、先ず己へ当てる)。
+#
+# ★牙の遷移の簿は初回 空である★= 空の初回は【初見】であって ★「退行 0」ではない★ =
+#   ★rc=0 が正常であり故障ではない★ (朝の者が「門が黙っておる」を故障と読まぬため)。
+CENSUS_WIRING="${GATE_CENSUS_WIRING:-0}"
+CENSUS_STRICT="${GATE_CENSUS_STRICT:-0}"
+regcensus_rc=0; fangdom_rc=0; drift_rc=0
+
+# ★撃てなんだ を 黙って飛ばさぬ★ (cmd_1405 の族 = 「0 件」と「読めなかった」を分ける)。
+#   ★道具が居らぬ★ / ★出力が想定の形でない (落ちた・綴りが変わった)★ を
+#   ★UNDETERMINED (=2)★ で名指す = ★不在を無音と区別できぬ形にせぬ★。
+#   ★札で確かめる★= rc だけを見れば「rc=0 で何も刷らぬ道具」を緑と読む (本夜の族)。
+run_reporter() {
+    local label="$1" banner="$2" script="$3"; shift 3
+    local out rc
+    if [ ! -f "$script" ]; then
+        printf '[%s] ★UNDETERMINED★ 道具が居らぬ (%s) = ★撃てなんだ★ (黙って飛ばさぬ)\n' "$label" "$script"
+        return 2
+    fi
+    out="$(python3 "$script" "$@" 2>&1)"; rc=$?
+    printf '%s\n' "$out"
+    if ! printf '%s' "$out" | grep -qF "$banner"; then
+        printf '[%s] ★UNDETERMINED★ 札 %s を1行も出さなんだ (rc=%s) = ★道具が落ちたか綴りが変わった★ 生の末尾=%s\n' \
+            "$label" "$banner" "$rc" "$(printf '%s' "$out" | tail -3 | tr '\n' '/')"
+        return 2
+    fi
+    return "$rc"
+}
+
+if [ "$CENSUS_WIRING" = "1" ]; then
+    run_reporter '台帳の点呼' '[台帳の点呼]' "$SCRIPT_DIR/scripts/registry_census.py"; regcensus_rc=$?
+    run_reporter '牙の域の点呼' '[牙の域の点呼]' "$SCRIPT_DIR/scripts/fang_domain_census.py"; fangdom_rc=$?
+    # ★遷移は replay の【出力を読む】だけ = 試験を一度も走らせぬゆえ増える負担は 0 秒★
+    #   (上で既に撃った 5 冊の replay 出力を其のまま渡す = 二度撃たぬ)。
+    DRIFT_LOG="$(mktemp -t gate_replay_verdicts.XXXXXX)"
+    printf '%s\n%s\n%s\n%s\n%s\n' "$out2" "$out4" "$out6b" "$out7" "$out9" > "$DRIFT_LOG"
+    # ★簿の在処を差し替えられる口を1つ残す★= ★配線を検める者が【本番の簿を汚さずに】撃てるため★。
+    #   ★既定は本番の簿 (queue/state/mutation_verdict_ledger.yaml)★ = 差し替えは明示した時のみ。
+    drift_args=(--record "$DRIFT_LOG")
+    [ -n "${GATE_VERDICT_LEDGER:-}" ] && drift_args+=(--ledger "$GATE_VERDICT_LEDGER")
+    run_reporter '牙の遷移' '[牙の遷移]' "$SCRIPT_DIR/scripts/gate_verdict_drift.py" "${drift_args[@]}"; drift_rc=$?
+    rm -f "$DRIFT_LOG"
+else
+    echo "[gate_nightly] ★三本 (台帳の点呼／牙の域の点呼／牙の遷移) は本走行では呼んでおらぬ★ = GATE_CENSUS_WIRING=1 で呼ぶ (★眠っておる番人を毎朝 名乗らせる★・号令は家老/殿)"
+fi
+
+# ★報告のみの間は門へ 1bit も入れぬ★ = 呼んでおらぬ時・strict でない時は 0 を返す。
+srt() { if [ "$CENSUS_WIRING" = "1" ] && [ "$CENSUS_STRICT" = "1" ]; then echo "$1"; else echo 0; fi; }
+regcensus_gate="$(srt "$regcensus_rc")"; fangdom_gate="$(srt "$fangdom_rc")"; drift_gate="$(srt "$drift_rc")"
+
 verdict() { case "$1" in 0) echo PASS;; 1) echo FAIL;; *) echo UNDETERMINED;; esac; }
 
 # ★切り詰めたなら【切り詰めたと言え】★ (cmd_1367 N1・軍師一号の差し戻し)
@@ -217,7 +286,7 @@ fold_lines() {
     return 0
 }
 
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ]; then
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$regcensus_gate" -ne 0 ] || [ "$fangdom_gate" -ne 0 ] || [ "$drift_gate" -ne 0 ]; then
     # 警告は1行に畳む (inbox message の YAML 安全のため改行・コロン+空白を避ける)
     # 行連結は awk で行う (tr '\n' '・' は byte 置換ゆえ多byte文字の先頭1byteのみを埋め
     # 不正 UTF-8 を inbox へ混入させる — 2026-07-26 実測で発見した既存バグの是正)
@@ -257,6 +326,12 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
         #   拾えなんだと言うて生の末尾を渡す (家老が log を掘らずに次の手を決められる形)。
         [ -z "$ntfydetail" ] && ntfydetail="★札つきの所見を1行も拾えなんだ = 番人の出力が想定の形でない★ (生の末尾=$(printf '%s' "$ntfy_out" | tail -3 | fold_lines 3))"
         ntfynote="★殿への通知路が緑でない (cmd_1381)=${ntfydetail}★ "
+    fi
+    census3note=""
+    # ★三本は既定では門を落とさぬ★= 而して ★別の理由で警告が出る朝には、其の数も一緒に載せる★
+    #   = ★門を騒がせずに【見える所へ出す】★ (log にしか出さねば、誰も読まぬ場所へ置くのと同じ)。
+    if [ "$CENSUS_WIRING" = "1" ] && { [ "$regcensus_rc" -ne 0 ] || [ "$fangdom_rc" -ne 0 ] || [ "$drift_rc" -ne 0 ]; }; then
+        census3note="★三本の口=台帳の点呼$(verdict "$regcensus_rc")／牙の域$(verdict "$fangdom_rc")／牙の遷移$(verdict "$drift_rc")$([ "$CENSUS_STRICT" = "1" ] && echo "（門へ入れておる）" || echo "（★報告のみ=本札は門を落としておらぬ★）")★ "
     fi
     msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/engine台帳(cmd_1376)=$(verdict "$rc9")/engine登録検知=$(verdict "$rc10")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")/殿への通知路(cmd_1381)=$(verdict "$ntfy_rc")。${hooknote}${wirenote}${undistnote}${censusnote}${ntfynote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \

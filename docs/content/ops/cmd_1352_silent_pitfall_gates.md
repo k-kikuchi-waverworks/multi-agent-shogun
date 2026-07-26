@@ -80,6 +80,8 @@
 | `gate_mutation_replay.py --coverage` | **gate-2 付帯 (cmd_1352b)**: 台帳登録検知。「変異testらしき file が台帳に無い」を名指しで警告 (下記専用節) |
 | `scripts/gate_precommit.sh` | commit 時の関所本体 (gate-1 全件 + gate-2 sanity。正本はここ・hook は shim) |
 | `scripts/install_gate_hooks.sh` | pre-commit shim 据付 (冪等・既存 hook は退避チェーン) |
+| `gate_mutation_replay.py --tree-census` | **木の点呼 (cmd_1374)**: 上の層が「見ておる木の中」を検分するのに対し、**そもそも どの gate も見ておらぬ repo** を名指す (下記専用節) |
+| `config/mutation_registry.yaml` の `tree_census_waivers` | 木の点呼の免除簿 (path/reason 必須・`until` で期限) |
 | `scripts/gate_nightly.sh` | cron backstop (毎朝 06:30 フル再走・非 PASS を家老 inbox へ警告) |
 
 ## どこで回るか (人が思い出して回す形にはしていない)
@@ -207,6 +209,67 @@ shogun 7 件 (増減なし) / backend 12 件 (+3・いずれも実物の変異�
 
 **他 agent の変異testを見つけた時**: 勝手に登録するな (他人の test へ mutate を書くのは
 所有者の手番)。`coverage_waivers` へ理由つきで置き、所有者へ登録を申し送れ。
+
+### 期限つき免除 — 免除は「いつ返すか」が決まって初めて免除 (cmd_1374)
+
+`coverage_waivers` / `tree_census_waivers` の各 entry に `until: YYYY-MM-DD` を書ける。
+
+- **期限内** … `[WAIVED〜YYYY-MM-DD]` として毎朝可視表示 (PASS)
+- **期限切れ** … `[WAIVER-EXPIRED]` で **FAIL** = 借金が自動で取り立てられる。
+  **黙って延びる道は無い** — 延ばすなら理由を書き直して延ばせ。
+- **`until` 無し** … 赤にはせぬが `[WAIVED・★無期限★]` と名指しし、PASS 行にも
+  「うち無期限 N 件」と数を刻む。**いつ返すか決まっておらぬ免除を、画面から隠さぬ**。
+- **読めぬ日付** … UNDETERMINED (読めぬ期限は期限でない)。
+
+背景: 2026-07-26 に「登録したが永久に UNDETERMINED」という**免除より悪い形**が実際に生まれた
+(免除は理由つきで可視だが、UNDETERMINED は毎朝鳴って誰も消せぬ)。免除そのものは正しい道具だが、
+**返す日が無い免除は永久化する**。ゆえに期限を機械が持つ。
+
+## 木の点呼 — そもそも どの gate も見ておらぬ木を数える (cmd_1374)
+
+**なぜ在るか — 実例 (2026-07-26)**: 上の登録検知は「**見ておる木の中**で台帳に無い牙」を
+数える層である。ところが cmd_1370 の全数走査で、**app 本体 (`~/aituber-project`) は
+どの gate も見ておらぬ**ことが判った — backend (子 submodule) は毎朝見ておったのに、
+その**親**が視野の外に在った。牙 11 件が誰にも数えられておらなんだ。
+
+**盲 (候補に挙がるが規則が見えぬ) は cmd_1370 で塞いだ。だが「そもそも見ておらぬ」は盲ですらない
+— 見ておらぬ場所には、盲であることすら分からぬ**。ゆえに「**今どれだけ見ておらぬか**」を
+毎朝 画面に出す (cmd_1370 の視野計と同じ思想を、file 単位から repo 単位へ上げたもの)。
+
+**分母の採り方 (己の記憶を分母にせぬ)**:
+
+1. `config/projects.yaml` … system 自身が持つ木の登録簿
+2. **実際に撃った木** … gate_nightly が各 gate を撃つ度に repo-root を記録した一覧
+3. 上記の **submodule** と **親 repo**
+
+**「見ておる」の判定は宣言でなく実績**: gate_nightly は `watched()` で
+**実際に撃った** repo-root だけを記録する。gate の呼び出し行を消せばその木は記録されず、
+点呼が `[UNWATCHED]` として名指す ⇒「配線を消したのに watched のまま」が**構造的に起こり得ぬ**。
+
+**親 repo を辿る理由 (自己適用で判った要衝)**: 初版は分母を「登録簿 + 見ておる木」に留めており、
+**app 本体を watched から外しても PASS を返した** — 検知すべき当のものを検知できぬ試験であった。
+`projects.yaml` の app 登録が旧 Windows path (2026-06-27 削除済) を指しており、
+**登録が実体を指さぬ間その木は分母にすら入らなんだ**のが機序。
+登録簿の是正 (cmd_1374 で実施) と併せ、**子を見ておるなら親も分母に入れる**構造を足した。
+なお `config/projects.yaml` は `.gitignore` 対象 (各環境で `first_setup.sh` が作る) ゆえ、
+**fresh clone で効くのは親辿りの側**である — 登録簿の是正だけに頼っておらぬ。
+
+**判定**:
+
+| 状態 | 扱い |
+|---|---|
+| 見ておる木 | `ok [WATCHED]` |
+| **牙を持つのに未監視** | **`★NG★ [UNWATCHED]` = FAIL** (牙の内訳も名指し) |
+| 牙なしの未監視 | `注` で数えるのみ (今は失う物が無い。**牙が生えれば赤へ変わる**) |
+| 登録が古い (path が実在せぬ) | `注` で名指し (**登録が実体を指さぬ間その木は点呼に載らぬ**) |
+| 点呼できた木が 0 本 | **UNDETERMINED** (真空 PASS 禁) |
+| gate が撃った先が git repo でない | **UNDETERMINED** (黙って読み替えはせぬ) |
+
+免除は `tree_census_waivers` (期限つき免除の掟は上節と同じ)。
+
+**app 本体は登録検知のみ撃つ (replay は撃たぬ)**: app 台帳の `mutations:` は空ゆえ
+replay を撃つと「台帳 0 件 = **永久 UNDETERMINED**」= 免除より悪い形になる (実測)。
+**実体のある変異が 1 件でも登録された時点で** gate_nightly へ replay を足すのが筋。
 
 ## harness 内 SKIP=FAIL (gate-2 付帯2・2026-07-26 四号の申し送り)
 

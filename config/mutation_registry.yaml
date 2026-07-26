@@ -688,11 +688,72 @@ mutations:
     expect: nonzero
     red_needle: "NG T24"  # 実測 2026-07-26: 視野計を倒すと T24 (盲の名指し) が落ちる
 
+  - id: MUT-1374-001
+    origin: cmd_1374
+    suspected_by: ashigaru3
+    desc: |
+      ★期限つき免除★ (until を過ぎた免除を FAIL へ戻す層) を倒すと、T28 (期限切れ=FAIL)
+      と T28b (名指し) が赤くなるべき。倒しても緑なら ★免除が【黙って永久に】なる★ =
+      家老の掟「免除は【いつ返すか】が決まって初めて免除じゃ」が骨抜きになる。
+      ★免除は消えるのでなく【返る】もの★ — その「返る」機構が生きておるかの牙である。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^            if due is not None and today > due:/            if False:/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T28"  # 実測 2026-07-26: 期限判定を殺すと T28 (期限切れ=FAIL) が落ちる
+
+  - id: MUT-1374-002
+    origin: cmd_1374
+    suspected_by: ashigaru3
+    desc: |
+      ★木の点呼★ (どの gate も見ておらぬ牙持ちの木を名指す層) を「未監視は無い」へ倒すと、
+      T32 (未監視の牙持ち木=FAIL) と T32b (木の名指し) が赤くなるべき。
+      倒しても緑なら ★app 本体が視野から落ちても誰も気付かぬ元の状態へ静かに戻る★ =
+      本 cmd が塞いだ当のもの (見ておらぬ場所には、盲であることすら分からぬ) の再発。
+      ★点呼を消すのでなく【常に緑を返す】形にするのが最も静かな殺し方★ゆえ、其処を撃つ。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^            unwatched_fanged.append(top)/            pass/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T32"  # 実測 2026-07-26: 未監視の記録を殺すと T32 が落ちる
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)
+#   ・★until: YYYY-MM-DD (任意だが強く推奨) = その日を過ぎれば機械が FAIL へ戻す★ (cmd_1374)。
+#     until 無しの免除は毎朝 ★無期限★ と名指しで数えられる (黙って永久にはならぬ)。
 #   ・免除しても毎朝 [WAIVED] として可視表示される (黙って消える道は無い)
 #   ・他 agent 所有の変異test を見つけた時は、勝手に登録せずここへ理由つきで置き、
 #     所有者へ登録を申し送るのが筋 (他人の test に mutate を書くのは所有者の手番)
 # ─────────────────────────────────────────────────────────────────────────────
 coverage_waivers: []
+
+# ─────────────────────────────────────────────────────────────────────────────
+# tree_census_waivers — ★木の点呼 (--tree-census・cmd_1374)★ の免除簿。
+#   「牙を持つのに どの gate も見ておらぬ木」を、理由と期限つきで一時的に見逃す簿である。
+#   ・path (repo の絶対 path) / reason は必須・until は登録検知の免除と同じ掟
+#   ・★path が変われば免除は空撃ちになり、その木は【新たに未監視】として赤くなる★ =
+#     間違う向きが安全側 (黙って免除され続ける道が無い)
+# ─────────────────────────────────────────────────────────────────────────────
+tree_census_waivers:
+  # ── ★cmd_1374 で新たに見つかった2本目の穴★ ────────────────────────────────
+  #  本任は app 本体 (1本目) を塞ぐ任であったが、点呼を全数で回した結果
+  #  ★waverworks WP theme にも牙 1 件 (scripts/check-shippable-theme.py) が在り、
+  #  どの gate も見ておらぬ★ ことが判った (2026-07-26 実測)。
+  #  ★1つ見つけて満足せぬ★ ための全数走査が、実際に2本目を出した形である。
+  #
+  #  ★拙者が今これを塞がぬ理由 (2つ・どちらも「出来ぬ」ではなく「拙者の手番でない」)★:
+  #    (1) ★別 project の repo である★ = 台帳を置く先が web repo 配下ゆえ、
+  #        cmd_1374 (app 本体の穴) の scope を跨ぐ。家老の起票を待つのが筋。
+  #    (2) ★殿の CLAUDE.md 禁止事項に /mnt/c/Users/ 配下の変更が挙がっておる★ =
+  #        web repo は其処に在る。commit 経路も殿手番 (web-git-commit skill) ゆえ
+  #        足軽が独断で台帳を置いてよい木ではない。★裁可を仰ぐべき事柄である★。
+  #  ⇒ ゆえに ★消すのでなく、期限つきで見逃し、期限が来たら機械が取り立てる★ 形にした。
+  #     until は 2026-08-09 = ★裁可を仰ぐだけなら5週間は要らぬ★ (登録作業でなく判断ゆえ)。
+  - path: /mnt/c/Users/k-kikuchi/development/waverworks/common/wp-content/themes/waverworks-base-for-wp
+    reason: "cmd_1374 の点呼で発見した2本目の未監視木 (牙1件=scripts/check-shippable-theme.py・cmd_1358 N4 系)。別 project かつ /mnt/c/Users 配下 (殿 CLAUDE.md 禁止事項) ゆえ足軽の独断で台帳を置かず、家老へ cmd 化の起票を具申した。期限までに裁可が無ければ機械が毎朝取り立てる"
+    until: '2026-08-09'

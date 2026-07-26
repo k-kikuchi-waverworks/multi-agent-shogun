@@ -50,10 +50,14 @@ exit: 0 PASS / 1 FAIL あり / 2 UNDETERMINED あり (FAIL 優先)
   python3 scripts/gate_mutation_replay.py --coverage    # 台帳登録検知 (cmd_1352b): 変異testらしき
                                                         #   file が台帳に無ければ名指しで警告
   python3 scripts/gate_mutation_replay.py --selftest    # 変異試験つき自己検分
+  python3 scripts/gate_mutation_replay.py --tree-census --watched-file F
+                                                        # ★木の点呼 (cmd_1374)★: 牙を持つのに
+                                                        #   どの gate も見ておらぬ repo を名指す
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import os
 import re
@@ -66,6 +70,26 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = REPO_ROOT / "config" / "mutation_registry.yaml"
 DEFAULT_TIMEOUT = 180
+
+
+def _today() -> datetime.date:
+    """本日 (GATE_TODAY=YYYY-MM-DD で差替可 — selftest を暦から独立させるため)。
+
+    ★差替口を置く理由★: 期限つき免除の検分は「今日が何日か」に依る。selftest が暦で
+    赤くなったり緑になったりする形にすると ★試験そのものが日付で黙る★ = 本 gate が
+    塞ごうとしておる型そのものである。ゆえに試験は必ず日付を固定して撃つ。
+    """
+    ov = os.environ.get("GATE_TODAY")
+    if ov:
+        try:
+            return datetime.date.fromisoformat(ov.strip())
+        except ValueError:
+            # ★黙って本日へ倒れぬ★ (家老 規律(3b) 2026-07-26): 道具が代用品へ落ちる時は
+            # 必ず告げよ。黙って倒れると ★固定したはずの日付で試験が動いておらぬ★ のに
+            # 緑が出る = 四号の style vector fallback と同じ型になる。
+            raise SystemExit(f"[gate] GATE_TODAY が日付として読めぬ: {ov!r}"
+                             " — 黙って本日へ倒れることはせぬ (YYYY-MM-DD で書け)")
+    return datetime.date.today()
 
 # CONTRACT: 「変異を当てたのに test が緑」は FAIL である (これを False にすると gate は飾りになる)
 GREEN_AFTER_MUTATION_IS_FAIL = True
@@ -489,13 +513,28 @@ def coverage(registry: Path, repo: Path) -> int:
         print("[gate-2 coverage] UNDETERMINED: 台帳に mutations: リストが無い")
         return 2
     entries = [e for e in data["mutations"] if isinstance(e, dict)]
+    # ── 免除簿の読み取り (cmd_1374: ★いつ返すかを機械が持つ★) ──
+    #   until: YYYY-MM-DD を書けば、その日を過ぎた免除は ★自動で FAIL へ戻る★。
+    #   until 無しの免除は「無期限免除」として ★毎朝 名指しで数える★ (赤にはせぬ) =
+    #   既存免除の所有者は他 agent ゆえ勝手に赤へ倒さぬが、★いつ返すか決まっておらぬ★
+    #   ことを画面から隠さぬ。★免除は【いつ返すか】が決まって初めて免除である★ (家老下命)。
     wmap: dict[str, str] = {}
+    w_until: dict[str, datetime.date] = {}
     for w in (data.get("coverage_waivers") or []):
         if not isinstance(w, dict) or not w.get("path") or not w.get("reason"):
             print(f"[gate-2 coverage] UNDETERMINED: coverage_waivers に path/reason を欠く entry: {w!r}"
                   " (曖昧な免除は免除でない)")
             return 2
-        wmap[str(w["path"])] = str(w["reason"])
+        p = str(w["path"])
+        wmap[p] = str(w["reason"])
+        if w.get("until") is not None:
+            raw = str(w["until"]).strip()
+            try:
+                w_until[p] = datetime.date.fromisoformat(raw)
+            except ValueError:
+                print(f"[gate-2 coverage] UNDETERMINED: 免除 {p} の until が日付として読めぬ: {raw!r}"
+                      " (YYYY-MM-DD で書け — ★読めぬ期限は期限でない★)")
+                return 2
     cands, err = scan_mutation_test_candidates(repo)
     if err:
         print(f"[gate-2 coverage] UNDETERMINED: {err}")
@@ -507,7 +546,10 @@ def coverage(registry: Path, repo: Path) -> int:
               f" (候補 {len(cands)} 件) = 検出規則の牙が折れておる (0件検出もここへ畳む・真空 PASS 禁)")
         return 2
     unregistered: list[str] = []
+    expired: list[str] = []
     n_waived = 0
+    n_open_ended = 0
+    today = _today()
     for rel in sorted(cands):
         eid = next((e.get("id", "?") for e in entries
                     if rel in (e.get("paths") or [])
@@ -515,8 +557,21 @@ def coverage(registry: Path, repo: Path) -> int:
         if eid:
             print(f"  ok   REGISTERED    {rel} ← {eid}")
         elif rel in wmap:
-            n_waived += 1
-            print(f"  免除 [WAIVED]      {rel}: {wmap[rel]}")
+            due = w_until.get(rel)
+            if due is not None and today > due:
+                # ★期限切れ = 借金の取り立て★。免除は消えるのでなく【返る】。
+                expired.append(rel)
+                print(f"  ★NG★ [WAIVER-EXPIRED] {rel}: 免除の期限 {due} を過ぎた (本日 {today})"
+                      f" — 理由「{wmap[rel]}」。登録するか、期限を延ばす理由を書き直せ"
+                      " (★黙って延びる道は無い★)")
+            elif due is None:
+                n_waived += 1
+                n_open_ended += 1
+                print(f"  免除 [WAIVED・★無期限★] {rel}: {wmap[rel]}"
+                      " ← ★いつ返すか決まっておらぬ★ (until: YYYY-MM-DD を書け)")
+            else:
+                n_waived += 1
+                print(f"  免除 [WAIVED〜{due}] {rel}: {wmap[rel]}")
         else:
             unregistered.append(rel)
             print(f"  ★NG★ [UNREGISTERED] {rel}: {cands[rel]}")
@@ -565,9 +620,10 @@ def coverage(registry: Path, repo: Path) -> int:
                   f"・盲 {len(blind)} 件★")
     print(f"  [視野] {vision} — 下の候補件数は【規則に見えた物】の勘定である")
 
-    if unregistered or ghosts:
+    if unregistered or ghosts or expired:
         print(f"[gate-2 coverage] FAIL: 候補 {len(cands)} 件中 ★台帳に無い変異test"
-              f" {len(unregistered)} 件★ / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件★"
+              f" {len(unregistered)} 件★ / ★期限切れ免除 {len(expired)} 件★"
+              f" / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件★"
               f" (視野: {vision})")
         print("  処方: 「赤を一度確認した」変異を config/mutation_registry.yaml へ登録せよ")
         print("        (登録の書式は本 file 冒頭 docstring)。登録すべきでない正当な理由が在るなら")
@@ -576,9 +632,218 @@ def coverage(registry: Path, repo: Path) -> int:
         return 1
     # ★PASS の文言に視野を刻む★ = 「候補すべて登録済」を【全部検査した】と読ませぬための限定
     #   (cmd_1364 の「検査した と 全部検査した を混同させぬ」を、検知器自身へ当てたもの)
-    print(f"[gate-2 coverage] PASS: ★規則に見えた★候補 {len(cands)} 件すべて台帳登録済"
-          f" (免除 {n_waived} 件・免除は可視・ID言及 {len(refs)} 件に幽霊なし)"
+    # ★「登録済」と「免除」を混ぜて言わぬ★ = 全件が免除の木で「すべて登録済」と出すのは
+    #   画面の嘘である (cmd_1353b D-1 で直したのと同じ型 — 見出しが実態と食い違う)。
+    n_reg = len(cands) - n_waived
+    print(f"[gate-2 coverage] PASS: ★規則に見えた★候補 {len(cands)} 件 ="
+          f" ★登録 {n_reg} 件 / 免除 {n_waived} 件 (うち★無期限 {n_open_ended} 件★)★"
+          f" — 免除は可視・期限切れ 0 件・ID言及 {len(refs)} 件に幽霊なし"
           f" — ★但し視野は全域でない: {vision}★")
+    return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ★木の点呼 (--tree-census・cmd_1374)★
+#
+#   上の登録検知は「見ておる木の中で、台帳に無い牙」を数える = ★盲★ を塞ぐ層である。
+#   本層はその ★一段外★ = 「そもそも どの gate も見ておらぬ木」を数える。
+#   ★見ておらぬ場所には、盲であることすら分からぬ★ (cmd_1374 north_star)。
+#
+#   ■ 見ておる木をどう知るか = ★宣言でなく【実際に走った物】を数える★
+#     gate_nightly が各 gate を撃つ度に repo-root を --watched-file へ書き足し、
+#     その file を本層が読む。★gate の呼び出し行を消せば、その木は記録されぬ★ゆえ
+#     「配線を消したのに watched のまま」という食い違いが ★構造的に起こり得ぬ★。
+#     (cmd_1359 の「番人は書いただけでは番をせぬ」を、点呼自身へ当てたもの)
+#
+#   ■ 木の全数をどう知るか = ★system 自身が持つ独立の登録 (config/projects.yaml)★
+#     + 見ておる木 + それらの submodule。★己の記憶を分母にせぬ★ (cmd_1370 の流儀)。
+# ─────────────────────────────────────────────────────────────────────────────
+def _win2wsl(p: str) -> str:
+    """projects.yaml は Windows 表記ゆえ WSL path へ写す (C:/x → /mnt/c/x)。"""
+    p = p.replace("\\", "/")
+    if len(p) > 1 and p[1] == ":":
+        return f"/mnt/{p[0].lower()}{p[2:]}"
+    return p
+
+
+def _git_toplevel(p: str) -> str | None:
+    try:
+        r = subprocess.run(["git", "-C", p, "rev-parse", "--show-toplevel"],
+                           capture_output=True, text=True, timeout=60)
+        return r.stdout.strip() or None if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _submodule_paths(top: str) -> list[str]:
+    gm = Path(top) / ".gitmodules"
+    if not gm.is_file():
+        return []
+    out = []
+    for line in gm.read_text(encoding="utf-8", errors="replace").splitlines():
+        s = line.strip()
+        if s.startswith("path"):
+            out.append(s.split("=", 1)[1].strip())
+    return out
+
+
+def tree_census(registry: Path, watched_file: Path | None, projects: Path) -> int:
+    """牙を持つのに どの gate も見ておらぬ repo を名指す。0 PASS / 1 FAIL / 2 UNDETERMINED。"""
+    import yaml
+    # ── 見ておる木 (実際に走った物) ──
+    watched: set[str] = set()
+    if watched_file and watched_file.is_file():
+        for line in watched_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            t = _git_toplevel(line)
+            if t is None:
+                # gate が撃った先が git repo でない = 記録の取り違え/path 崩れ。
+                # ★黙って代用の path を watched へ入れぬ★ (それをすると照合が外れた事に
+                #   気付かぬまま「見ておることになっておる木」が生まれる)。
+                print(f"[木の点呼] UNDETERMINED: gate が撃った先が git repo でない: {line}"
+                      " = 記録の取り違え / path 崩れの疑い (黙って読み替えはせぬ)")
+                return 2
+            watched.add(t)
+    if not watched:
+        print("[木の点呼] UNDETERMINED: ★見ておる木が 0 本★ = 点呼の分母が立たぬ"
+              " (--watched-file が空/不在 = gate が1つも走っておらぬか配線が切れた疑い)。"
+              " ★0 件は PASS ではない★")
+        return 2
+
+    # ── 免除簿 (期限つき・登録検知の免除と同じ掟) ──
+    wmap: dict[str, str] = {}
+    w_until: dict[str, datetime.date] = {}
+    if registry.is_file():
+        try:
+            data = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            print(f"[木の点呼] UNDETERMINED: 台帳が parse 不能: {e}")
+            return 2
+        for w in (data.get("tree_census_waivers") or []):
+            if not isinstance(w, dict) or not w.get("path") or not w.get("reason"):
+                print(f"[木の点呼] UNDETERMINED: tree_census_waivers に path/reason を欠く entry: {w!r}"
+                      " (曖昧な免除は免除でない)")
+                return 2
+            p = str(w["path"])
+            wmap[p] = str(w["reason"])
+            if w.get("until") is not None:
+                try:
+                    w_until[p] = datetime.date.fromisoformat(str(w["until"]).strip())
+                except ValueError:
+                    print(f"[木の点呼] UNDETERMINED: 免除 {p} の until が日付として読めぬ"
+                          f" ({w['until']!r}) — YYYY-MM-DD で書け")
+                    return 2
+
+    # ── 木の全数 (projects.yaml ∪ 見ておる木 ∪ submodule) ──
+    universe: dict[str, list[str]] = {}   # toplevel → 由来 label 群
+    missing: list[tuple[str, str]] = []   # (label, path) = 登録されておるのに実在せぬ
+    def add(label: str, path: str) -> str | None:
+        top = _git_toplevel(path)
+        if not top:
+            missing.append((label, path))
+            return None
+        universe.setdefault(top, []).append(label)
+        return top
+
+    if projects.is_file():
+        try:
+            pdata = yaml.safe_load(projects.read_text(encoding="utf-8")) or {}
+        except Exception as e:
+            print(f"[木の点呼] UNDETERMINED: projects.yaml が parse 不能: {e}")
+            return 2
+        for e in (pdata.get("projects") or []):
+            if isinstance(e, dict) and e.get("path"):
+                add(f"projects.yaml:{e.get('id', '?')}", _win2wsl(str(e["path"])))
+    else:
+        print(f"[木の点呼] UNDETERMINED: 木の登録簿が見えぬ: {projects}"
+              " = 分母を system の登録から採れぬ (己の記憶を分母にはせぬ)")
+        return 2
+    for w in sorted(watched):
+        add("gate が見ておる木", w)
+    # ★見ておる木の【親】も分母に入れる (cmd_1374 の自己適用で判った要衝)★
+    #   本 cmd の穴そのものが ★子 (backend submodule) は見ておるが親 (app 本体) は
+    #   見ておらぬ★ という形であった。親を辿らねば、点呼の分母は
+    #   「projects.yaml に載っておる木」+「既に見ておる木」に留まり、
+    #   ★未監視の親は分母にすら入らぬ = 点呼が【常に緑】になる★。
+    #   実際、初版はこの穴を持っており ★app 本体を watched から外しても PASS を返した★
+    #   = 検知すべき当のものを検知できぬ試験であった (自己適用で捕えた)。
+    for w in sorted(watched):
+        cur = Path(w).resolve()
+        for parent in cur.parents:
+            top = _git_toplevel(str(parent))
+            if top and top != str(cur):
+                add(f"{cur.name} の親", top)
+                break
+    for top in list(universe):
+        for sub in _submodule_paths(top):
+            add(f"submodule of {Path(top).name}", str(Path(top) / sub))
+
+    # ── 点呼 ──
+    today = _today()
+    unwatched_fanged: list[str] = []
+    expired: list[str] = []
+    n_watched = n_fangless = n_waived = 0
+    for top in sorted(universe):
+        labels = "/".join(sorted(set(universe[top])))
+        cands, err = scan_mutation_test_candidates(Path(top))
+        if err:
+            print(f"[木の点呼] UNDETERMINED: {top} を走査できぬ: {err}")
+            return 2
+        n = len(cands)
+        if top in watched:
+            n_watched += 1
+            print(f"  ok   [WATCHED]      {top} (牙 {n} 件) ← {labels}")
+        elif n == 0:
+            n_fangless += 1
+            print(f"  注   [牙なし・未監視] {top} ← {labels}"
+                  " (今は失う物が無い。★牙が生えても誰も見ぬ★ゆえ点呼には残す)")
+        elif top in wmap:
+            due = w_until.get(top)
+            if due is not None and today > due:
+                expired.append(top)
+                print(f"  ★NG★ [免除期限切れ]  {top} (牙 {n} 件): 期限 {due} を過ぎた"
+                      f" (本日 {today}) — 理由「{wmap[top]}」")
+            elif due is None:
+                n_waived += 1
+                print(f"  免除 [★無期限★]     {top} (牙 {n} 件): {wmap[top]}"
+                      " ← ★いつ返すか決まっておらぬ★")
+            else:
+                n_waived += 1
+                print(f"  免除 [〜{due}]  {top} (牙 {n} 件): {wmap[top]}")
+        else:
+            unwatched_fanged.append(top)
+            print(f"  ★NG★ [UNWATCHED]    {top}: ★牙 {n} 件を持つのに どの gate も見ておらぬ★"
+                  f" ← {labels}")
+            for rel in sorted(cands):
+                print(f"          - {rel}")
+    for label, path in missing:
+        print(f"  注   [登録が古い]    {path} ← {label}"
+              " = 登録されておるのに repo として実在せぬ。★登録が実体を指さぬ間、"
+              "その木は点呼に載らぬ = 見えぬ穴になりうる★")
+    for wp in sorted(set(wmap) - set(universe)):
+        print(f"  注   免除の空撃ち   {wp} (点呼に居らぬ = path 変更/消滅。waiver を掃除せよ)")
+
+    total = len(universe)
+    # ★真空 PASS 禁 (家老 規律(3) 2026-07-26: 道具の exit code でなく【成果物の実数】を数えよ)★
+    #   git が全滅する / 登録簿が空 / path が総崩れ ⇒ 木 0 本 でも「未監視 0 本」ゆえ
+    #   PASS が出てしまう。★数えた木が 0 本なのは「全部見えておる」ではない★。
+    if total == 0:
+        print("[木の点呼] UNDETERMINED: ★点呼できた木が 0 本★ = 登録簿も実地も空"
+              " (git 不通 / path 総崩れの疑い)。★0 本は PASS ではない★")
+        return 2
+    print(f"  [点呼] 木 {total} 本 = 見ておる {n_watched} / 免除 {n_waived}"
+          f" / ★見ておらぬが牙あり {len(unwatched_fanged)}★ / 牙なし未監視 {n_fangless}"
+          f" / 登録が古い {len(missing)}")
+    if unwatched_fanged or expired:
+        print(f"[木の点呼] FAIL: ★どの gate も見ておらぬ牙持ちの木 {len(unwatched_fanged)} 本★"
+              f" / ★免除期限切れ {len(expired)} 本★")
+        print("  処方: その木を gate_nightly の監視下へ入れる (台帳を置き coverage を撃つ) か、")
+        print("        tree_census_waivers へ ★理由と until (いつ返すか) をつけて★ 免除せよ。")
+        return 1
+    print(f"[木の点呼] PASS: 牙を持つ木はすべて監視下 (免除 {n_waived} 本は可視・"
+          f"★牙なし未監視 {n_fangless} 本は牙が生えれば赤へ変わる★)")
     return 0
 
 
@@ -644,10 +909,30 @@ def _cov_entry(eid: str, paths: list[str]):
     return {"id": eid, "desc": eid, "paths": paths, "mutate": "true", "test": "true"}
 
 
-def _invoke(args: list[str]) -> tuple[int, str]:
+def _invoke(args: list[str], today: str | None = None) -> tuple[int, str]:
+    env = dict(os.environ)
+    # ★試験は必ず日付を固定して撃つ★ = 期限つき免除の検分を暦に依らせると、
+    #   ある日から試験が黙る/鳴る形になり、本 gate が塞ごうとしておる型そのものになる。
+    if today is not None:
+        env["GATE_TODAY"] = today
+    else:
+        env.pop("GATE_TODAY", None)
     r = subprocess.run([sys.executable, str(Path(__file__).resolve())] + args,
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
     return r.returncode, r.stdout
+
+
+def _write_census_reg(path: Path, waivers: list) -> None:
+    import yaml
+    path.write_text(yaml.safe_dump({"mutations": [], "tree_census_waivers": waivers},
+                                   allow_unicode=True))
+
+
+def _write_projects(path: Path, paths: list[str]) -> None:
+    import yaml
+    path.write_text(yaml.safe_dump(
+        {"projects": [{"id": f"p{i}", "path": p} for i, p in enumerate(paths)]},
+        allow_unicode=True))
 
 
 def selftest() -> int:
@@ -904,6 +1189,143 @@ def selftest() -> int:
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
         expect("T22 実在ID言及=幽霊扱いせぬ", 0, rc, "幽霊なし", out)
 
+        # ── ★期限つき免除 (cmd_1374)★ = 免除は【いつ返すか】が決まって初めて免除 ──
+        # 素材は共通: 対照 + 未登録の変異test 1本を、免除の書き方だけ変えて撃つ。
+        def _waiver_repo(tag: str):
+            return _mk_git_repo(T / tag, {ctl: _COV_CONTROL_BODY,
+                                          "tests/rogue_mutation.bats": _COV_ROGUE_BATS})
+
+        # T27: 期限が未来 → 免除は効く (PASS) が ★期限つきと明示される★
+        repo = _waiver_repo("t27")
+        reg = T / "t27reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])],
+                   waivers=[{"path": "tests/rogue_mutation.bats", "reason": "所有者の手番ゆえ待つ",
+                             "until": "2026-08-31"}])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)],
+                          today="2026-07-26")
+        expect("T27 期限内の免除=PASS", 0, rc, "[WAIVED〜2026-08-31]", out)
+
+        # T28: ★期限切れ → 免除が【自分で返る】= FAIL★
+        #      これが本層の芯である。★黙って延びる道が無い★ことの実証。
+        repo = _waiver_repo("t28")
+        reg = T / "t28reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])],
+                   waivers=[{"path": "tests/rogue_mutation.bats", "reason": "所有者の手番ゆえ待つ",
+                             "until": "2026-08-31"}])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)],
+                          today="2026-09-01")
+        expect("T28 ★期限切れ免除=FAIL (借金が返る)★", 1, rc, "[WAIVER-EXPIRED]", out)
+        expect("T28b 期限切れの名指し", 1, rc, "tests/rogue_mutation.bats", out)
+
+        # T29: 期限無し → 赤にはせぬが ★無期限と名指しで数える★ (黙って永久にせぬ)
+        repo = _waiver_repo("t29")
+        reg = T / "t29reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])],
+                   waivers=[{"path": "tests/rogue_mutation.bats", "reason": "期限を書いておらぬ免除"}])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)],
+                          today="2026-07-26")
+        expect("T29 無期限免除=PASSだが名指しで可視", 0, rc, "★無期限★", out)
+        expect("T29b PASS 行が無期限を数える", 0, rc, "うち★無期限 1 件★", out)
+
+        # T30: 読めぬ期限 → UNDETERMINED (★読めぬ期限は期限でない★)
+        repo = _waiver_repo("t30")
+        reg = T / "t30reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])],
+                   waivers=[{"path": "tests/rogue_mutation.bats", "reason": "r", "until": "来月中"}])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)],
+                          today="2026-07-26")
+        expect("T30 読めぬ期限=UNDETERMINED", 2, rc, "読めぬ期限は期限でない", out)
+
+        # ── ★木の点呼 (cmd_1374)★ = そもそも どの gate も見ておらぬ木を名指す ──
+        fanged = _mk_git_repo(T / "c_fanged", {"tests/rogue_mutation.bats": _COV_ROGUE_BATS})
+        plain = _mk_git_repo(T / "c_plain", {"README.md": "牙なし\n"})
+        # ★決して監視されぬ牙なしの木★ = 「牙なし未監視」の数が本当に効いておるかを撃つ的。
+        #   これを置かねば T33b は常に 0 を見ることになり ★変異させても落ちぬ試験★ になる
+        #   ([[feedback_green_tests_that_prove_nothing]] 類型3 — 自分の試験へ当てたもの)。
+        plain2 = _mk_git_repo(T / "c_plain2", {"README.md": "牙なし2\n"})
+        creg = T / "creg.yaml"
+        cproj = T / "cproj.yaml"
+        _write_census_reg(creg, [])
+        _write_projects(cproj, [str(fanged), str(plain), str(plain2)])
+
+        # T31: ★見ておる木が 0 本 = UNDETERMINED★ (真空 PASS 禁)
+        empty_watched = T / "watched_empty.txt"
+        empty_watched.write_text("")
+        rc, out = _invoke(["--tree-census", "--registry", str(creg), "--projects", str(cproj),
+                           "--watched-file", str(empty_watched)])
+        expect("T31 見ておる木0本=UNDETERMINED", 2, rc, "点呼の分母が立たぬ", out)
+
+        # T32: ★牙を持つのに誰も見ておらぬ木 = FAIL + 名指し★ (本 cmd の実事故そのもの)
+        watched_f = T / "watched.txt"
+        watched_f.write_text(f"{plain}\n")
+        rc, out = _invoke(["--tree-census", "--registry", str(creg), "--projects", str(cproj),
+                           "--watched-file", str(watched_f)])
+        expect("T32 ★未監視の牙持ち木=FAIL★", 1, rc, "[UNWATCHED]", out)
+        expect("T32b 木の名指し", 1, rc, str(fanged), out)
+        expect("T32c 牙の内訳も出す", 1, rc, "tests/rogue_mutation.bats", out)
+
+        # T33: 監視下へ入れれば緑 (= 是正が効くことの対照)
+        watched_f.write_text(f"{plain}\n{fanged}\n")
+        rc, out = _invoke(["--tree-census", "--registry", str(creg), "--projects", str(cproj),
+                           "--watched-file", str(watched_f)])
+        expect("T33 監視下=PASS", 0, rc, "牙を持つ木はすべて監視下", out)
+        expect("T33b 牙なし未監視も数える", 0, rc, "牙なし未監視 1", out)
+
+        # T35: ★親が未監視なら赤くなる (cmd_1374 の実事故そのもの)★
+        #      子 (submodule) だけを見ておる状態を組み、親が牙を持つ時に名指せるかを撃つ。
+        #      ★初版はこれを取り逃がした★ = 親は分母にすら入らず常に緑を返した。
+        #      ★登録簿 (projects.yaml) に親を載せずに撃つ★のが肝 =
+        #      「登録が古い/抜けておっても構造だけで親へ届く」ことを示すため。
+        parent = _mk_git_repo(T / "c_parent", {"tests/rogue_mutation.bats": _COV_ROGUE_BATS})
+        child = parent / "sub"
+        child.mkdir(parents=True, exist_ok=True)
+        (child / "README.md").write_text("子 repo\n", encoding="utf-8")
+        for cmd in (["git", "init", "-q"], ["git", "add", "-A"]):
+            subprocess.run(cmd, cwd=child, check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        pproj = T / "pproj.yaml"
+        _write_projects(pproj, [str(plain)])          # ★親を登録簿に載せぬ★
+        pwatched = T / "pwatched.txt"
+        pwatched.write_text(f"{child}\n")             # 子だけを見ておる
+        preg = T / "pregistry.yaml"
+        _write_census_reg(preg, [])
+        rc, out = _invoke(["--tree-census", "--registry", str(preg), "--projects", str(pproj),
+                           "--watched-file", str(pwatched)])
+        expect("T35 ★子だけ監視=親の牙を名指す★", 1, rc, "[UNWATCHED]", out)
+        expect("T35b 親の path を名指す", 1, rc, str(parent), out)
+
+        # ── ★家老 規律(3)/(3b) を本 gate 自身へ当てた層 (2026-07-26)★ ──
+        #    「道具の exit code でなく成果物の実数を数えよ」「代用品の申告を拾って止めよ」
+        # T36: ★点呼できた木が 0 本 = UNDETERMINED★ (真空 PASS 禁)
+        empty_proj = T / "emptyproj.yaml"
+        _write_projects(empty_proj, [])
+        ghost_watched = T / "ghost_watched.txt"
+        ghost_watched.write_text(f"{T / 'no_such_repo'}\n")
+        rc, out = _invoke(["--tree-census", "--registry", str(creg), "--projects", str(empty_proj),
+                           "--watched-file", str(ghost_watched)])
+        expect("T36 gate が撃った先が非repo=UNDETERMINED", 2, rc, "git repo でない", out)
+
+        # T37: ★GATE_TODAY が読めぬ時、黙って本日へ倒れぬ★ (代用品の申告を拾う)
+        repo = _waiver_repo("t37")
+        reg = T / "t37reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])],
+                   waivers=[{"path": "tests/rogue_mutation.bats", "reason": "r",
+                             "until": "2026-08-31"}])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)],
+                          today="きのう")
+        expect("T37 読めぬGATE_TODAY=黙って倒れぬ", 1, rc, "黙って本日へ倒れることはせぬ", out)
+
+        # T34: 点呼の免除も期限切れで返る (登録検知の免除と同じ掟)
+        _write_census_reg(creg, [{"path": str(fanged), "reason": "別 cmd で扱う",
+                                  "until": "2026-08-31"}])
+        watched_f.write_text(f"{plain}\n")
+        rc, out = _invoke(["--tree-census", "--registry", str(creg), "--projects", str(cproj),
+                           "--watched-file", str(watched_f)], today="2026-07-26")
+        expect("T34 点呼の期限内免除=PASS", 0, rc, "免除 1 本は可視", out)
+        rc, out = _invoke(["--tree-census", "--registry", str(creg), "--projects", str(cproj),
+                           "--watched-file", str(watched_f)], today="2026-09-01")
+        expect("T34b ★点呼の免除も期限切れで返る★", 1, rc, "[免除期限切れ]", out)
+
     print("----")
     if ng == 0:
         print(f"[gate-2 selftest] {ok}/{ok} ALL PASS")
@@ -920,9 +1342,17 @@ def main() -> int:
     ap.add_argument("--coverage", action="store_true",
                     help="cmd_1352b: 変異testらしき file が台帳に登録されておるかの検知層")
     ap.add_argument("--selftest", action="store_true")
+    ap.add_argument("--tree-census", action="store_true",
+                    help="cmd_1374: 牙を持つのに どの gate も見ておらぬ repo を名指す")
+    ap.add_argument("--watched-file", type=Path, default=None,
+                    help="gate が実際に撃った repo-root の一覧 (--tree-census 用)")
+    ap.add_argument("--projects", type=Path, default=REPO_ROOT / "config" / "projects.yaml",
+                    help="木の登録簿 (点呼の分母)")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if a.tree_census:
+        return tree_census(a.registry, a.watched_file, a.projects)
     if a.sanity:
         return sanity(a.registry)
     if a.coverage:

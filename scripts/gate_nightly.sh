@@ -93,8 +93,11 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     wirenote=""
     [ "$wiring_rc" -ne 0 ] && wirenote="★stall_watchdog の cron 配線不在=帳簿漏れの番人が誰にも呼ばれておらぬ (cmd_1359)★ "
     undistnote=""
-    # 所見は undist 側の出力から直に採る (上の detail は gate-1/2 の out しか畳んでおらぬ)
-    [ "$undist_rc" -ne 0 ] && undistnote="★配られておらぬ道具あり (cmd_1367)=$(printf '%s' "$undist_out" | grep -E 'UNDISTRIBUTED|UNDETERMINED|allowlist' | head -4 | awk '{printf "%s・", $0}' | sed 's/: /：/g')★ "
+    # 所見は undist 側の出力から直に採る (上の detail は gate-1/2 の out しか畳んでおらぬ)。
+    # ★角括弧つきの判定行のみを拾う★ = 内訳行にも "★UNDISTRIBUTED=1★" の語が出るゆえ、
+    #   語で拾うと集計行が所見を埋め ★何が配られておらぬのかを名指しできぬ警告★ になる
+    #   (2026-07-26 worktree 実射で実測。cmd_1355b で PASS 行が所見を押し出したのと同型)。
+    [ "$undist_rc" -ne 0 ] && undistnote="★配られておらぬ道具あり (cmd_1367)=$(printf '%s' "$undist_out" | grep -E '\[(UNDISTRIBUTED|FAIL|UNDETERMINED)\]' | head -4 | awk '{printf "%s・", $0}' | sed 's/: /：/g')★ "
     msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/配布(cmd_1367)=$(verdict "$undist_rc")。${hooknote}${wirenote}${undistnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2

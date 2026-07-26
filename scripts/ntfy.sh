@@ -46,8 +46,30 @@ case "$BODY" in
         BODY="$(cat "$_BF")"
         ;;
 esac
-LOG_FILE="$SCRIPT_DIR/logs/ntfy_send.log"
-mkdir -p "$SCRIPT_DIR/logs"
+# ★NTFY_LOG_FILE = 試験の口★ (既定は従前どおり logs/ntfy_send.log)。
+#   ★之が無ければ (c) の変異試験は【本物の log を汚す】か【撃たぬ】かの二択になる★。
+LOG_FILE="${NTFY_LOG_FILE:-$SCRIPT_DIR/logs/ntfy_send.log}"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# ★★cmd_1381 段5 (a) — log を【機械が読める1行】にする (2026-07-27 足軽四号)★★
+#   ■ ★実測で判った瑕疵 (推測ではない)★= 本 log 1,097 行を byte で検めた:
+#       ★46 箇所の【不正 UTF-8】が現に在った★ = 全て 117 byte 行の 115〜116 byte 目 =
+#       ★`head -c 80` が多byte文字を途中で切っておった★ (前置き "…title=" が 37 byte / 37+80=117)。
+#     ⇒ ★python の read_text(encoding="utf-8") は本物の log を今 読めば落ちる★ (実測で落ちた)。
+#     ⇒ ★之は cmd_1381 差し戻し F-2 と同じ族★= 我らの側の byte 列の落ち度が、
+#       読み手を落とし ★「通知路が死んだ」の色に化けうる★。
+#   ■ ★併せて【1行1事象】が構造で保たれておらなんだ★= title に改行が在れば行が割れる。
+#     (本 log では現に起きておらぬ = ★起きなんだのは盤面のおかげであり、守りのおかげではない★)
+#   ■ ★処方 = 三段★ (順序に意味が在る):
+#       (1) 制御文字を除く    → ★改行/CR/TAB が消える = 1行1事象が【構造で】立つ★
+#       (2) 80 byte で切る    → 従前と同じ長さの上限
+#       (3) iconv -c で漉す   → ★(2) が作った壊れた末尾の多byteだけが落ちる★
+#     ★(3) を (2) の後に置かねば意味が無い★= 壊すのは (2) ゆえ、漉すのは其の後である。
+_log_title() {
+  # ★|| true★= head の早仕舞い (SIGPIPE) と iconv の「末尾が不完全」の rc を飲む。
+  #   ★飲んでよいのは rc のみ★= 出力 (漉された妥当な UTF-8) は現に出ておる。
+  printf '%s' "${1-}" | tr -d '\000-\037\177' | head -c 80 | iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true
+}
 
 # ★cmd_1381 段4 (2026-07-27 足軽四号): curl が死んだ時【1行も残らぬ】のを塞ぐ★
 #   旧版は set -e の下で `_http_status=$(curl …)` を撃っており、★curl が非0で死ぬと代入の段で
@@ -63,11 +85,22 @@ if [ -n "$BODY" ]; then
 else
   _http_status=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_ARGS[@]}" -H "Tags: outbound" -d "$TITLE" "https://ntfy.sh/$TOPIC" 2>/dev/null) || _curl_rc=$?
 fi
+# ★★段5 (a) の書き出し = 【一本の口】から出す★★
+#   ■ ★旧版は成功と失敗で別々の echo を持っており、★成功行にだけ curl_rc が無かった★ =
+#     ★読み手から見て【場が固定でない】★ = 段5 (a) の下命「rc と HTTP と時刻が固定位置に在る形」に反する。
+#   ■ ★時刻に offset を足した★ (%:z) = 旧行は naive ゆえ ★読み手が盤面の TZ を仮定せねば齢を出せなんだ★。
+#     ⇒ ★新しい行は盤面の TZ に依らず齢が出る★ (判定子の [NTFY-SEND-CALENDAR] が要らぬ側へ寄る)。
+#   ■ ★旧 1,097 行との後方互換は実測で確かめてある★= curl_rc を optional 群にした正規で
+#     ★1,097/1,097 が今も解ける★ (足軽四号 01:1x)。★形を変えたが、過去を読めなくはしておらぬ★。
+#   ■ ★失うた物も名乗る★= 段4 で得た「成功行は従前と byte 一致」は ★本改修で意図して手放した★ =
+#     ★機械可読の方が値打ちが上と判じたゆえ★ (家老の下命が其れを求めておる)。
+_log_line() {
+  echo "[$(date '+%Y-%m-%dT%H:%M:%S%:z')] HTTP=${_http_status:-NONE} curl_rc=$_curl_rc title=$(_log_title "$TITLE")" >> "$LOG_FILE"
+}
+_log_line
 if [ "$_curl_rc" -ne 0 ]; then
-  echo "[$(date '+%Y-%m-%dT%H:%M:%S')] HTTP=${_http_status:-NONE} curl_rc=$_curl_rc title=$(echo "$TITLE" | head -c 80)" >> "$LOG_FILE"
   exit "$_curl_rc"   # ★従前 set -e が返しておった値と同じ★
 fi
-echo "[$(date '+%Y-%m-%dT%H:%M:%S')] HTTP=$_http_status title=$(echo "$TITLE" | head -c 80)" >> "$LOG_FILE"
 
 # ★cmd_1363: 送信の失敗を【黙って】飲まぬ★
 #   旧版は HTTP status を log へ書くだけで ★何が起きても exit 0★ であった =
@@ -77,7 +110,9 @@ echo "[$(date '+%Y-%m-%dT%H:%M:%S')] HTTP=$_http_status title=$(echo "$TITLE" | 
 case "$_http_status" in
     2??) ;;  # 届いた
     *)
-        echo "[ntfy] FAILED: HTTP=$_http_status — ★通知は届いておらぬ★ (title=$(echo "$TITLE" | head -c 60))" >&2
+        # ★同じ helper を通す★= stderr も ★多byteを途中で切って化けさせぬ・改行で行を割らせぬ★
+        #   (60→80 byte へ揃えた。同じ瑕疵が二箇所に在ったゆえ、二箇所とも塞ぐ)
+        echo "[ntfy] FAILED: HTTP=$_http_status — ★通知は届いておらぬ★ (title=$(_log_title "$TITLE"))" >&2
         exit 1
         ;;
 esac

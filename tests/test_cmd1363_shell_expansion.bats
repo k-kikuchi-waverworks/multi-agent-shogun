@@ -28,6 +28,14 @@ setup_file() {
 setup() {
     TESTDIR="$(mktemp -d)"
     mkdir -p "$TESTDIR/scripts" "$TESTDIR/queue/inbox"
+    # ★2026-07-27 cmd_1381 段5(a) 足軽四号★ = ★本試験は【本番の logs/ntfy_send.log】へ書き込んでおった★。
+    #   N-001/N-002 が偽 curl で ntfy.sh を走らせるゆえ、走るたび "title=テスト" の行が
+    #   ★本番の記録へ 2 行 積まれる★ (実測: 2026-07-27 01:20〜01:21 に 4 行 積まれておるのを発見)。
+    #   ★本物の矢は一度も飛んでおらぬ (偽 curl ゆえ) が、記録は現に汚れておった★ =
+    #   ★段5(b) の判定子は此の log を読む★ ⇒ 試験の 500 が本番の「失敗」として数えられ、
+    #   ★3 度走らせれば閾 (3件/3h) に達して偽の赤が出る★。
+    #   ⇒ 段5(a) で開けた NTFY_LOG_FILE の口へ逃がす (本番の記録を試験で汚さぬ)。
+    export NTFY_LOG_FILE="$TESTDIR/ntfy_send.log"
     cp "$IW" "$TESTDIR/scripts/"
     export TESTDIR
 }

@@ -165,24 +165,46 @@ _SKIP_EVIDENCE = re.compile(
 #
 # 測り方 (静的な anchor 解析はせぬ — 台帳の mutate は 113 通りの綴りで書かれており、
 #          綴りを読む道は必ず取りこぼす。★実際に撃って数える★):
-#   ・第1射 = pristine へ mutate → 文字単位の編集片を採り、★同一の (消えた綴り→現れた綴り) が
-#     何度現れたか★ を数える。n>=2 なら (a)。
-#     ※ 空白のみの組は数から外す = 多行 block の字下げ直しが n 発火に見える偽陽性を実測で潰した。
-#   ・第2射 = 第1射の結果へ ★同じ mutate をもう一度★ 当てる。第1射が触れておらぬ行を
-#     撃ったなら ★別の候補が残っておった★ = (b)。
-#     第2射が己の守り (assert old in s 等) で落ちるのは ★候補が尽きた証★ = 一意。
+#   ・第1射 = pristine へ mutate → ★二つの独立した物差しで数え、多い方を採る★。
+#     - 物差しA (綴り) = 文字単位の編集片を採り、★同一の (消えた綴り→現れた綴り) が
+#       何度現れたか★ を数える。
+#     - 物差しB (行の塊) = ★変わった行の【離れた塊】が幾つか★ を数える (cmd_1382 差し戻し)。
+#       ※ 空白のみの組は両方の数から外す = 多行 block の字下げ直しが n 発火に見える
+#          偽陽性を実測で潰した (物差しB は連続した塊を 1 と数えるゆえ字下げ直しに強い)。
+#   ・残り候補の検分 = ★第1射が変えた行だけを空行に潰した pristine★ へ同じ mutate を当てる。
+#     変われば ★第1射が撃たなんだ候補が残っておった★ = (b)。
+#     己の守り (assert old in s 等) で落ちる / ★1 byte も変えぬ★ のが候補尽き = 一意の証。
+#     ※ 行を消さず空行で潰すのは `sed -i '12s/…'` の類が ★行番号で狙う★ ゆえ。
+#
+# ★物差しBを足した理由 (cmd_1382 差し戻し・軍師一号の名指し)★:
+#   物差しA は ★key の一致★ に頼るゆえ、同じ狙いでも difflib の文字整列が site ごとに
+#   別の境界へ割れると ★key が別物になり、max が 1 しか見ぬ★ = ★少なく数える★。
+#   六号の実測 = `0`→`1` を `aa0aa` / `a00aa` へ当てると ★現に2行へ着弾しておるのに
+#   fired=1 で PASS★ (総当り 1,254,499 組中 1 件・稀ではあるが現に在る)。
+#   ⇒ ★key に依らぬ物差しBを併走させ、多い方を採る★ = 片方が盲でも他方が数える。
+#
+# ★過大申告も咎める (cmd_1382 差し戻し・足軽二号の名指し)★:
+#   旧版は `fired > declared` しか見ておらなんだゆえ ★anchor_sites: 99 と書けば門は黙った★
+#   (六号 実測 rc=0 PASS)。★申告は【飾り】になってはならぬ★ ⇒ ★実測と一致せねば鳴る★。
 #
 # ★この網が答えぬ問い (名乗っておく — 消えたら赤くなる形で下の selftest が縛る)★:
 #   ① ★一意であることは、其の1箇所が【狙った場所】である事を意味せぬ★。
 #      「一意か」と「狙った場所か」は別の問いである (狙いは red_needle が別に縛る)。
-#   ② 第1射が自らの産物を食う形 (置換後の綴りが自分に当たる) では、第2射が同じ場所へ
-#      戻るゆえ ★その先に第2候補が在っても見えぬ★。この型は mutate 側で
-#      `assert s.count(old) == 1` を書くのが唯一の確かな道である。
-#   ③ ★一意でも波及が広ければ同じ穴★ (規律(8) 第三の型・軍師二号)。共有 helper を撃てば
+#   ② ★一意でも波及が広ければ同じ穴★ (規律(8) 第三の型・軍師二号)。共有 helper を撃てば
 #      anchor は一意でも赤の出所が絞れぬ。本層は ★波及の広さを測っておらぬ★。
+#
+# ★かつて②として名乗っておった「自食い型」は、cmd_1382 差し戻しで【塞いだ】★:
+#   第1射が己の産物を食う形 (置換後の綴りが自分に当たる) では第2射が同じ行へ戻るゆえ
+#   ★その先に第2候補が在っても見えなんだ★ (六号 実測: 第2候補が現に残っておるのに PASS)。
+#   ⇒ ★盤面の側を変えて塞いだ★ = 第1射の変えた行を伏せた pristine へ当てるゆえ
+#   ★己の産物が盤面に居らず、自食いが原理的に起こらぬ★。
+#   ※ 初版は「第2射が第1射の触れた行へ戻ったら鳴らす」と書いたが、★これは誤りであった★ =
+#     申告つきの全置換 (T41) まで巻き込んで赤くした。★常に鳴る門は外される★ ゆえ
+#     「戻ったか」でなく ★「撃たれておらぬ候補が在るか」★ を直に問う形へ改めた。
 #
 # 宣言: entry に `anchor_sites: N` を書けば「N 箇所で発火するのが意図である」と申告できる
 #       (既定 1)。★意図的な全置換を禁じてはおらぬ。黙って全置換することを禁じておる★。
+#       ★N は実測と一致せねばならぬ (過大も過小も鳴る)★。
 # ─────────────────────────────────────────────────────────────────────────────
 ANCHOR_SITES_DEFAULT = 1
 
@@ -224,6 +246,104 @@ def anchor_firings(a_root: Path, b_root: Path) -> tuple[int, list]:
     return worst, detail
 
 
+def changed_line_hunks(a_root: Path, b_root: Path) -> int:
+    """★物差しB (cmd_1382 差し戻し)★: 変わった行の【離れた塊】が幾つかを数える。
+
+    物差しA (anchor_firings) は ★同一の (old→new) key★ に頼るゆえ、difflib の文字整列が
+    site ごとに別境界へ割れると key が別物になり ★少なく数える★。本関数は key を見ず
+    ★行の連続性★ だけを見るゆえ、其の盲を持たぬ。
+    ★連続した塊は 1 と数える★ = 多行 block の字下げ直し (1 箇所の編集) を n 発火と誤らぬ。
+    """
+    return _diff_shape(a_root, b_root)[0]
+
+
+def _diff_shape(a_root: Path, b_root: Path):
+    """(塊の数, 純粋な挿入が在るか, 行の移動が在るか) を返す。
+
+    ★形を知る必要が在る理由★= 下の「残り候補の検分」は ★置換型の変異にしか当てはまらぬ★。
+    挿入/追記型と移動型では ★盤面を「消費済」に潰す術が無い★ ゆえ、当て直せば当然また動く
+    (= 候補が残っておる証にならぬ)。★当てはまらぬ検分を当てれば、正しい牙を赤にする★。
+    """
+    import difflib
+    af, bf = _tree_text_files(a_root), _tree_text_files(b_root)
+    hunks = 0
+    has_insert = False
+    has_move = False
+    for rel in sorted(set(af) & set(bf)):
+        al, bl = _read_lines_safe(af[rel]), _read_lines_safe(bf[rel])
+        if al is None or bl is None or al == bl:
+            continue
+        pieces = []
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+                None, al, bl, autojunk=False).get_opcodes():
+            if tag == "equal":
+                continue
+            old, new = "".join(al[i1:i2]), "".join(bl[j1:j2])
+            # ★空白だけが動いた塊は数から外す★ = 字下げ直しを着弾と誤らぬため。
+            #   ※ 判ずるのは【中身が空白か】ではなく ★【動いたのが空白だけか】★ である
+            #     (初版は前者で書いており、行末に空白を足すだけの変異を 1 発火と数えて
+            #      おった = ★己の物差しが己の意図と食い違うておった★ — selftest T49 が捕えた)。
+            if "".join(old.split()) == "".join(new.split()):
+                continue
+            pieces.append(("".join(old.split()), "".join(new.split())))
+
+        # ★行の【移動】は 1 箇所と数える (cmd_1382 差し戻しの実測で判った偽陽性)★:
+        #   ある所から消えた綴りが、余所へそのまま現れておるなら ★1 つの編集★ である。
+        #   実例 = backend MUT-1350-M1 (五号) = 2 つの sed で ★行を移す★ 変異ゆえ
+        #   「消す塊」と「入れる塊」の 2 つに割れ、★初版は之を 2 箇所着弾と誤って鳴らした★。
+        #   ※ 限界 (名乗っておく): 突き合わせは ★同一 file の中★ のみ。file を跨ぐ移動は
+        #     今も 2 と数える (跨ぐ移動を偶然の一致と見分ける術を持たぬゆえ、多く数える側へ倒す)。
+        dels = [i for i, (o, n) in enumerate(pieces) if o and not n]
+        adds = [i for i, (o, n) in enumerate(pieces) if n and not o]
+        used = set()
+        moved = 0
+        for d in dels:
+            for a in adds:
+                if a not in used and pieces[d][0] == pieces[a][1]:
+                    used.add(a)
+                    moved += 1
+                    break
+        if moved:
+            has_move = True
+        if len(adds) > moved:
+            has_insert = True   # 移動と対にならぬ挿入が残っておる = 純粋な挿入/追記
+        hunks += len(pieces) - moved
+    return hunks, has_insert, has_move
+
+
+def _blank_changed_lines(pristine: Path, mut: Path, probe: Path) -> None:
+    """pristine を写し、★第1射が変えた行だけを空行に潰した木★ を probe へ作る。
+
+    ★狙い★= 「第1射が撃たなんだ候補が、まだ残っておるか」を直に問うための盤面。
+    ★行を消さず空行で潰す★のは、`sed -i '12s/x/y/'` の類が ★行番号で狙う★ ゆえ
+    行数を変えれば別の場所を撃ってしまうからである。
+    """
+    import difflib
+    af, bf = _tree_text_files(pristine), _tree_text_files(mut)
+    for rel, src in af.items():
+        dst = probe / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        al = _read_lines_safe(src)
+        if al is None or rel not in bf:
+            shutil.copy2(src, dst)
+            continue
+        bl = _read_lines_safe(bf[rel])
+        if bl is None:
+            shutil.copy2(src, dst)
+            continue
+        out = list(al)
+        for tag, i1, i2, _j1, _j2 in difflib.SequenceMatcher(
+                None, al, bl, autojunk=False).get_opcodes():
+            if tag != "equal":
+                for k in range(i1, i2):
+                    out[k] = ""
+        dst.write_text("\n".join(out), encoding="utf-8", errors="surrogateescape")
+        try:
+            shutil.copystat(src, dst)
+        except Exception:
+            pass
+
+
 def untouched_line_set(pristine: Path, shot1: Path) -> set:
     """第1射が【触れなかった】行の集合。第2射がここを撃てば別候補が在った証。"""
     import difflib
@@ -263,34 +383,85 @@ def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: i
     except (TypeError, ValueError):
         return f"anchor_sites が整数でない: {e.get('anchor_sites')!r}"
 
-    fired, detail = anchor_firings(pristine, mut)
+    by_spelling, detail = anchor_firings(pristine, mut)
+    by_hunks, has_insert, has_move = _diff_shape(pristine, mut)
+    # ★二つの物差しの多い方を採る★ = 片方が盲でも他方が数える (cmd_1382 差し戻し (i))
+    fired = max(by_spelling, by_hunks)
+
     if fired > declared:
         d = "; ".join(f"{x['file']}「{x['old']}」→「{x['new']}」×{x['count']}" for x in detail)
+        # ★どちらの物差しが鳴らしたかを必ず名乗る★ = 「綴りとしては 1 箇所に見える」形が
+        #   現に在るゆえ、内訳が空でも読む者が惑わぬようにする。
+        which = ("綴り+行の塊の双方" if by_spelling == by_hunks else
+                 ("綴り" if by_spelling > by_hunks else "行の塊 (綴りとしては"
+                  f" {by_spelling} 箇所にしか見えぬ)"))
         return (f"★同一の綴り置換が {fired} 箇所で発火 (申告は {declared} 箇所)★ = 狙い+余所を"
                 f"巻き込んでおる。赤が出ても【どの箇所の赤か】を名指しできぬ。"
-                f" 内訳: {d}."
-                f" 処方 = anchor を一意な綴りへ絞る (前後の行を含める) か、全置換が意図なら"
+                f" 数えた物差し = {which} (綴り {by_spelling} / 行の塊 {by_hunks})."
+                + (f" 内訳: {d}." if d else "")
+                + f" 処方 = anchor を一意な綴りへ絞る (前後の行を含める) か、全置換が意図なら"
                 f" 台帳へ anchor_sites: {fired} と書け (黙って全置換するのを禁じておる)")
 
-    # 第2射: 別の候補が残っておらぬか (移動型の検分)
-    mut2 = work / "mut2"
+    if fired == 0:
+        # 空白のみの変更 = 着弾を測る術が無い。★黙って通さぬ★ (未検分は緑ではない)。
+        return ("★着弾を測れなんだ (変わったのは空白のみ)★ = 一意とは言えぬ。"
+                " 処方 = 空白でなく【意味の在る綴り】を変える mutate にせよ")
+
+    if declared > fired:
+        # ★過大申告 = 申告が飾りになる道★ (cmd_1382 差し戻し (ii)・足軽二号の名指し)。
+        # 旧版は fired > declared しか見ておらず、anchor_sites: 99 と書けば門は黙った。
+        return (f"★anchor_sites の申告 {declared} 箇所に対し、実測は {fired} 箇所★ = 過大申告。"
+                f" (綴り {by_spelling} / 行の塊 {by_hunks})"
+                f" ★申告を大きく書けば門は黙る★ ゆえ、申告と実測の食い違いは両向きに咎める。"
+                f" 処方 = 台帳の anchor_sites を {fired} へ直せ (実測に合わせよ)")
+
+    # ★残り候補の検分 (cmd_1382 差し戻し (iii) で「第2射」から置き換えた)★
+    #   ★旧版の第2射の穴★= 第1射の【結果】へもう一度当てておったゆえ、置換後の綴りが
+    #   元の綴りを含む形 (guard→guardX→guardXX) では ★第2射が第1候補へ戻るだけ★ で、
+    #   其の先に候補が在るか否かを一度も見ておらなんだ (★自食い型★・軍師一号の名指し。
+    #   六号の実測 = 第2候補が現に残っておるのに rc=0 PASS)。
+    #   ★今の形★= 第1射が【変えた行だけを空行に潰した pristine】へ当てる =
+    #   ★己の産物が盤面に居らぬゆえ自食いが起こらぬ★。変われば ★撃たれなんだ候補が残っておった★。
+    if has_insert or has_move:
+        # ★此の検分は置換型にしか当てはまらぬ★ (上の _diff_shape の注を見よ)。
+        #   挿入/追記型 = 消える行が無いゆえ盤面を消費済に潰せぬ。
+        #   移動型     = difflib が「消す/入れる」のどちらを選ぶかで潰す行が変わり、
+        #                潰し損ねた側を当て直しが再び撃つ。
+        #   ★いずれも「また変わった」が候補の残存を意味せぬ★ ゆえ、当てずに退く。
+        #   ★何箇所へ挿入/移動したかは 物差しA/B が既に数えておる★ゆえ穴にはならぬ。
+        #   実例 (配線前の全数計数で捕えた偽陽性) = backend MUT-1350-M1 (移動) /
+        #   M2 (追記) / M4 (挿入) = いずれも五号の正しい牙であった。
+        return None
+
+    probe = work / "probe"
     try:
-        shutil.copytree(mut, mut2)
+        _blank_changed_lines(pristine, mut, probe)
     except Exception as ex:
         # ★黙って見送らぬ★ (規律(3b)): 測れなんだ時は「測れなんだ」と名乗る。
         # 黙って None を返せば ★検分しておらぬ物が「一意」の顔をして通る★。
-        return f"着弾の検分ができなんだ (第2射用の複製に失敗: {ex!r}) = 未検分。一意とは言えぬ"
-    rc2, _out2 = run_sh(e["mutate"], mut2, timeout)
+        return f"着弾の検分ができなんだ (残り候補の盤面を作れず: {ex!r}) = 未検分。一意とは言えぬ"
+    before = tree_digest(probe)
+    if before == tree_digest(pristine):
+        # ★伏せる物が無かった = 第1射は pristine から何も【消して】おらぬ★
+        #   (純粋な挿入・追記型の変異。difflib では i1==i2 ゆえ潰す行が無い)。
+        #   ⇒ ★この盤面は pristine と同じゆえ、当て直せば当然また挿入される★ =
+        #   ★「また変わった」は候補が残っておる証にならぬ★。此の検分は【当てはまらぬ】。
+        #   実例 = backend MUT-1350-M2 (追記型) / M4 (挿入型) = 五号。
+        #   ★初版は之を「候補が残っておる」と誤って鳴らした★ (配線前の全数計数が捕えた)。
+        #   挿入型の非一意は ★物差しA/B が【何箇所へ挿入したか】として既に数えておる★ゆえ
+        #   此処を素通しても穴にはならぬ。
+        return None
+    rc2, _out2 = run_sh(e["mutate"], probe, timeout)
     if rc2 is None or rc2 != 0:
-        return None  # 己の守りで落ちた = 候補は尽きておった (一意の証)
-    again = [r for r in removed_lines(mut, mut2) if r in untouched_line_set(pristine, mut)]
-    if again:
-        sample = again[0][1].strip()[:90]
-        return (f"★第2射が【第1射の触れておらぬ行】を {len(again)} 行 撃った = anchor に別の候補が"
-                f"在る★ (replace(old,new,1) 型は先頭を取るゆえ、狙いが黙って別所へ移りうる)。"
-                f" 例:「{sample}」."
-                f" 処方 = anchor を一意な綴りへ絞るか、mutate の中で assert s.count(old) == 1 を書け")
-    return None
+        return None  # 己の守り (assert old in s 等) で落ちた = 候補は尽きておった
+    if before == tree_digest(probe):
+        return None  # 1 byte も変えられなんだ = ★撃たれておらぬ候補は残っておらぬ★ = 一意
+
+    return ("★第1射が撃たなんだ候補が、まだ残っておる★ = anchor が一意でない"
+            " (第1射の変えた行を伏せた盤面へ同じ mutate を当てたら、別の場所が現に変わった)。"
+            " replace(old,new,1) 型は先頭を取るゆえ ★狙いが黙って別所へ移りうる★。"
+            " 処方 = anchor を一意な綴りへ絞る (前後の行を含める) か、"
+            "mutate の中で assert s.count(old) == 1 を書け")
 
 
 def skip_evidence(out: str):
@@ -1564,7 +1735,7 @@ def selftest() -> int:
         MOVE = ("python3 - <<'PY2'\np='tool.sh'\ns=open(p,encoding='utf-8').read()\n"
                 "open(p,'w',encoding='utf-8').write(s.replace('guard() {','guardX() {',1))\nPY2\n")
         rc, out = _anchor_run("move", TWO, MOVE)
-        expect("T39 ★移動型 (別候補が残る) = UNDETERMINED★", 2, rc, "別の候補", out)
+        expect("T39 ★移動型 (別候補が残る) = UNDETERMINED★", 2, rc, "撃たなんだ候補", out)
 
         # T40 (負例): anchor が一意なら同じ mutate でも通る = ★常に鳴る門ではない★
         rc, out = _anchor_run("uniq", ONE, MOVE)
@@ -1597,6 +1768,81 @@ def selftest() -> int:
                           "mutate": "true", "test": "true", "anchor_sites": "いち"}])
         rc, out = _invoke(["--sanity", "--registry", str(bad)])
         expect("T44 anchor_sites 非整数=sanity が止める", 2, rc, "anchor_sites", out)
+
+        # ── ★T45〜T49: cmd_1382 差し戻し3件 (三側すべて塞ぐ)★ ────────────────
+        # T45: ★過大申告も鳴る★ (足軽二号の名指し)。旧版は fired > declared しか見ておらず
+        #      ★anchor_sites: 99 と書けば門は黙った★ (是正前 実測 rc=0 PASS)。
+        rc, out = _anchor_run("overdeclared", TWO, "sed -i 's/guard/guard_X/' tool.sh\n",
+                              {"anchor_sites": 99})
+        expect("T45 ★過大申告は鳴る★", 2, rc, "過大申告", out)
+
+        # T46: ★自食い型★ (軍師一号の名指し)。旧版は第1射の【結果】へ当て直しておったゆえ
+        #      置換後の綴りが元を含む形では第2射が第1候補へ戻るだけで
+        #      ★第2候補が現に残っておるのに rc=0 PASS★ であった (是正前 六号 実測)。
+        SELFFEED = ("python3 - <<'PY2'\np='tool.sh'\ns=open(p,encoding='utf-8').read()\n"
+                    "open(p,'w',encoding='utf-8').write(s.replace('guard','guardX',1))\nPY2\n")
+        rc, out = _anchor_run("selffeed", TWO, SELFFEED, guard="'guard() { echo old'")
+        expect("T46 ★自食い型でも残り候補を捕える★", 2, rc, "撃たなんだ候補", out)
+
+        # T47 (負例): ★残り候補が無ければ通る★ = 候補尽きの証。
+        #   T46 の門が ★常に鳴る門★ にならぬことの対照。
+        rc, out = _anchor_run("exhausted", ONE, MOVE)
+        expect("T47 残り候補なし (候補尽き) は通る (負例)", 0, rc, "PASS", out)
+
+        # T47b (負例・最重要): ★申告つきの全置換は、自食いの綴りでも通る★。
+        #   初版の是正はこれを赤くしておった (T41 が落ちた) = ★正しい entry を殺す門★。
+        #   「戻ったか」でなく「撃たれておらぬ候補が在るか」を問う形へ改めた事の対照である。
+        rc, out = _anchor_run("selffeed_declared", TWO, "sed -i 's/guard/guard_X/' tool.sh\n",
+                              {"anchor_sites": 2})
+        expect("T47b ★申告つき全置換は自食いの綴りでも通る (負例)★", 0, rc, "PASS", out)
+
+        # T48: ★物差しB (行の塊)★ = difflib の key が site ごとに割れて
+        #   ★綴りとしては 1 箇所にしか見えぬのに現に 2 行へ着弾しておる★ 形を捕える。
+        #   (六号 実測: 総当り 1,254,499 組中 1 件 — 稀だが現に在る。是正前は fired=1 で PASS)
+        SKEW = "#!/bin/bash\naa0aa\nfiller\na00aa\n"
+        rc, out = _anchor_run("skew", SKEW, "sed -i 's/0/1/g' tool.sh\n", guard="'aa0aa'")
+        expect("T48 ★綴りで割れても行の塊が数える★", 2, rc, "行の塊", out)
+
+        # T49: ★空白のみの変更は「測れなんだ」と名乗る★ (黙って一意の顔をさせぬ)
+        rc, out = _anchor_run("wsonly", ONE, "sed -i 's/^x=1$/x=1   /' tool.sh\n")
+        expect("T49 空白のみ=着弾を測れなんだ", 2, rc, "測れなんだ", out)
+
+        # ── ★T51〜T53: 配線前の全数計数が捕えた「己の門の偽陽性」3 型 (負例)★ ──────
+        #   ★いずれも実在の台帳 entry で現に鳴っておった★ = 出荷しておれば
+        #   ★他人の正しい牙を 3 本 赤にしておった★。★門を建てる前に数えたゆえ捕まえた★。
+        NEG_GUARD = "'^x=1$' tool.sh && ! grep -q MUT_MARK"
+
+        # T51 (負例): ★追記型★ (printf >>) — 伏せる行が無いゆえ検分は当てはまらぬ。
+        #   実例 = backend MUT-1350-M2 (五号)。初版は「候補が残っておる」と誤って鳴らした。
+        rc, out = _anchor_run("append", ONE, "printf '\\nMUT_MARK\\n' >> tool.sh\n",
+                              guard=NEG_GUARD)
+        expect("T51 ★追記型は鳴らぬ (負例)★", 0, rc, "PASS", out)
+
+        # T52 (負例): ★挿入型★ (sed 's/x/&\\n…/') — 同上 (difflib では i1==i2)。
+        #   実例 = backend MUT-1350-M4 (五号)。
+        rc, out = _anchor_run("insert", ONE, "sed -i 's/^x=1$/&\\nMUT_MARK/' tool.sh\n",
+                              guard=NEG_GUARD)
+        expect("T52 ★挿入型は鳴らぬ (負例)★", 0, rc, "PASS", out)
+
+        # T53 (負例): ★行の移動は 1 箇所と数える★ — 消える塊と現れる塊に割れるが 1 つの編集。
+        #   実例 = backend MUT-1350-M1 (五号) = 2 つの sed で行を移す変異。
+        MOVE_BODY = "#!/bin/bash\nAAA\nBBB\nCCC\nx=1\n"
+        MOVE_MUT = ("sed -i '/^BBB$/d' tool.sh\n"
+                    "sed -i 's/^CCC$/CCC\\nBBB/' tool.sh\n")
+        rc, out = _anchor_run("linemove", MOVE_BODY, MOVE_MUT,
+                              guard="'^BBB$' tool.sh && [ \"$(sed -n 3p tool.sh)\" = BBB ] #")
+        expect("T53 ★行の移動は 1 箇所 (負例)★", 0, rc, "PASS", out)
+
+        # T50: ★gate の実出力の語が docs に在ること★ (cmd_1382 差し戻し・軍師二号)
+        #   ★書いた場所と読まれる場所を揃える★ = 赤を見た者が docs を grep して辿り着けるか。
+        #   ★語が食い違えば此処が赤くなる★ ゆえ、次に出力を整理する者が黙って道を切れぬ。
+        doc = REPO_ROOT / "docs" / "content" / "ops" / "cmd_1352_silent_pitfall_gates.md"
+        doc_txt = doc.read_text(encoding="utf-8") if doc.exists() else ""
+        missing = [w for w in ("同一の綴り置換", "過大申告", "撃たなんだ候補",
+                               "着弾を測れなんだ", "行の塊")
+                   if w not in doc_txt]
+        expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
+               0, len(missing))
 
     print("----")
     if ng == 0:

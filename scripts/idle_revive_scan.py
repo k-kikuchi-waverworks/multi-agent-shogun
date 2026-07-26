@@ -172,6 +172,18 @@ UPSTREAM_FAILURE_PATTERNS = (
     # 長句は物理行を跨いで割れるため足さない。
     "session limit",            # You've hit your session limit · resets 4:30am (Asia/Tokyo)
     "/usage-credits",           # /usage-credits to finish what you’re working on. (CLI 誘導行)
+    # ── cmd_1401 (2026-07-27 01:5x): ★週次上限の族が丸ごと抜けておった★ ──
+    # 実測: 「You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)」を現行の網へ
+    # 食わせると ★detect_upstream_failure が None★ = ★抑止の引き金が一つも当たらぬ★ =
+    # ★週次上限で沈黙した agent は番人の目に【ただの固着】と映り /clear が撃たれる★
+    # (cmd_1355 の実害と同型)。★3 体以上が同時に当たれば停電型 quorum が救うが、
+    #  1〜2 体だけが当たった時は救いが無い★ — 8 体が別々に枠を食う今夜は現に起こりうる。
+    # ★推測ではない★= 一次資料 2 本 (dashboard.md:462 = 家老が 9 pane 走査で書き写した行 /
+    # queue/reports/ashigaru4_report.yaml:2778)。★但し実 pane の byte 凍結ではない★ —
+    # 次に其の banner を見た者は capture-pane で fixture へ凍結せよ (session limit と同じ形へ)。
+    # ★"weekly limit" の 2 語だけを採る★= 折返しを跨がぬ短句の掟どおり。長い方
+    # ("You've hit your weekly limit") は此の短句に含まれるゆえ二重には置かぬ。
+    "weekly limit",             # You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)
 )
 
 # ── cmd_1385: 主文 (head) と 続き行 (continuation) の区別 ──
@@ -195,6 +207,14 @@ UPSTREAM_HEAD_PATTERNS = tuple(
 #   ★「期限を読めなんだ時に、其れを【行が崩れた証】と読んでよい族か」★。
 #   ★期限が読めた時は本 tuple を一度も見ぬ★ (下の upstream_wall_verdict を見よ) =
 #   ★族の登録漏れが【期限を名乗る banner】に対しては構造的に起こらぬ★。
+#
+# ★cmd_1401: "weekly limit" は【入れぬ】★ — 理由を残す (次に読む者が足したくなる形ゆえ):
+#   本 tuple は「期限を読めなんだ時に【行が崩れた証】と読んでよい族か」を決める。
+#   ★週次の期限は「resets Jul 29, 4am」= 日付つきで、現行 RESETS_RE (resets の直後に
+#   数字を待つ綴り) では ★読めぬ★ (実測: parse_resets_eta → None)。
+#   ⇒ 此処へ入れれば「読めぬ = 残渣 = 断定せぬ」へ倒れ、★家老への上流障害警報が消える★。
+#   ★週次の壁は現に立っておる★ゆえ live のまま上げるのが正しい。
+#   ★日付形を読む綴りを足すのは、実 pane の凍結を得てからにせよ★ (推測で網を広げぬ)。
 UPSTREAM_TIMED_HEAD_PATTERNS = ("session limit",)
 
 UPSTREAM_LIVE = "live"          # 壁は今も立っておる (断定してよい)
@@ -1236,12 +1256,37 @@ def selftest_upstream():
                   f"期限の枝が pattern 名に依存しておる (族の登録漏れが再び効く形): "
                   f"reset後={v_stale} reset前={v_live}")
 
+    # ── U10: ★週次上限の族 (cmd_1401)★ ──
+    # ★2026-07-27 01:5x の実測★= 此の literal は網を【一つも】通らず None が返り、
+    # ★週次上限で沈黙した agent へ /clear が撃たれる形★であった (cmd_1355 の実害と同型)。
+    # 一次資料 = dashboard.md:462 / queue/reports/ashigaru4_report.yaml:2778 (★pane の凍結ではない★)。
+    weekly = "You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)"
+    # U10a: ★抑止が効くこと★ = 本任の芯 (期限の精度は二の次)。
+    if detect_upstream_failure(weekly) is None:
+        ng.append("U10a ★週次上限 banner を検知できぬ★ = pattern \"weekly limit\" が消えておる "
+                  "⇒ 週次で沈黙した agent へ /clear が撃たれる (cmd_1401 の実害そのもの)")
+    # U10b: ★断定は live★ = 期限を読めずとも壁は現に立っておる ⇒ 家老へ上がる。
+    #       ("weekly limit" を TIMED 族へ入れると残渣へ倒れて警報が消える = 其の退行の的)
+    v_wk, p_wk, why_wk = upstream_wall_verdict(weekly, datetime.datetime(2026, 7, 27, 2, 0))
+    if v_wk != UPSTREAM_LIVE:
+        ng.append(f"U10b ★週次上限 banner が live と断ぜられぬ★ (verdict={v_wk} why={why_wk!r}) "
+                  f"= 家老への上流障害警報が消える。TIMED 族へ入れたのではないか")
+    # U10c: ★期限は今は読めぬ★ことを【契約として】固定する — 読める様になったら此処が鳴り、
+    #       其の時こそ TIMED 族へ移す判断が要る (黙って挙動が変わらぬための目印)。
+    if parse_resets_eta(weekly, datetime.datetime(2026, 7, 27, 2, 0)) is not None:
+        ng.append("U10c 週次の日付つき期限が読める様になっておる (RESETS_RE が広がった?) "
+                  "⇒ ★TIMED 族へ移すか否かを判じ直せ★ (U10b の前提が変わる)")
+    # U10d: ★過剰抑止の側★ = 「week」を含む良性文言で誤検知せぬ (語を短く採り過ぎておらぬか)。
+    for benign in ("this week's plan", "weekly report generated", "week 3 of the sprint"):
+        if detect_upstream_failure(benign) is not None:
+            ng.append(f"U10d 良性文言を週次上限と誤検知: {benign!r}")
+
     if ng:
         for line in ng:
             print(f"★NG★ {line}")
         print(f"selftest_upstream: FAIL ({len(ng)}件)")
         return 1
-    print("selftest_upstream: PASS (U1-U9 全て契約どおり)")
+    print("selftest_upstream: PASS (U1-U10 全て契約どおり)")
     return 0
 
 

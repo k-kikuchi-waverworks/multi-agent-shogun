@@ -380,6 +380,56 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# T-LOG-011 (cmd_1401): ★週次上限の pane へは /clear も escalation 警報も撃たぬ★。
+# ★U10 (selftest) が縛るのは【検知できるか】まで★= 此処は ★現に撃たれぬか★ を見る
+# (検知しても発行相で撃てば実害は同じゆえ、二段で縛る)。
+# ★escalation 側も同じ網 (detect_upstream_failure) を見ておる★ことを、
+# 同じ literal で ★一度に★ 示す = 家老の問い (5) への機械の答。
+# ---------------------------------------------------------------------------
+@test "T-LOG-011: weekly-limit pane fires neither /clear nor escalation alert (mutation proof: MUT-1401-001)" {
+    _write_stuck_task ashigaru93
+    _write_pane_states ashigaru93:idle
+    local weekly="You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)"
+
+    # (a) revive 経路
+    FAKE_PANE_TEXT="$weekly" run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OUTCOME=revive_not_fired AGENT=ashigaru93 TASK_ID=subtask_log_ashigaru93 REASON=upstream_gate"
+    _refute_file "$INBOX_STUB_RECORD" "^ashigaru93|clear_command|"
+
+    # (b) escalation 経路 = 連続 3 回 clear 済の latch 状態を作る
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/upstream_outage.yaml"
+    cat > "$Q/state/clear_log.yaml" <<EOF
+agents:
+  ashigaru93:
+    last_clear_ts: '$(date -d '30 minutes ago' +%Y-%m-%dT%H:%M:%S)'
+    consecutive: 3
+    last_task_id: subtask_log_ashigaru93
+EOF
+    FAKE_PANE_TEXT="$weekly" run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "^ACTION=escalation_stop AGENT=ashigaru93"
+    echo "$output" | grep -q "OUTCOME=escalation_not_fired AGENT=ashigaru93 TASK_ID=subtask_log_ashigaru93 REASON=upstream_gate"
+    # ★家老への『復帰せず』誤警報も出ておらぬ★ (cmd_1355 で 10 通積もった族)
+    _refute_file "$INBOX_STUB_RECORD" "^karo|idle_revive_escalation_alert|"
+}
+
+# ---------------------------------------------------------------------------
+# T-LOG-012 (cmd_1401 逆向き): ★抑止が過剰でない★。
+# 良性文言 ("weekly report" 等・週次上限ではない) の pane では従前どおり撃つ。
+# これが無ければ「何でも抑止する」実装でも T-LOG-011 は緑になる。
+# ---------------------------------------------------------------------------
+@test "T-LOG-012: a benign 'weekly report' pane still fires revive (the new net is not over-broad)" {
+    _write_stuck_task ashigaru93
+    _write_pane_states ashigaru93:idle
+
+    FAKE_PANE_TEXT="weekly report generated / this week's plan" run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OUTCOME=revive_fired AGENT=ashigaru93 TASK_ID=subtask_log_ashigaru93 REASON=clear_command_sent"
+    grep -q "^ashigaru93|clear_command|" "$INBOX_STUB_RECORD"
+}
+
+# ---------------------------------------------------------------------------
 # T-LOG-008: dry-run は★走行の刻だけ★を記す。判定 state (clear_log) は書かぬ =
 # 「番人は走ったか」と「番人は撃ったか」を別の器で答える (混ぜれば dry-run が
 # rate limit を消費し、次の live が撃てなくなる)。

@@ -383,10 +383,12 @@ YAML
     '
     [ "$status" -eq 0 ]
     grep -q "send-keys.*inbox1" "$MOCK_LOG"
-    if echo "$output" | grep -q "escalating"; then
-        echo "★閾が【下へ】動いた★: 経過 $((declared - 1))s は閾 ${declared}s の直下ゆえ Phase 1 である筈" >&2
-        return 1
-    fi
+    # ★一行の if-then-return 形を保て★ = 段2 の計器 (gate_mutation_replay の NEG_SPELLINGS)
+    #   は ★`if <cmd>; then return 1`★ の一行形しか【負の主張】と数えぬ。
+    #   ★診断を if の外へ出して多行へ崩すと、主張は生きたまま【分母から消える】★
+    #   = ★数は減らず守りだけが見えなくなる★ (拙者が 04:15:53 に現に踏んだ) ゆえ、
+    #   診断は ★条件の中★ へ入れる (grep が当たった時だけ鳴る)。
+    if echo "$output" | grep -q "escalating" && { echo "★閾が【下へ】動いた★: 経過 $((declared - 1))s は閾 ${declared}s の直下ゆえ Phase 1 である筈" >&2; true; }; then return 1; fi
 
     # ── 直上 = 閾ちょうど → ★Phase 2 へ移る★ (`-lt` ゆえ境界は escalation 側) ──
     > "$MOCK_LOG"
@@ -503,10 +505,8 @@ YAML
         process_unread event
     '
     [ "$status" -eq 0 ]
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then
-        echo "★閾が【下へ】動いた★: 前回から ${declared}s は境界ゆえ /clear は抑止される筈 (-lt)" >&2
-        return 1
-    fi
+    # ★一行の if-then-return 形を保て★ (理由は T-ESC-002 の註と同じ = 多行へ崩すと分母から消える)
+    if grep -q "send-keys.*/clear" "$MOCK_LOG" && { echo "★閾が【下へ】動いた★: 前回から ${declared}s は境界ゆえ /clear は抑止される筈 (-lt)" >&2; true; }; then return 1; fi
     echo "$output" | grep -q "/clear cooldown, using Escape+nudge"
 
     # ── 直上 = declared+1 秒 → ★抑止されぬ★ (/clear が現に出る) ──

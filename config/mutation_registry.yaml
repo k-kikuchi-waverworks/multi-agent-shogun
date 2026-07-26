@@ -922,6 +922,104 @@ mutations:
     expect: nonzero
     red_needle: "NG T43"  # 実測 2026-07-26: 抑制を殺すと T43 (負例) が偽の多発火で落ちる
 
+  # ── cmd_1381 段3 (足軽四号) — ★殿への通知路の生死を読む番人★ の牙 ────────────
+  #   守る物 = ★「無い」を「届かなんだ」と読ませぬこと★ が本 gate の急所ゆえ、
+  #   ★三値を二値へ潰す変異★ を主に当てる (軍師二号が §4 で名指しした罠そのもの)。
+  - id: MUT-1381-101
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    desc: |
+      ★★本 gate の急所★★= state file が【無い】時を UNDETERMINED (据わっておらぬ) でなく
+      FAIL (届かなんだ) へ倒す。★之を許せば、通知路は健在なのに毎朝「壊れておる」と嘘を言う★
+      = ★仕掛けが1度も走っておらぬ (HMR で再登録されぬ) だけの状態を、故障と見分けられぬ★
+      ⇒ ★軍師二号の言う「本設計自身が cmd_1359 の再演を起こす」形★。
+      倒せば T1 (state file が無い) と T2 (engine が見えぬ) の2本が落ちるべき。
+    paths: [scripts/gate_ntfy_alive.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_ntfy_alive.py"
+      s = open(p, encoding="utf-8").read()
+      old = '            "⇒ 解錠条件=★殿が engine dev server を再起動なされること★ (それで此の行は消える)"\n        )\n        return UNDET, out'
+      # ★規律(8)★ 撃つ前に数える = 一意でなければ狙いは別の場所へ着弾する
+      assert s.count(old) == 1, f"MUT-1381-101: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, old.replace("return UNDET, out", "return FAIL, out"), 1))
+      PY
+    test: |
+      python3 scripts/gate_ntfy_alive.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ T1 state file が無い"  # 実測 2026-07-26: 未検分→届かなんだ の潰しを T1 が捕える
+
+  - id: MUT-1381-102
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    desc: |
+      ★齢の検査を殺す★= 自己試験が何日 前であろうと「届いた」なら PASS へ倒す。
+      ★昔届いたことは、今 生きておることの証にならぬ★ — 之を許せば、dev server が
+      止まって canary が撃たれなくなっても ★最後の緑が永久に効き続ける★ =
+      ★通知路が死んでも毎朝 PASS が出る★ (本 cmd の北極星が丸ごと空振りになる形)。
+      殺せば T8 (30h) T15 (24.1h 境界の外) T9 (60h) が落ちるべき。
+    paths: [scripts/gate_ntfy_alive.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_ntfy_alive.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    if age > FRESH_HOURS:"
+      assert s.count(old) == 1, f"MUT-1381-102: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "    if False:", 1))
+      PY
+    test: |
+      python3 scripts/gate_ntfy_alive.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ T15 24.1h"  # 実測 2026-07-26: 境界の外が緑へ落ちるのを T15 が捕える
+
+  - id: MUT-1381-103
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    desc: |
+      ★時刻表記の読み違え (9時間ずれ)★= naive な時刻を local (JST) でなく UTC として読む。
+      ★state file は二種の表記を現に混ぜておる★ (engine 実測):
+        probe.lastAt/writtenAt = naive JST / lastAttemptAt・lastFailure.at = ISO-UTC。
+      ⇒ ★naive を UTC と読めば齢が 9h 若く出る★ = ★止まっておる自己試験が「新しい」と見え、
+        偽 PASS が出る★。★之は「暦は思い出すな、撃って写せ (規律(7))」の測定側の顔である★。
+      倒せば T15 (24.1h→15.1h と読めて緑へ落ちる) が落ちるべき。
+    paths: [scripts/gate_ntfy_alive.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_ntfy_alive.py"
+      s = open(p, encoding="utf-8").read()
+      old = "        d = d.replace(tzinfo=now.tzinfo)"
+      assert s.count(old) == 1, f"MUT-1381-103: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(old, "        d = d.replace(tzinfo=_dt.timezone.utc)", 1))
+      PY
+    test: |
+      python3 scripts/gate_ntfy_alive.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ T15 24.1h"  # 実測 2026-07-26: 9h ずれで境界の外が緑になるのを T15 が捕える
+
+  - id: MUT-1381-104
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    desc: |
+      ★盤面のおかげで緑、を防ぐ guard を殺す★ (軍師一号の F-B 型)。
+      本 gate は naive 時刻を local として読むゆえ ★local が JST でなければ其の読みは成り立たぬ★。
+      cron の TZ が変われば ★齢が 9h 若く出て偽 PASS が出る★ ゆえ、暦が食い違う時は緑と呼ばぬ。
+      殺せば T19 (local が JST でない) が落ちるべき。
+      ★之は「今日は日曜ゆえ鳴らぬ」型の裏返し = 環境が変わった時に黙って緑へ倒れる道を塞ぐ牙★。
+    paths: [scripts/gate_ntfy_alive.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_ntfy_alive.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    if off is None or abs(off - 9.0) > 1e-9:"
+      assert s.count(old) == 1, f"MUT-1381-104: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "    if False:", 1))
+      PY
+    test: |
+      python3 scripts/gate_ntfy_alive.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ T19 local が JST でない"  # 実測 2026-07-26: 暦 guard の不在を T19 が捕える
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -171,6 +171,10 @@ scripts/seo_qc.sh
 !scripts/gate_precommit.sh
 !scripts/install_gate_hooks.sh
 !scripts/gate_nightly.sh
+# cmd_1381 段3 (2026-07-26): ★殿への通知路の生死★を毎朝読む番人 (gate_nightly が呼ぶ先)。
+# ★之を whitelist へ書き忘れれば、通知路の番人自身が clone へ配られず、
+#  fresh clone の毎朝は「通知路=見ておらぬ」に静かに戻る★ = cmd_1367 が名指した当の族ゆえ明示で通す。
+!scripts/gate_ntfy_alive.py
 
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)

@@ -672,8 +672,22 @@ mutations:
     #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
     #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
     paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
+    # ═══ ★cmd_1408 錨の追随 (2026-07-27 08:17 六号が己の手で撃ち直して確かめた)★ ═══════
+    # ★何が起きたか★= ★三号の 4076bdf (08:10:59) が REGISTRY_ID_RE の綴りを是正した★
+    #   (壊れた物差し `MUT-\d{3,4}-[A-Za-z0-9]+` → 枝を取り落とさぬ形へ)
+    #   ⇒ ★旧 mutate の錨 `re.compile(r"MUT-` が盤面から消え、sed が空振りした★。
+    # ★六号の独立実測★= ★撃つ前後の md5 が一致 = 1 byte も変えておらぬ★ (三号の申告どおり)。
+    # ★★之は cmd_1387 の当の族 = 他人の commit が他人の牙を黙って鈍らせる、の当日中に拾えた実例★★
+    #   ⇒ ★pre-commit の門が其の場で名指し、朝の門も独立に「空振り」と名指した★
+    #   = ★★層が二つ在る事の値打ちが、実物で示された★★。
+    # ★★咎むべきは三号ではない★★= ★正しい是正が、正しく牙を鈍らせた★ (一号が cmd_1363 で名乗った形と同じ)。
+    # ★新しい錨の実測 (六号・08:17)★:
+    #   baseline = 88/88 ALL PASS → 変異後 rc=1 / ok=80 ng=8 / ★needle「NG T21」hit=1★
+    #   ★随伴して T70 / T70b / T70c / T70d / T70e / T71 / T71b の 7 本も落ちた★
+    #   = ★★牙は前より太くなっておる★★ (三号が幽霊の出所を割る口を足したゆえ)。
+    # ★suspected_by は四号のまま動かさぬ★= ★己の疑いでない物を己の名で載せぬ★ (家老 08:14 下命)。
     mutate: |
-      sed -i 's/^REGISTRY_ID_RE = re.compile(r"MUT-/REGISTRY_ID_RE = re.compile(r"MUTNEVER-/' scripts/gate_mutation_replay.py
+      sed -i 's/^REGISTRY_ID_RE = re.compile(r"/REGISTRY_ID_RE = re.compile(r"MUTNEVER/' scripts/gate_mutation_replay.py
     test: |
       python3 scripts/gate_mutation_replay.py --selftest
     expect: nonzero
@@ -2252,6 +2266,213 @@ mutations:
       python3 scripts/gate_verdict_drift.py --selftest
     expect: nonzero
     red_needle: "T6 同じ id が二度 出たら先を採る"
+    timeout: 300
+
+  - id: MUT-1394-001
+    origin: cmd_1394
+    suspected_by: ashigaru5
+    desc: |
+      ACTION 行から MODE=/PHASE= を落とす = ★2026-07-27 未明の log そのものへ戻す変異★。
+      当夜の log は dry-run と live で【一字一句同じ行】を出しており、★「撃つと判じた」と
+      「撃った」を log から永久に判じられなんだ★ (家老を二度 誤らせた実害の一次原因)。
+      落とせば T-LOG-001 が赤くなるべき。緑なら log は再び二義へ戻っておる。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_log_selfproof.bats]
+    anchor_sites: 1   # ★六号が明示へ移した★ = 実 runner が既定 1 で 7/7 通しておる = fired==1 は実測済 (五号 08:18 裁可)
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = '                  f"MODE={run_mode} PHASE=decided "\n'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "", 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-LOG-001" tests/unit/test_idle_revive_log_selfproof.bats
+    expect: nonzero
+    # 実測 2026-07-27 07:57:36 (五号): 落ちた行 = L177
+    #   `echo "$dry_line" | grep -q "MODE=dry-run PHASE=decided"' failed
+    #   = ★落ちた理由が、当てた変異その物を名指しておる★
+    red_needle: "not ok 1 T-LOG-001"
+    timeout: 300
+
+  - id: MUT-1394-002
+    origin: cmd_1394
+    suspected_by: ashigaru5
+    desc: |
+      dry-run の return を emit_outcome より前へ戻す = ★「dry-run ゆえ抑止が効いた」を
+      log だけで言えなくする変異★。当夜、家老は之を log から読めると誤って申した。
+      戻せば T-LOG-002 (と T-LOG-004 の数合わせ) が赤くなるべき。
+      緑なら ★沈黙が「撃った」にも「撃たなんだ」にも化けられる★ 形へ戻っておる。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_log_selfproof.bats]
+    anchor_sites: 1   # ★六号が明示へ移した★ = 実 runner が既定 1 で 7/7 通しておる = fired==1 は実測済 (五号 08:18 裁可)
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = ('        for r in results:\n'
+             '            emit_outcome(r, False, PRE_SUPPRESSED_REASONS.get(r["action"], "dry_run"))\n'
+             '        return 0\n')
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "        return 0\n", 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-LOG-002" tests/unit/test_idle_revive_log_selfproof.bats
+    expect: nonzero
+    # 実測 2026-07-27 07:57:37 (五号): 落ちた行 = L200
+    #   grep -q "OUTCOME=revive_not_fired ... REASON=dry_run" failed
+    red_needle: "not ok 1 T-LOG-002"
+    timeout: 300
+
+  - id: MUT-1394-003
+    origin: cmd_1394
+    suspected_by: ashigaru5
+    desc: |
+      発行直前 probe gate の emit_outcome を落とす = ★抑止が効いた事が log から消える変異★。
+      ACTION=revive は出たまま OUTCOME だけが消えるゆえ、★log の読み手には「撃った」と
+      見分けが付かぬ★ (本試験が塞ぐ主目的)。落とせば T-LOG-003 が赤くなるべき。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_log_selfproof.bats]
+    anchor_sites: 1   # ★六号が明示へ移した★ = 実 runner が既定 1 で 7/7 通しておる = fired==1 は実測済 (五号 08:18 裁可)
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = '                emit_outcome(r, False, f"probe_gate:{state_now}")\n'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "", 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-LOG-003" tests/unit/test_idle_revive_log_selfproof.bats
+    expect: nonzero
+    # 実測 2026-07-27 07:57:37 (五号): 落ちた行 = L223
+    #   grep -q "OUTCOME=revive_not_fired ... REASON=probe_gate:busy" failed
+    red_needle: "not ok 1 T-LOG-003"
+    timeout: 300
+
+  - id: MUT-1394-004
+    origin: cmd_1394
+    suspected_by: ashigaru5
+    desc: |
+      欠測 WARN の閾値を無限へ (elapsed <= expected*factor を常真へ) = ★走行の欠測を
+      永久に名乗らぬ変異★。2026-07-26 23:18:01 → 00:15:02 の 57 分 (18 scan 欠) が
+      log から読めなんだ、其の穴その物へ戻る。当てれば T-LOG-005 が赤くなるべき。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_log_selfproof.bats]
+    anchor_sites: 1   # ★六号が明示へ移した★ = 実 runner が既定 1 で 7/7 通しておる = fired==1 は実測済 (五号 08:18 裁可)
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = "    if expected_sec <= 0 or elapsed <= expected_sec * factor:\n"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "    if expected_sec <= 0 or True:\n", 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-LOG-005" tests/unit/test_idle_revive_log_selfproof.bats
+    expect: nonzero
+    # 実測 2026-07-27 07:57:38 (五号): 落ちた行 = L271  `grep -q "WARN=scan_gap"' failed
+    red_needle: "not ok 1 T-LOG-005"
+    timeout: 300
+
+  - id: MUT-1394-005
+    origin: cmd_1394
+    suspected_by: ashigaru5
+    desc: |
+      同じ閾値を常偽へ倒し ★毎 scan WARN を鳴らす★変異 (MUT-1394-004 の逆向き)。
+      ★鳴りっぱなしの WARN は読まれぬゆえ、黙っておるのと実効は同じである★ =
+      「鳴る側」だけを縛れば此の退行が素通りする。当てれば T-LOG-006 が赤くなるべき。
+      ★本変異は歴史的に一度 生き残っておる★: 旧版 T-LOG-006 は `! echo | grep` の形で
+      書かれており、bash の `!` は bats の set -e から免除されるゆえ ★変異体が現に
+      WARN を吐いておるのに緑★ であった (cmd_1401 で _refute_output へ倒して是正)。
+      ⇒ ★本 entry は其の刃が今も在ることの見張りでもある★。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_log_selfproof.bats]
+    anchor_sites: 1   # ★六号が明示へ移した★ = 実 runner が既定 1 で 7/7 通しておる = fired==1 は実測済 (五号 08:18 裁可)
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = "    if expected_sec <= 0 or elapsed <= expected_sec * factor:\n"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "    if False:\n", 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-LOG-006" tests/unit/test_idle_revive_log_selfproof.bats
+    expect: nonzero
+    # 実測 2026-07-27 07:57:44 (五号): _refute_output (L118) 経由で L295 が落ち、
+    #   ★出てはならぬ行が出た: WARN=scan_gap★ + 現に出た WARN 行そのものを印字した
+    #   = ★刃が現に在る★ことの実証 (旧 `!` 形では此処が緑であった)
+    red_needle: "not ok 1 T-LOG-006"
+    timeout: 300
+
+  - id: MUT-1394-006
+    origin: cmd_1394
+    suspected_by: ashigaru5
+    desc: |
+      report YAML の parse 落ちを ★従来どおり「未完」へ倒す★変異 (unreadable 分岐を殺す)。
+      = ★働いておる agent の report が壊れておるだけで番人が /clear を撃つ★ 病その物。
+      実測の前科: logs/idle_revive_scan.log の "report YAML parse failed" は書き手 8 名全員。
+      当てれば T-LOG-009 が赤くなるべき (ACTION=report_unreadable が消え、書き手の名指しも消える)。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_log_selfproof.bats]
+    anchor_sites: 1   # ★六号が明示へ移した★ = 実 runner が既定 1 で 7/7 通しておる = fired==1 は実測済 (五号 08:18 裁可)
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = '        if completion == "unreadable":\n'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, '        if False:\n', 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-LOG-009" tests/unit/test_idle_revive_log_selfproof.bats
+    expect: nonzero
+    # 実測 2026-07-27 07:57:50 (五号): 落ちた行 = L343
+    #   grep -q "^ACTION=report_unreadable AGENT=ashigaru93" failed
+    red_needle: "not ok 1 T-LOG-009"
+    timeout: 300
+
+  - id: MUT-1401-001
+    origin: cmd_1401
+    suspected_by: ashigaru5
+    desc: |
+      上流障害の網から "weekly limit" を外す変異 = ★週次上限で黙った pane へ /clear が飛ぶ★
+      形へ戻す。★U10 (selftest) が縛るのは【検知できるか】までゆえ、此の変異は
+      【検知しても発行相で撃てば実害は同じ】側を縛る★ (二段で縛る内の下段)。
+      当てれば T-LOG-011 が赤くなるべき。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_log_selfproof.bats]
+    anchor_sites: 1   # ★六号が明示へ移した★ = 実 runner が既定 1 で 7/7 通しておる = fired==1 は実測済 (五号 08:18 裁可)
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    "weekly limit",             # You\'ve hit your weekly limit'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, '    # ★変異★ weekly limit を網から外した  #', 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-LOG-011" tests/unit/test_idle_revive_log_selfproof.bats
+    expect: nonzero
+    # 実測 2026-07-27 07:57:56 (五号): 落ちた行 = L397
+    #   grep -q "OUTCOME=revive_not_fired ... REASON=upstream_gate" failed
+    red_needle: "not ok 1 T-LOG-011"
     timeout: 300
 
 coverage_waivers: []

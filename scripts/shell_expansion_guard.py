@@ -318,8 +318,14 @@ def _strip_expansions(text: str) -> str:
     return _EXPANSION_RE.sub("", text)
 
 
-def inspect_argument(raw_unsafe: str) -> list[str]:
-    """本文位置の引数1つを検め、違反理由の list を返す (空 = 健全)。"""
+def inspect_argument(raw_unsafe: str, prose: bool = True) -> list[str]:
+    """引数1つを検め、違反理由の list を返す (空 = 健全)。
+
+    ★prose (cmd_1398)★ = 其の引数が【散文を置く位置】か否か。
+      ・★R1 (生 backtick) は位置に依らず当てる★ = ★shell は引数の位置を問わず backtick を実行する★。
+      ・★R2 (散文 + 展開) は散文位置にのみ当てる★ = ★"$msg" の如き【意図した展開だけの引数】は
+        正当であり、之を咎めれば実在の呼出が軒並み止まる★ (既存 ALLOW 例が其の証人)。
+    """
     reasons: list[str] = []
 
     # R1: 生 backtick
@@ -330,8 +336,8 @@ def inspect_argument(raw_unsafe: str) -> list[str]:
             "★本文は黙って欠け、意図せぬ command が走る★"
         )
 
-    # R2: 展開 + 残りが散文
-    expansions = _EXPANSION_RE.findall(raw_unsafe)
+    # R2: 展開 + 残りが散文  (★散文位置に限る = cmd_1398★)
+    expansions = _EXPANSION_RE.findall(raw_unsafe) if prose else []
     if expansions:
         remainder = _strip_expansions(raw_unsafe)
         if _PROSE_RE.search(remainder):
@@ -396,19 +402,28 @@ def analyze(command: str) -> dict:
                 break
             args.append(nxt)
 
-        # ★逃げ道が使われておれば検めぬ★ = shell を通っておらぬゆえ
+        # ★逃げ道 (--content-file / --body-stdin 等) が使われておるか★
+        #   = ★本文は shell を通らぬ★ ゆえ【散文位置】は其もそも存在せぬ。
         arg_values = [a.value for a in args]
         # --body-file=PATH (= つき) も同じ逃げ道ゆえ prefix で見る
-        if any(
+        body_escape = any(
             v == s or v.startswith(s + "=") for v in arg_values for s in BODY_SENTINELS
-        ):
-            continue
+        )
 
-        for pos in sorted(positions):
-            if pos > len(args):
-                continue
-            arg = args[pos - 1]
-            for reason in inspect_argument(arg.unsafe_text):
+        # ★★cmd_1398 = 己で掘った穴を己で塞ぐ★★
+        #   ★旧★ = 逃げ道が1つでも在れば ★其の呼出を丸ごと検めなんだ (continue)★。
+        #   ★何が抜けたか★ = ★同じ行に残る他の引数の backtick★ =
+        #     例 bash scripts/inbox_write.sh karo "残 `wc -l < f` 行" report a6 --body-stdin
+        #     ⇒ ★本文は stdin から来るが、其の位置引数は現に shell が食う★ = 旧版は ALLOW を返した。
+        #   ★誤りの根★ = ★「本文が shell を通らぬ」から「此の行は shell を通らぬ」へ滑った★ =
+        #     ★免除の範囲を、免除の理由より広く取っておった★。
+        #   ★処方 (家老の枷 (a) 緩めるな = 免除を狭めるのであって、通す量は増やさぬ)★:
+        #     ・R1 (生 backtick) は ★全ての引数へ★ 当てる = ★位置に依らず shell は実行する★
+        #     ・R2 (散文 + 展開) は ★散文位置にのみ★ 当てる = 逃げ道が在る時は当てる場所が無い
+        #   ★単引用符の中は元より unsafe_text から外れておる★ゆえ、正当な書き方は巻き込まぬ。
+        for pos, arg in enumerate(args, start=1):
+            prose = (pos in positions) and not body_escape
+            for reason in inspect_argument(arg.unsafe_text, prose=prose):
                 findings.append(
                     {
                         "tool": basename,
@@ -587,11 +602,28 @@ _CASES: list[tuple[str, str, str]] = [
     ),
     (
         'bash scripts/inbox_write.sh karo "残 `wc -l < f` 行" report ashigaru6 --body-stdin',
+        "DENY",
+        "★H4b (cmd_1398 で【穴】から【塞いだ】へ転じた): 混在行 — 逃げ道が在っても、"
+        "同じ行の位置引数の backtick は shell が現に食う ⇒ 見逃さぬ★",
+    ),
+    (
+        'bash scripts/inbox_write.sh karo --body-stdin task_assigned "`whoami`"',
+        "DENY",
+        "★H4c: 逃げ道 + 散文位置でない引数の backtick も咎める "
+        "(R1 は位置に依らず当てる)★",
+    ),
+    (
+        'bash "$SCRIPT_DIR/scripts/inbox_write.sh" "$a" --body-stdin task_assigned "$from"',
         "ALLOW",
-        "★H4b: ★★既知の穴★★ — 逃げ道が1つでも在れば其の呼出を一切検めぬ造りゆえ、"
-        "同じ行の位置引数の backtick を見逃す。★shell は現に其れを食う★。"
-        "★HEAD 版でも同じ = cmd_1388 の変更が作った物ではない (実測で確かめた)★。"
-        "★免除でなく【穴として名指した札】である★ = 家老へ具申済・別 cmd の種",
+        "★H4d (逆向きの負例): 逃げ道 + 【意図した展開だけ】の引数は通る "
+        "= 免除を狭めても実在の呼出を巻き込んでおらぬ★",
+    ),
+    (
+        "bash scripts/inbox_write.sh karo --content-file /tmp/b.txt task_assigned "
+        "'五号は `docker rm -f x` を撃った'",
+        "ALLOW",
+        "★H4e (逆向きの負例): 単引用符の中の backtick は shell が触れぬゆえ通す "
+        "(R1 を全引数へ広げても単引用符の作法は守られる)★",
     ),
     (
         "bash scripts/inbox_write.sh karo --body-stdin task_assigned karo <<'A'\n"

@@ -32,6 +32,28 @@ SCANNED_AGENT_PREFIXES = ("ashigaru",)
 SCANNED_AGENT_NAMES = {"gunshi"}
 
 
+def normalize_status(value):
+    """status 文字列を照合可能な正規形へ (先頭 token 化 + lowercase)。
+
+    idle_revive_scan.py の同名関数と同型 (cmd_1356 d8fc7fd の同処方)。家老の帳簿慣行
+    `status: 'assigned   # 2026-07-26 07:23 家老dispatch=…'` は YAML 上【引用符内の
+    一つの文字列】であり、生のまま "assigned" と完全一致照合すると注記付き task が
+    全て scan に不可視になる。本 scan では task 側 (assigned 照合) と report 側
+    (COMPLETION_STATUSES 照合) の両方が同じ穴を持っておった = 帳簿漏れ alert が
+    注記1つで永久に沈黙する (alert は「撃たれなかった」ことに誰も気付けぬ型)。
+    注記は運用上有用ゆえ家老は書き続ける —「注記が在っても読める」側で吸収する。
+    末尾の :;,. も落とす = 'assigned:' 型の書き癖 drift でも盲目に戻らぬため。
+    idle_revive 側との copy drift は各 copy の変異登録 (MUT-1154-001 / MUT-0552-001,002)
+    が独立に見張る。
+    """
+    if not isinstance(value, str):
+        return value
+    tokens = value.strip().split(None, 1)
+    if not tokens:
+        return ""
+    return tokens[0].rstrip(":;,.").lower()
+
+
 def parse_task(path: Path):
     try:
         with path.open(encoding="utf-8") as f:
@@ -43,7 +65,9 @@ def parse_task(path: Path):
     if not isinstance(data, dict) or not isinstance(data.get("task"), dict):
         return None
     t = data["task"]
-    return (t.get("task_id"), t.get("parent_cmd"), t.get("status"))
+    # status は正規化して返す = 消費点 (scan の assigned 照合) が注記付きでも読める。
+    # 出所は本関数の1点のみ (二重管理禁)。
+    return (t.get("task_id"), t.get("parent_cmd"), normalize_status(t.get("status")))
 
 
 def extract_report_record(doc):
@@ -51,7 +75,9 @@ def extract_report_record(doc):
         return None
     inner = doc["report"] if isinstance(doc.get("report"), dict) else doc
     task_id = inner.get("task_id") or inner.get("primary_task")
-    status = inner.get("status")
+    # report 側も同じ注記慣行がありうる — task 側と同じ正規形で読む (出所は本関数の1点)。
+    # alert 本文へ運ばれるのも正規化 token = 注記の生文字列を inbox へ流さぬ。
+    status = normalize_status(inner.get("status"))
     ts = inner.get("timestamp")
     return (task_id, status, ts)
 
@@ -122,7 +148,9 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
         r_task_id, r_status, _r_ts = latest
         if r_task_id != task_id:
             continue
-        if not isinstance(r_status, str) or r_status.lower() not in COMPLETION_STATUSES:
+        # r_status は extract_report_record で正規化済 (注記付き 'completed   # …' も
+        # 完了と読める。lowercase も正規化に含まれる)。
+        if not isinstance(r_status, str) or r_status not in COMPLETION_STATUSES:
             continue
         elapsed_min = int((now - latest_dt).total_seconds() // 60)
         if elapsed_min < threshold_min:

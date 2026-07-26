@@ -283,6 +283,46 @@ mutations:
     expect: nonzero
     red_needle: "not ok 1 T-STA-003"  # 実測 2026-07-26: 印字折りで eligible=2 が消え名指しで落ちる
 
+  - id: MUT-0552-001
+    origin: cmd_1356
+    suspected_by: ashigaru1
+    desc: |
+      stall_watchdog の task 側 status 正規化 (parse_task の normalize_status 適用 =
+      注記付き 'assigned   # 家老dispatch…' を先頭 token 化して読む) を折る (生の文字列を
+      そのまま返す) と、T-SWD-001 (注記付き assigned の帳簿漏れが hit として見える) が
+      赤くなるべき。折っても緑なら帳簿漏れ alert は注記1つで永久に沈黙する —
+      idle_revive の盲目 (MUT-1154-001・2026-07-26 朝の実害) と同型の穴が本 scan の
+      旧 :114 `task_status != "assigned"` にも在った (d8fc7fd 申し送り筆頭→家老 routing)。
+      alert は「撃たれなかった」ことに誰も気付けぬ型 = cmd_1352 沈黙 family。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh,
+            tests/unit/test_stall_watchdog_status_normalize.bats]
+    mutate: |
+      sed -i 's/normalize_status(t.get("status"))/t.get("status")/' scripts/stall_watchdog_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-SWD-001" tests/unit/test_stall_watchdog_status_normalize.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SWD-001"  # 実測 2026-07-26: 正規化折りで注記付き assigned の帳簿漏れが不可視化し名指しで落ちる
+
+  - id: MUT-0552-002
+    origin: cmd_1356
+    suspected_by: ashigaru1
+    desc: |
+      stall_watchdog の report 側 status 正規化 (extract_report_record の normalize_status
+      適用) を折ると、T-SWD-003 (注記付き 'completed   # …' report が完了と読める) が
+      赤くなるべき。折っても緑なら「task=assigned のまま report は注記付き完遂」の帳簿漏れ
+      が検知されぬ + alert 本文へ注記の生文字列 (shell 敵対文字を含みうる) が流れる穴も
+      再開する。idle_revive T-STA-004 (report 注記) と同じ契約の stall_watchdog 側の顔。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh,
+            tests/unit/test_stall_watchdog_status_normalize.bats]
+    mutate: |
+      sed -i 's/normalize_status(inner.get("status"))/inner.get("status")/' scripts/stall_watchdog_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-SWD-003" tests/unit/test_stall_watchdog_status_normalize.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SWD-003"  # 実測 2026-07-26: report正規化折りで注記付き completed が読めず名指しで落ちる
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

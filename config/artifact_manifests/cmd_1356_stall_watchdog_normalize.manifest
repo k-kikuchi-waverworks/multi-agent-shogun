@@ -1,0 +1,8 @@
+# cmd_1356 follow-up 成果物 manifest — stall_watchdog の status 注記正規化 (同型穴の是正)
+# (d8fc7fd 申し送り筆頭 = stall_watchdog_scan.py:114 の生 exact match を家老 routing で
+#  同処方 (normalize_status) にて閉塞。帳簿漏れ alert が注記1つで永久沈黙する穴)
+# 文法: scripts/gate_artifact_capture.sh 冒頭コメント参照 (path / dir/ [min=N] / #コメント)
+scripts/stall_watchdog_scan.py
+tests/unit/test_stall_watchdog_status_normalize.bats
+config/mutation_registry.yaml
+docs/content/ops/cmd_1355_upstream_outage_guard.md

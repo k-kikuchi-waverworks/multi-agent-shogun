@@ -134,6 +134,16 @@ ashigaru6 pane (%3) scrollback より 2026-07-26 04:4x 採取。正本 =
 - **変異登録**: MUT-1154-001 (正規化折り→T-STA-001 名指し赤) / MUT-1154-002 (分母印字折り→
   T-STA-003 名指し赤)。試験本体 = `tests/unit/test_idle_revive_status_normalize.bats`
   (T-STA-001〜004: 見える/偽 active を作らぬ/分母印字/report 注記の両側)。毎朝 gate_nightly 再走。
+- **同型穴の水平展開 (同日 09:1x・家老 routing)**: 同じ生 exact match が
+  `stall_watchdog_scan.py` (cmd_552 帳簿漏れ watchdog) の task 側 (`!= "assigned"`) と
+  report 側 (`.lower()` のみ) にも在った — 帳簿漏れ alert が注記1つで**永久に沈黙**する
+  (alert は「撃たれなかった」ことに誰も気付けぬ型)。同処方 `normalize_status()` を両側の
+  出所1点ずつへ適用し、alert 本文へは正規化 token のみ運ぶ (注記の生文字列 = shell 敵対
+  文字を inbox へ流さぬ)。変異登録 = MUT-0552-001/002 (折れば T-SWD-001/T-SWD-003 名指し赤)。
+  試験本体 = `tests/unit/test_stall_watchdog_status_normalize.bats`。
+  なお同 scan は hit 0 件時に無出力ゆえ「分母0 (盲目)」と「全員健全」が log 上区別できぬ
+  (idle_revive の `eligible=N` と同型の観測性欠落) — 既存 test (`T-002` 等) が無出力を契約
+  しており他者領分ゆえ、分母印字の是非は家老裁定待ち (2026-07-26 report 具申)。
 
 ## 運用
 

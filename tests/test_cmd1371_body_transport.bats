@@ -51,7 +51,22 @@ setup() {
 RAWEOF
     export BODY
     export HBDIR="$TESTDIR/queue/.shell_guard_heartbeat"
-    export HBKEY="$(printf '%s' "${TMUX_PANE:-nopane}" | tr -c 'A-Za-z0-9_.-' '_')"
+    # ═══ ★cmd_1408 是正 (2026-07-27 07:30 実測)★ ═══════════════════════════════
+    # ★旧版★= HBKEY を `${TMUX_PANE:-nopane}` から採っておった = ★盤面から鍵を借りておった★。
+    #   ・tmux の中で撃つ  = 道具も TMUX_PANE を鍵にするゆえ一致 → ★緑★
+    #   ・cron の中で撃つ  = 道具は「pane も session も無い = outside-pane」へ落ち、
+    #                        ★心拍を見に行かぬ★ → T-302/T-303 が赤
+    #     (T-502 も同断 = 関所 python は TMUX_PANE 無しでは payload の session_id を鍵に採るゆえ
+    #      "nopane" を見張っておる試験と鍵が割れる)
+    #   ⇒ ★★試験の緑が【誰が走らせたか】に依っておった★★ = 毎朝の門で MUT-1371-001〜005/007 が
+    #      ★永久に UNDETERMINED★ (baseline が赤ゆえ検出力を測れぬ) を出し続けておった。
+    # ★書いた時の註 (T-502) は「隔離した木へ写せば心拍の在処も隔離される」と申しておった★=
+    #   ★在処 (HBDIR) は現に隔離できておった。而して【鍵】は隔離しておらなんだ = 半分だけ隔離した形★。
+    # ★処方★= ★鍵を盤面から借りず、試験の側で固定する★ = cron でも tmux でも同じ赤・同じ緑になる。
+    #   (★TMUX_PANE を持たぬ経路そのものを検める T-307/T-308 は `env -u TMUX_PANE` で明示的に
+    #     剥がしておるゆえ、此の固定に侵されぬ★ = ★盤面依存を消しても、盤面を検める口は残る★)
+    export TMUX_PANE="%zzz_test_1371"
+    export HBKEY="$(printf '%s' "$TMUX_PANE" | tr -c 'A-Za-z0-9_.-' '_')"
 }
 
 teardown() {

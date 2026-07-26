@@ -67,7 +67,15 @@ mutations:
       gate-2 runner 自身の「変異後も緑 = FAIL」契約 (GREEN_AFTER_MUTATION_IS_FAIL) を
       False へ倒すと、gate-2 selftest の T2 (静かな無効化の検出) が赤くなるべき。
       倒しても緑なら本台帳そのものが飾りになる (gate の gate)。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       sed -i 's/^GREEN_AFTER_MUTATION_IS_FAIL = True$/GREEN_AFTER_MUTATION_IS_FAIL = False/' scripts/gate_mutation_replay.py
     test: |
@@ -133,7 +141,15 @@ mutations:
       決して当たらぬ pattern へ折ると、coverage selftest (T10 未登録の名指し / T11 登録済
       PASS) が赤くなるべき。折っても緑なら「検知層を潰しても誰も気付かぬ」= 本検知層自身が
       沈黙する落とし穴になる (検知層の検知)。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       sed -i 's/^COVERAGE_MUT_KEYWORDS = .*/COVERAGE_MUT_KEYWORDS = r"ZZ_NEVER_MATCH_ZZ"/' scripts/gate_mutation_replay.py
     test: |
@@ -620,7 +636,15 @@ mutations:
       番人が skip → skip は緑に見えた。四号は DB の口を開けて撃ち直し赤を実測した。
       掟 =「SKIP=FAIL は変異試験の harness 内でも成り立つ」(CLAUDE.md Test Rules 1 の拡張)。
       台帳所有者 (ashigaru1) が自分では疑わなんだ場所 = 他者の疑いを台帳へ写す型。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       sed -i 's/^    return m.group(0).strip() if m else None$/    return None/' scripts/gate_mutation_replay.py
     test: |
@@ -639,7 +663,15 @@ mutations:
       書いてあった — M6 で同じ抜けを一度やっており二度目 = 申告と実在の食い違いは人の
       注意力では二度破れた。機械で拾う (拾えるのは完全形 ID の言及のみ・略記「M9」は
       拾えぬ = 完全形で書く規律とセット)。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       sed -i 's/^REGISTRY_ID_RE = re.compile(r"MUT-/REGISTRY_ID_RE = re.compile(r"MUTNEVER-/' scripts/gate_mutation_replay.py
     test: |
@@ -860,7 +892,15 @@ mutations:
       ★MUT-1352-005 との違い★ = あちらは「決して当たらぬ pattern へ折る」全滅形。
       本変異は ★実際に起きた狭さへ戻す★ 形 = 全滅せぬゆえ陽性対照は生き残り、
       T23 だけが落ちる (=「対照が当たるゆえ規則は生きておる」の裏をかく変異)。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       sed -i 's/^COVERAGE_MUT_KEYWORDS = .*/COVERAGE_MUT_KEYWORDS = r"変異試験|変異を当て|わざと壊|壊して赤|壊せば落ち|mutation"/' scripts/gate_mutation_replay.py
     test: |
@@ -877,7 +917,15 @@ mutations:
       赤くなるべき。倒しても緑なら ★「候補 N 件すべて登録済 = PASS」が再び【候補に
       挙がった物】だけの勘定に戻り、しかもそう読めることが画面から消える★。
       = 本 cmd が塞いだ当のもの (数えておる、と申しておる者が、数え落としておる) の再発。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       sed -i 's/^    blind = {rel: ids for rel, ids in named.items() if rel not in cands}/    blind = {}/' scripts/gate_mutation_replay.py
       sed -i 's/^    non_ctl = sorted(set(named) - {control})/    non_ctl = []/' scripts/gate_mutation_replay.py
@@ -904,7 +952,15 @@ mutations:
       と T28b (名指し) が赤くなるべき。倒しても緑なら ★免除が【黙って永久に】なる★ =
       家老の掟「免除は【いつ返すか】が決まって初めて免除じゃ」が骨抜きになる。
       ★免除は消えるのでなく【返る】もの★ — その「返る」機構が生きておるかの牙である。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     # ★cmd_1382 是正 (六号の anchor 監査)★= 旧版の anchor は綴りが coverage() と tree_census() の
     #   2 箇所で byte 一致ゆえ、sed が【両方の期限判定を同時に折っておった】(規律(8)型(b))。
     #   red_needle は coverage 側の T28 を名乗るが、tree_census 側の赤と区別できておらなんだ。
@@ -927,7 +983,15 @@ mutations:
       倒しても緑なら ★app 本体が視野から落ちても誰も気付かぬ元の状態へ静かに戻る★ =
       本 cmd が塞いだ当のもの (見ておらぬ場所には、盲であることすら分からぬ) の再発。
       ★点呼を消すのでなく【常に緑を返す】形にするのが最も静かな殺し方★ゆえ、其処を撃つ。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       sed -i 's/^            unwatched_fanged.append(top)/            pass/' scripts/gate_mutation_replay.py
     test: |
@@ -1085,7 +1149,15 @@ mutations:
       素通りしても緑なら ★anchor が非一意でも黙って通る★ = 狙いが別の場所へ着弾しておっても
       我らは「確かめた」と言うてしまう。★これは空振り検知 (byte 一致で UNDETERMINED) では
       原理的に捕えられぬ層である★ = 撃ってはおる。撃つ場所が違うだけゆえ byte も赤も出る。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       python3 - <<'PY'
       p = "scripts/gate_mutation_replay.py"
@@ -1111,7 +1183,15 @@ mutations:
       cmd_1369 の B2a/B2b が 5 発火に見えたが literal 数え上げでは block 1 箇所であった。
       ★他 repo の台帳の ID は綴らぬ = 此処へ書けば幽霊 ID として鳴るゆえ★)。
       ★常に鳴る門は必ず外される★ ゆえ、鳴らぬ側もまた牙で縛る。
-    paths: [scripts/gate_mutation_replay.py]
+    # ★cmd_1408 是正 (2026-07-27 07:33 実測・六号)★= ★兄弟 2 本を足した★。
+    #   ★paths が本 file 一本きりであった間、runner は其れだけを scratch へ写しておった★。
+    #   ★而して --selftest は其の後 育ち、兄弟を読む検が 6 本 生えた★
+    #   (T9b / T56 / T57 / T59 / T60b / T64 = gate_bats_negation.py と本台帳を読む)
+    #   ⇒ ★一本きりの scratch では其の 6 本が exit 2 を返し baseline が赤★
+    #   = ★本 entry は【変異を当てるまでもなく】永久に UNDETERMINED であった★ (毎朝 10 件)。
+    #   ★実測★= 一本きり ok=73 ng=6 → ★兄弟込み 79/79 ALL PASS★。
+    #   ★★之は「赤を消す」ではなく「申告を実態に合わせる」★★ = 牙が【測れる】状態へ返る。
+    paths: [scripts/gate_mutation_replay.py, scripts/gate_bats_negation.py, config/mutation_registry.yaml]
     mutate: |
       python3 - <<'PY'
       p = "scripts/gate_mutation_replay.py"

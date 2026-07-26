@@ -29,7 +29,15 @@ import yaml
 #     退場した者を帳簿の上で蘇らせる形になる。
 #   ★karo.yaml は本任の scope 外ゆえ触れておらぬ★= 但し同じ形の危うさが在る (非 canonical ゆえ
 #     status が done になった日に file ごと消える)。今は status='archived' で当たっておらぬ。家老へ具申済。
-CANONICAL_TASKS = {f'ashigaru{i}' for i in range(1, 9)} | {'gunshi', 'gunshi1', 'gunshi2'}
+#   ★karo を加えた (家老の裁 2026-07-27 01:41)★= ★家老の task file が「done になった日に file ごと
+#     消える」形は、家老の state が消える形である★。家老は /clear 復帰時に queue/ から state を建て直す
+#     立場ゆえ、己の task file が消えるのが最も痛い。★而も家老は毎 cycle 己の手で此の道具を撃っておる★。
+#   ★ashigaru7 / ashigaru8 は【既に canonical に居る】= 上の range(1, 9) が拾っておる★。
+#     ⇒ ★家老が gunshi_a/b・ashigaru7 に当てた理屈 (実在せぬ agent の stub を立てるな) を通すなら、
+#       此の二人は canonical から【外す】側である★ (ashigaru7 は pane 廃止済・★ashigaru8 は task file
+#       すら存在せぬ★)。★但し之は「加えるな」でなく「外せ」であり、家老は外せとは命じておらぬゆえ
+#       触れておらぬ★ = 具申に留める (挙動を変える判断は道具の持ち主が下すべきゆえ)。
+CANONICAL_TASKS = {f'ashigaru{i}' for i in range(1, 9)} | {'gunshi', 'gunshi1', 'gunshi2', 'karo'}
 CANONICAL_REPORTS = ({f'ashigaru{i}_report' for i in range(1, 9)}
                      | {'gunshi_report', 'gunshi1_report', 'gunshi2_report'})
 IDLE_STUB = {'task': {'status': 'idle'}}

@@ -362,6 +362,43 @@ task:
   timestamp: "2026-01-25T12:00:00"
 ```
 
+## ★target_path は【路だけ】書け (2026-07-27 実害・cmd_1392)★
+
+`target_path` は人が読む説明欄ではない。**番人 (`scripts/idle_revive_scan.py` の `newest_output_mtime`) が路として解決し、
+出力が漸進しておれば revive を撃たぬ = 働いておる agent を斬らぬための守り**である。
+
+★而して路として読めぬ時、番人は警告も出さず黙って候補から捨てる★ ⇒ **守りが「在るが効いておらぬ」状態になる**。
+
+| ❌ 斬られる書き方 | ✅ 正しい書き方 |
+|---|---|
+| `target_path: "config/mutation_registry.yaml (4台帳)"` | `target_path: "config/mutation_registry.yaml"` + `target_path_note: "4台帳が対象"` |
+| `target_path: 'A.md + B.yaml'` | 主たる成果物 1 本の路のみ。副次は `target_path_note` へ |
+| `target_path: 'scripts/ 配下の該当 script'` | 実在する路。未定なら **書くな** (未指定の方が安全) |
+
+**2026-07-27 の実害**: 軍師二号が註釈つき `target_path` を持ったまま検分 (= file を書かぬ仕事) をしており、
+05:24 に偽陽性の `/clear` を受けた。同刻、六号も同型で**斬られる口が開いたまま作業していた**。
+
+★併せて心得よ★: 番人が測るのは**出力**でなく **file の mtime** である。
+⇒ **書かずに読む仕事 (調査・検分・log 読み) は、此の計器からは沈黙に見える** = 最も深く調べておる時に最も斬られやすい。
+そういう任を配る時は `target_path` を必ず実在の路にし、中間成果を書かせる段取りにせよ。
+
+## ★任を替えたら、同じ turn で帳面を替えよ (2026-07-27 実害 3 件・cmd_1392)★
+
+inbox で任を渡しただけでは **task YAML は古い主語のまま**であり、番人は task YAML で裁く。
+
+★2026-07-27 の実害★ — 家老が口で命じ、帳面へ写さなんだ窓に 3 体が斬られた:
+
+| 刻 | 誰 | 家老が命じた事 | 帳面 | 窓の長さ |
+|---|---|---|---|---|
+| 05:03 | ashigaru5 | 04:22「手を空けて控えよ」 | `assigned` のまま | 41 分 |
+| 05:12 | ashigaru2 | 04:22「待機を認める」 | `assigned` のまま | 50 分 |
+| 05:24 | gunshi2 | 05:23 に新任を inbox で渡した直後 | 古い task_id のまま | **45 秒** |
+
+⇒ ★★窓は【命の古さ】でなく【帳面の古さ】で決まる★★ = **任を渡した直後こそ最も危うい**。
+
+**規**: `inbox_write` で任を替える・控えを命じる・完遂を受ける — いずれも**同じ turn で task YAML の
+`status` / `task_id` / `updated_at` を直す**。「後で直す」は窓を開けることと同義である。
+
 ## "Wake = Full Scan" Pattern
 
 Claude Code cannot "wait". Prompt-wait = stopped.

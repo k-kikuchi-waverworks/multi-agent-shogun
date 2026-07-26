@@ -1730,12 +1730,12 @@ mutations:
     desc: "門が【見る所】を狭める退行 = 走査から tests/unit を外すと T-NEG-001 が赤くなること。★赤の出所は【見落とし】でなく【分母 0 の canary】である★ (下の註を見よ) = ★0 件の緑が「走査しておらぬ」に化ける形★を捕える"
     origin: cmd_1401
     suspected_by: ashigaru5
-    # ★2026-07-27 04:5x 六号が paths を【木】へ広げた (mutate / red_needle は 1 文字も触れておらぬ)★:
+    # ★2026-07-27 03:5x (訂正・初稿は 04:5x と誤記) 六号が paths を【木】へ広げた (mutate / red_needle は 1 文字も触れておらぬ)★:
     #   ★五号の 6486fde が T-NEG-001 へ「走査 30 file 以上」の下限を据えた★= 正しい下限である。
     #   ★然れど runner の scratch は entry の paths だけを写す★ ⇒ ★.bats が 1 本しか無く下限を原理的に満たせぬ★
     #   ⇒ ★G1/G2/G3 は登録時 (03:1x) の PASS から【baseline 赤 = UNDETERMINED】へ黙って転じておった★。
     #   ★他人の commit が他人の牙を黙って鈍らせうる (MUT-1355-001 と同族) の二例目★。
-    #   ★処方 = tests/ を丸ごと写す★= 走査 47 file が復し、下限が現に測られる (実測 04:5x = 3/3 PASS)。
+    #   ★処方 = tests/ を丸ごと写す★= 走査 47 file が復し、下限が現に測られる (実測 03:5x = 3/3 PASS)。
     paths: [scripts/gate_bats_negation.py, tests]
     mutate: |
       python3 - <<'PY'
@@ -1767,12 +1767,12 @@ mutations:
     desc: "判定を【末尾の `!` は許す】へ緩めると T-NEG-003 が赤くなること = ★明日 1 行 足された瞬間に音もなく死ぬ形★を再び許す退行 (末尾の否定は【今日は】効くが、其の後ろへ 1 行 書かれた刹那に刃を失う)"
     origin: cmd_1401
     suspected_by: ashigaru5
-    # ★2026-07-27 04:5x 六号が paths を【木】へ広げた (mutate / red_needle は 1 文字も触れておらぬ)★:
+    # ★2026-07-27 03:5x (訂正・初稿は 04:5x と誤記) 六号が paths を【木】へ広げた (mutate / red_needle は 1 文字も触れておらぬ)★:
     #   ★五号の 6486fde が T-NEG-001 へ「走査 30 file 以上」の下限を据えた★= 正しい下限である。
     #   ★然れど runner の scratch は entry の paths だけを写す★ ⇒ ★.bats が 1 本しか無く下限を原理的に満たせぬ★
     #   ⇒ ★G1/G2/G3 は登録時 (03:1x) の PASS から【baseline 赤 = UNDETERMINED】へ黙って転じておった★。
     #   ★他人の commit が他人の牙を黙って鈍らせうる (MUT-1355-001 と同族) の二例目★。
-    #   ★処方 = tests/ を丸ごと写す★= 走査 47 file が復し、下限が現に測られる (実測 04:5x = 3/3 PASS)。
+    #   ★処方 = tests/ を丸ごと写す★= 走査 47 file が復し、下限が現に測られる (実測 03:5x = 3/3 PASS)。
     paths: [scripts/gate_bats_negation.py, tests]
     mutate: |
       python3 - <<'PY'
@@ -1800,12 +1800,12 @@ mutations:
     desc: "行途中の否定を見る INLINE を削る (行頭のみ見る) と T-NEG-005 が赤くなること = ★五号の初回の数えが現に此の形であった★ = `A || ! B` の族を数の外へ置く退行 (此の形も set -e の免除に掛かり、当たっても緑である)"
     origin: cmd_1401
     suspected_by: ashigaru5
-    # ★2026-07-27 04:5x 六号が paths を【木】へ広げた (mutate / red_needle は 1 文字も触れておらぬ)★:
+    # ★2026-07-27 03:5x (訂正・初稿は 04:5x と誤記) 六号が paths を【木】へ広げた (mutate / red_needle は 1 文字も触れておらぬ)★:
     #   ★五号の 6486fde が T-NEG-001 へ「走査 30 file 以上」の下限を据えた★= 正しい下限である。
     #   ★然れど runner の scratch は entry の paths だけを写す★ ⇒ ★.bats が 1 本しか無く下限を原理的に満たせぬ★
     #   ⇒ ★G1/G2/G3 は登録時 (03:1x) の PASS から【baseline 赤 = UNDETERMINED】へ黙って転じておった★。
     #   ★他人の commit が他人の牙を黙って鈍らせうる (MUT-1355-001 と同族) の二例目★。
-    #   ★処方 = tests/ を丸ごと写す★= 走査 47 file が復し、下限が現に測られる (実測 04:5x = 3/3 PASS)。
+    #   ★処方 = tests/ を丸ごと写す★= 走査 47 file が復し、下限が現に測られる (実測 03:5x = 3/3 PASS)。
     paths: [scripts/gate_bats_negation.py, tests]
     mutate: |
       python3 - <<'PY'
@@ -1850,7 +1850,7 @@ mutations:
       mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
       bats tests/unit/test_idle_revive_proc_age.bats
     expect: nonzero
-    red_needle: "not ok 11 T-AGE-011"  # 実測 2026-07-27 04:5x (六号が隔離台帳で撃った)
+    red_needle: "not ok 11 T-AGE-011"  # 実測 2026-07-27 ★03:49〜03:52★ (六号が隔離台帳で撃った)  # ★訂正: 初稿は「04:5x」= 己で date を撃たず他者の報告の刻を写した★。機械の刻で挟む = census 03:48:32 と commit 5b4d094 03:52:28 の間
     timeout: 300
 
   - id: MUT-1392-M14
@@ -1873,7 +1873,7 @@ mutations:
       mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
       bats tests/unit/test_idle_revive_proc_age.bats
     expect: nonzero
-    red_needle: "not ok 12 T-AGE-012"  # 実測 2026-07-27 04:5x (六号が隔離台帳で撃った)
+    red_needle: "not ok 12 T-AGE-012"  # 実測 2026-07-27 ★03:49〜03:52★ (六号が隔離台帳で撃った)  # ★訂正: 初稿は「04:5x」= 己で date を撃たず他者の報告の刻を写した★。機械の刻で挟む = census 03:48:32 と commit 5b4d094 03:52:28 の間
     timeout: 300
 
   - id: MUT-1401-G4
@@ -1898,7 +1898,7 @@ mutations:
     expect: nonzero
     # ★MUT-1401-G1 と同じ needle である★= ★重複は咎ではない (家老 03:30)★=
     # ★事実 = 同じ検を 2 本の牙が別の角度から縛る / 帰結 = 覆いの上限を牙の数で読めば 1 本 甘くなる★。
-    red_needle: "not ok 1 T-NEG-001"  # 実測 2026-07-27 04:5x (六号が隔離台帳で撃った)
+    red_needle: "not ok 1 T-NEG-001"  # 実測 2026-07-27 ★03:49〜03:52★ (六号が隔離台帳で撃った)  # ★訂正: 初稿は「04:5x」= 己で date を撃たず他者の報告の刻を写した★。機械の刻で挟む = census 03:48:32 と commit 5b4d094 03:52:28 の間
     timeout: 300
 
 coverage_waivers: []

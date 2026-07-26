@@ -275,9 +275,34 @@ def run(argv: list[str] | None = None) -> int:
             "= ★之は通知路の生死について何も語っておらぬゆえ「届かなんだ」と呼ばぬ★ "
             "(番人の不具合であり、殿への通知が壊れた証ではない)。traceback は stderr に在る"
         ]
-    for line in out:
-        print(line)
-    print(f"── [gate-3 ntfy] {_VERDICT[rc]} (見た物={state_path}) ──")
+    # ★★差し戻し F-3 = 受け皿の【外】に同じ口が残っておった★★ (軍師一号 22:0x)
+    #   ■ ★何が起きるか★= stdout が書けぬ時 (/dev/full・pipe の相方が死んだ後)、
+    #     ★print そのものが例外を投げる★ ⇒ 受け皿は judge() しか包んでおらなんだゆえ素通りし、
+    #     ★rc=1 (= 届かなんだ) が出る★ = ★F-2 と同じ嘘が、報せる段で出る★。
+    #   ■ ★実射で確かめた二つの顔 (是正前)★
+    #       python3 -u … >/dev/full → ★rc=1★     (書いた其の場で落ちる)
+    #       python3    … >/dev/full → ★rc=120★   (buffer ゆえ落ちるのは【終了時の flush】)
+    #     ⇒ ★どちらも【己が死んだ時の色】を CPython の終了規約に委ねておった★ =
+    #       ★安全側へ落ちる理由が【設計】でなく【偶然】である★ (軍師の名指した F-B そのもの)。
+    #   ■ ★ゆえに三つを同じ try の内へ入れる★= (a)本文 (b)締めの1行 (c)★flush★。
+    #     ★flush を内へ入れねば、buffer 上は成功に見え、失敗は我らの手を離れた後に出る★
+    #     = ★捕えられるのは flush を己で撃った時だけである★。
+    try:
+        for line in out:
+            print(line)
+        print(f"── [gate-3 ntfy] {_VERDICT[rc]} (見た物={state_path}) ──")
+        sys.stdout.flush()
+    except Exception as e:  # noqa: BLE001 — 報せる段の受け皿ゆえ広く捕るのが狙いである
+        traceback.print_exc()
+        # ★stdout は既に死んでおる ⇒ 札は stderr へ出す★ (黙って色だけ変えぬ)
+        print(f"[NTFY-CRASH] UNDETERMINED: ★所見を刷る段が落ちた★ "
+              f"({type(e).__name__}: {e}) = ★通知路の生死について何も語っておらぬ★ "
+              f"(番人の出口の不具合であり、殿への通知が壊れた証ではない)", file=sys.stderr)
+        # ★残った buffer を捨てる★= 捨てねば ★終了時の flush が再び落ち rc=120 へ攫われる★
+        #   = ★此処で返す UNDETERMINED が、返した後に書き換えられてしまう★。
+        with contextlib.suppress(Exception):
+            sys.stdout = open(os.devnull, "w", encoding="utf-8")  # noqa: SIM115
+        return UNDET
     return rc
 
 
@@ -523,7 +548,66 @@ def selftest() -> int:
 
     check_crash_backstop()
 
-    print(f"── [gate-3 ntfy selftest] {len(fails)} 件の NG / 検 25 本 ──")
+    # ── ★出口の検 (差し戻し F-3)★= ★報せる段が落ちた時の色★ ──────────────
+    #   ★T25 は【judge が落ちた時】を見ておる。之は【judge が通った後、刷る段で落ちた時】である★
+    #   = ★受け皿の外に残っておった同じ口ゆえ、検も別に要る★。
+    def check_stdout_death() -> None:
+        class _DeadOut(io.StringIO):
+            """★書いても flush しても落ちる stdout★ (/dev/full の在らぬ機械でも撃てる形)."""
+
+            def write(self, *_a, **_k):
+                raise OSError(28, "試験が故意に塞いだ stdout")
+
+            def flush(self):
+                raise OSError(28, "試験が故意に塞いだ stdout (flush)")
+
+        base = _dt.datetime.now().astimezone()
+        stamp = (base - _dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "engine"
+            (root / "logs").mkdir(parents=True)
+            (root / STATE_REL).write_text(
+                json.dumps(_state(probe={"ok": True, "lastAt": stamp}), ensure_ascii=False),
+                encoding="utf-8")
+            err = io.StringIO()
+            real_out = sys.stdout
+            # ★試験の側も【己が死んだ時の色】を決めておく★= 是正が巻き戻された時、
+            #   run() の例外は此処へ素通りし ★selftest 自身が traceback で落ちる★ =
+            #   ★赤ではあるが【どの検が捕えたか】が所見に載らぬ★ (gate_nightly は札で拾う造りゆえ)。
+            #   ⇒ ★捕えて T26 の NG として名指す★ = ★之は本差し戻し F-3 と同じ型を、試験の側で踏まぬための備えである★。
+            escaped: Exception | None = None
+            rc = UNDET
+            try:
+                sys.stdout = _DeadOut()
+                with contextlib.redirect_stderr(err):
+                    rc = run(["--engine-root", str(root)])
+            except Exception as e:  # noqa: BLE001
+                escaped = e
+            finally:
+                sys.stdout = real_out
+        if escaped is not None:
+            fails.append(
+                f"★NG★ T26: stdout が死んでおる時、例外が run() の外へ抜けた "
+                f"({type(escaped).__name__}: {escaped}) = ★色は CPython の終了規約任せ "
+                "(無buffer なら rc=1・buffer なら rc=120)★ (期待=UNDETERMINED を自ら返すこと)")
+            return
+        seen.add(rc)
+        # ★之が無ければ rc=1 (無buffer) か rc=120 (buffer) = 「殿への通知は死んだ」の嘘★
+        if rc != UNDET:
+            fails.append(
+                f"★NG★ T26: stdout が死んでおる時 rc={_VERDICT[rc]} を返した = "
+                "★己の出口の不具合を通知路の罪として出しておる★ (期待=UNDETERMINED)")
+            return
+        if "[NTFY-CRASH]" not in err.getvalue():
+            fails.append(
+                "★NG★ T26: stdout が死んだ時、札 [NTFY-CRASH] が stderr へも出ておらぬ = "
+                f"★色は安全だが中身が空★ / err={err.getvalue().strip()[:200]}")
+            return
+        print("ok T26 刷る段が落ちても未検分 + 札は stderr へ逃がす (UNDETERMINED)")
+
+    check_stdout_death()
+
+    print(f"── [gate-3 ntfy selftest] {len(fails)} 件の NG / 検 26 本 ──")
     for f in fails:
         print(f)
     return 1 if fails else 0

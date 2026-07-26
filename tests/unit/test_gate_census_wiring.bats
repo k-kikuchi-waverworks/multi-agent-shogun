@@ -4,7 +4,7 @@
 # ★cmd 番号は未だ持たぬ★= 本任は家老の 04:33 の便で下されたが cmd が起票されておらぬ。
 #   ★己で番号を選ばぬ★ (採番は cmd_id_alloc.sh の払い出しのみ・手動採番は禁 = 2026-07-25 に
 #   1日 6 件 衝突した実害の根絶策)。★cmd_1406 は【番人が控えと固着を区別できぬ】の別件ゆえ使わぬ★。
-#   ⇒ 変異 id は衝突せぬ綴り (MUT-CENSUSWIRE-*) で置き、★払い出し後に家老が付け替える★。
+#   ⇒ 変異 id は衝突せぬ綴り (MUT-1382-CW*) で置き、★払い出し後に家老が付け替える★。
 #
 # ★なぜ此の試験が在るか (2026-07-27 04:27 軍師二号の実測)★:
 #   本夜 建てた七つの口は ★実体 7/7 在れど配線は 4/7★ であった。呼ぶ者が居らなんだのは
@@ -36,11 +36,11 @@
 #   T-CW-007: ★呼ばぬ朝も黙らぬ★= WIRING=0 で配線 block を撃つと「呼んでおらぬ」と毎朝 1 行 名乗る
 #
 # 変異登録案 (牙 台帳の単独書き手=六号・登録は家老の号令後):
-#   MUT-CENSUSWIRE-W1: run_reporter の「道具が居らぬ」枝を `return 0` へ倒す          → T-CW-002 赤
-#   MUT-CENSUSWIRE-W2: 札の照合 (grep -qF "$banner") を消す                           → T-CW-003 赤
-#   MUT-CENSUSWIRE-W3: srt() を `echo "$1"` へ倒す (既定で門へ入れる)                 → T-CW-006 赤
-#   MUT-CENSUSWIRE-W4: else 枝の「呼んでおらぬ」1 行を消す (黙って呼ばぬ)             → T-CW-007 赤
-#   MUT-CENSUSWIRE-W5: CENSUS_WIRING の既定を 1 へ倒す                                → T-CW-001 赤
+#   MUT-1382-CW1: run_reporter の「道具が居らぬ」枝を `return 0` へ倒す          → T-CW-002 赤
+#   MUT-1382-CW2: 札の照合 (grep -qF "$banner") を消す                           → T-CW-003 赤
+#   MUT-1382-CW3: srt() を `echo "$1"` へ倒す (既定で門へ入れる)                 → T-CW-006 赤
+#   MUT-1382-CW4: else 枝の「呼んでおらぬ」1 行を消す (黙って呼ばぬ)             → T-CW-007 赤
+#   MUT-1382-CW5: CENSUS_WIRING の既定を 1 へ倒す                                → T-CW-001 赤
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"

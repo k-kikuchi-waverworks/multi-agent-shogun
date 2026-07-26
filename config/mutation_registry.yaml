@@ -1913,7 +1913,7 @@ mutations:
   #   ★錨は全て hit=1 を明示 path で実測済 (2026-07-27 05:35)★= 再帰 grep は使うておらぬ
   #     (白名簿 repo では再帰 grep が追跡下しか見ぬゆえ = 本夜 01:37 の全軍規律)。
   # ═══════════════════════════════════════════════════════════════════════════
-  - id: MUT-CENSUSWIRE-W1
+  - id: MUT-1382-CW1
     origin: karo_0433_census_wiring
     suspected_by: ashigaru6
     desc: |
@@ -1930,7 +1930,7 @@ mutations:
     red_needle: "not ok 1 T-CW-002"
     timeout: 300
 
-  - id: MUT-CENSUSWIRE-W2
+  - id: MUT-1382-CW2
     origin: karo_0433_census_wiring
     suspected_by: ashigaru6
     desc: |
@@ -1946,7 +1946,7 @@ mutations:
     red_needle: "not ok 1 T-CW-003"
     timeout: 300
 
-  - id: MUT-CENSUSWIRE-W3
+  - id: MUT-1382-CW3
     origin: karo_0433_census_wiring
     suspected_by: ashigaru6
     desc: |
@@ -1963,7 +1963,7 @@ mutations:
     red_needle: "not ok 1 T-CW-006"
     timeout: 300
 
-  - id: MUT-CENSUSWIRE-W4
+  - id: MUT-1382-CW4
     origin: karo_0433_census_wiring
     suspected_by: ashigaru6
     desc: |
@@ -1980,7 +1980,7 @@ mutations:
     red_needle: "not ok 1 T-CW-007"
     timeout: 300
 
-  - id: MUT-CENSUSWIRE-W5
+  - id: MUT-1382-CW5
     origin: karo_0433_census_wiring
     suspected_by: ashigaru6
     desc: |
@@ -1997,7 +1997,7 @@ mutations:
     red_needle: "not ok 1 T-CW-001"
     timeout: 300
 
-  - id: MUT-CENSUSWIRE-W6
+  - id: MUT-1382-CW6
     origin: karo_0433_census_wiring
     suspected_by: ashigaru6
     desc: |
@@ -2014,7 +2014,7 @@ mutations:
     red_needle: "not ok 1 T-CW-004"
     timeout: 300
 
-  - id: MUT-CENSUSWIRE-W7
+  - id: MUT-1382-CW7
     origin: karo_0433_census_wiring
     suspected_by: ashigaru6
     desc: |

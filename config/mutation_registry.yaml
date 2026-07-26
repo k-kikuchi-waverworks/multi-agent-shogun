@@ -1355,6 +1355,51 @@ mutations:
     expect: nonzero
     red_needle: "NG  M2"  # 実測 2026-07-27: 牙折り時は M2 が赤を一つも出せず落ちる
 
+  # ══════════════════════════════════════════════════════════════════════
+  # ★cmd_1398 O-1 = docs が名乗る境界と、実装の境界の【一致】を守る牙★
+  #   ★代筆 = 足軽六号 (台帳の単独書き手)・★疑うた出所は家老の O-1 下命★
+  #   ★本 entry が生まれた経緯を記す = 之が牙の値打ちの半分にござる★:
+  #     家老の口述は「$(…) と $VAR は散文位置のみ止める (引数位置は正当な "$file" を
+  #     巻き込むゆえ通す)」であった。★実装へ当てたら偽であった★ =
+  #     ★inbox_write の【本文】は引数位置でありながら散文位置でもある★ ⇒ 本文位置の
+  #     $UNDEF は現に DENY。★口述どおり書けば docs が実装より強い嘘をつく (規律6)★。
+  #   ★★器の初版は【壊しても落ちなんだ】= 家老が【多重支持の緑】と名付けた形★★:
+  #     初版は主張3 の例に `--content-file "$HOME/x"` を据えたが、之は
+  #       (甲) 散文位置でない (= 守りたい当の性質) + (乙) 残りが "/x" ゆえ散文に見えぬ
+  #     の【二つ】で ALLOW になっており、★(乙) が単独で緑を支えるゆえ (甲) を壊しても緑★。
+  #     ⇒ ★例を「残りも散文である」物へ差し替えた★ = ★位置だけが ALLOW を支える形★。
+  #     ★之が本 entry を登録して良い理由である★ = ★偽にして赤を見てから載せた (02:12 の規律)★。
+  #   ★needle を二つに分けてある★ = CLAUDEMD-BOUNDARY (実装が動いた) /
+  #     CLAUDEMD-TEXT (docs から語が消えた) ⇒ ★赤の出所が絞れる★。
+  #   ★写し 3 本 (AGENTS.md / .github/copilot-instructions.md / agents/default/system.md) は
+  #     本 entry では見ておらぬ★ = 登録時 其の 3 本は他者の未commit 差分であり、
+  #     ★他者の未commit に緑を依存させぬ★ため外した。★写しの追随を縛る牙は別途 具申済★。
+  # ══════════════════════════════════════════════════════════════════════
+  - id: MUT-1398-DOC-001
+    origin: cmd_1398
+    suspected_by: karo
+    desc: |
+      【CLAUDE.md が名乗る関所の境界を、実装が黙って裏切っておらぬか】
+      ★守るのは文言でなく【docs と実装の一致】である★ =
+      ★CLAUDE.md は全員が自動で読む層★ゆえ、★実装だけが動けば全員が古い境界を信じ続ける★ =
+      ★「関所を通ったゆえ安全」と読む道が、docs の側から静かに開く★。
+      ★本牙が撃つのは prose 位置の判定そのもの★ = 境界を全位置へ広げると
+      ★主張3 (散文位置でない引数は通す) が破れ、CLAUDEMD-BOUNDARY が名指す★。
+      ★docs の側の退行は CLAUDEMD-TEXT が別に名指す★ = 二つの赤は出所が違う。
+    paths: [CLAUDE.md, scripts/shell_expansion_guard.py, scripts/claude_md_boundary_probe.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/shell_expansion_guard.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    prose = (pos in positions) and not body_escape"
+      assert s.count(old) == 1, f"MUT-1398-DOC-001: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "    prose = True", 1))
+      PY
+    test: |
+      python3 scripts/claude_md_boundary_probe.py
+    expect: nonzero
+    red_needle: "CLAUDEMD-BOUNDARY"  # 実測 2026-07-27: 境界を全位置へ広げると主張3 の 2 件が名指しで落ちる
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

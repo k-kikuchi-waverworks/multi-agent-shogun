@@ -81,7 +81,15 @@ EMPTY_REGISTRY_IS_UNDETERMINED = True
 # docs/content/ops/cmd_1352_silent_pitfall_gates.md「台帳登録検知」節。
 # ─────────────────────────────────────────────────────────────────────────────
 COVERAGE_EXTS = {".sh", ".bash", ".py", ".bats"}  # 実行可能な test の宿る拡張子のみ (prose/YAML 対象外)
-COVERAGE_MUT_KEYWORDS = r"変異試験|変異を当て|わざと壊|壊して赤|壊せば落ち|mutation"
+# ★綴りの一般形★ (cmd_1370): 旧版は「変異試験|変異を当て」と★語句★で綴りを固定しておったゆえ、
+# 「★変異★= …を戻せば赤」の様に記号装飾つきで書いた file が【候補にすら挙がらなんだ】
+# (軍師一号が cmd_1366 検分で実測・該当0件)。日本語側は一般形「変異」1語へ寄せ、
+# 照合前に装飾記号を落とす (_norm_for_kw)。★英語側は "mutation" のまま広げぬ★ =
+# "mutat" まで広げると "does not mutate" / "mutate 可能な stub" 等のデータ変異の意を拾い、
+# 実測 2026-07-26 で backend に誤検知 2 件が増えた (誤検知は無視されて検知を殺す)。
+COVERAGE_MUT_KEYWORDS = r"変異|わざと壊|壊して赤|壊せば落ち|mutation"
+# 照合前に落とす装飾記号 (本 repo の全軍が強調に使う。綴りの揺れの実体はほぼこれである)
+COVERAGE_DECORATION = r"[★☆◆◇■□●○▲△【】《》〔〕｜|]"
 COVERAGE_SELFTEST_MARKERS = r"--selftest|def selftest|selftest\(\)"
 COVERAGE_D1_NEGATIVE = r"(?:without|no|not)\s+mutation"  # データ変異の意 ("without mutation" 等) を除く
 # D3 (cmd_1355 backend 台帳延長): pytest 型の変異test (backend の test_cmd_1350_* 等) は
@@ -133,6 +141,71 @@ def skip_evidence(out: str):
 # (repo 跨ぎ言及は 2026-07-26 実測ゼロ)。
 # ─────────────────────────────────────────────────────────────────────────────
 REGISTRY_ID_RE = re.compile(r"MUT-\d{3,4}-[A-Za-z0-9]+")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gate-2 付帯4: ★視野計★ (--coverage に相乗り・cmd_1370)
+# 何を塞ぐか = ★「候補 N 件すべて登録済 = PASS」は【候補に挙がった物】しか数えておらぬ★。
+# 候補に挙がらなんだ牙は最初から分母の外に在り、検知器は静かに盲になる (軍師一号 R5)。
+# ★測り方 = 台帳そのものを物差しにする★: 台帳が名指しする file のうち test 本体であるものは、
+# 定義により変異試験である (綴りに一切依らぬ独立の証拠)。それを D1/D2/D3 が見えておるかで
+# ★検知規則の recall★ を毎朝印字し、見えておらぬ file を名指しする。
+# ★分母0と全員健全を区別する★ (cmd_1364 の流儀) = 台帳既知が0件なら「測れておらぬ」と言う。
+# ★限界 (正直に)★: 本計は【台帳に載っておる物】しか物差しにできぬゆえ、
+# 「未登録かつ綴りでも見えぬ」file は本計にも映らぬ (残余。docs に明記)。
+# ─────────────────────────────────────────────────────────────────────────────
+_PATHLIKE_RE = re.compile(r"[\w./-]+\.(?:py|sh|bash|bats)")
+# test 本体の印 (実装 file を分母へ入れぬため。mutate の的にされる実装は変異試験ではない)
+_TEST_BODY_RE = re.compile(r"(?m)^\s*def test_\w+|^\s*@test\s|--selftest|def selftest")
+
+
+def _norm_for_kw(s: str) -> str:
+    """変異 keyword 照合の前処理: 強調の装飾記号を落とす (「★変異★=」を「変異=」に)。"""
+    return re.sub(COVERAGE_DECORATION, "", s)
+
+
+def ls_files(repo: Path):
+    """(tracked relpath list, error) を返す。git 追跡下のみを見る掟の唯一の口。"""
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"git ls-files が走らぬ: {e}"
+    if r.returncode != 0:
+        return None, f"git ls-files 失敗 (exit {r.returncode}): {r.stderr.strip()[:200]}"
+    return list(filter(None, r.stdout.split("\0"))), None
+
+
+def registry_named_test_bodies(entries, repo: Path):
+    """台帳が名指しする tracked file のうち【test 本体】を {relpath: [entry id]} で返す。
+
+    ★綴りを一切見ぬ★ = paths / test / mutate の中の path らしき文字列を拾い、
+    追跡下・COVERAGE_EXTS・test 本体の印を持つものだけを残す。
+    """
+    tracked, err = ls_files(repo)
+    if err:
+        return None, err
+    tset = set(tracked)
+    out: dict[str, list[str]] = {}
+    for e in entries:
+        eid = str(e.get("id", "?"))
+        blob = " ".join([str(e.get("test", "")), str(e.get("mutate", ""))]
+                        + [str(p) for p in (e.get("paths") or [])])
+        for m in _PATHLIKE_RE.finditer(blob):
+            rel = m.group(0).lstrip("./")
+            if rel not in tset or Path(rel).suffix not in COVERAGE_EXTS:
+                continue
+            p = repo / rel
+            if not p.is_file():
+                continue
+            try:
+                if not _TEST_BODY_RE.search(p.read_text(encoding="utf-8", errors="replace")):
+                    continue
+            except OSError as ex:
+                return None, f"読めぬ追跡 file: {rel} ({ex}) — 黙って飛ばさぬ (沈黙禁)"
+            out.setdefault(rel, [])
+            if eid not in out[rel]:
+                out[rel].append(eid)
+    return out, None
 
 
 def load_registry(path: Path):
@@ -337,19 +410,15 @@ def scan_mutation_test_candidates(repo: Path):
     対象は git ls-files (追跡済) かつ COVERAGE_EXTS の拡張子のみ。内容は worktree を読む
     (限界: 追跡済で disk に無い file は数えぬ・untracked の変異testは見えぬ — docs に明記)。
     """
-    try:
-        r = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return None, f"git ls-files が走らぬ: {e}"
-    if r.returncode != 0:
-        return None, f"git ls-files 失敗 (exit {r.returncode}): {r.stderr.strip()[:200]}"
+    tracked, err = ls_files(repo)
+    if err:
+        return None, err
     kw = re.compile(COVERAGE_MUT_KEYWORDS, re.IGNORECASE)
     st = re.compile(COVERAGE_SELFTEST_MARKERS)
     neg = re.compile(COVERAGE_D1_NEGATIVE, re.IGNORECASE)
     pyt = re.compile(COVERAGE_D3_PYTEST_DEF)
     cands: dict[str, str] = {}
-    for rel in filter(None, r.stdout.split("\0")):
+    for rel in tracked:
         if Path(rel).suffix not in COVERAGE_EXTS:
             continue
         p = repo / rel
@@ -359,16 +428,18 @@ def scan_mutation_test_candidates(repo: Path):
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
             return None, f"読めぬ追跡 file: {rel} ({e}) — 黙って飛ばさぬ (沈黙禁)"
+        # ★装飾を落としてから照合★ (cmd_1370): 「★変異★=」の様な強調綴りで牙が落ちるのを塞ぐ
+        norm = _norm_for_kw(text)
         d1 = None
         for i, line in enumerate(text.splitlines(), 1):
-            if "@test" in line and kw.search(line) and not neg.search(line):
+            if "@test" in line and kw.search(_norm_for_kw(line)) and not neg.search(line):
                 d1 = f"D1 (L{i}: @test 行が変異を名指し)"
                 break
         if d1:
             cands[rel] = d1
-        elif st.search(text) and kw.search(text):
+        elif st.search(text) and kw.search(norm):
             cands[rel] = "D2 (selftest 宣言と変異 keyword の共起)"
-        elif Path(rel).suffix == ".py" and pyt.search(text) and kw.search(text):
+        elif Path(rel).suffix == ".py" and pyt.search(text) and kw.search(norm):
             cands[rel] = "D3 (pytest test と変異 keyword の共起)"
     return cands, None
 
@@ -378,15 +449,11 @@ def scan_registry_id_refs(repo: Path):
 
     幽霊 ID 検分 (四号 M9 型) の材料。読めぬ追跡 file は沈黙せず error (coverage scan と同じ掟)。
     """
-    try:
-        r = subprocess.run(["git", "-C", str(repo), "ls-files", "-z"],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return None, f"git ls-files が走らぬ: {e}"
-    if r.returncode != 0:
-        return None, f"git ls-files 失敗 (exit {r.returncode}): {r.stderr.strip()[:200]}"
+    tracked, err = ls_files(repo)
+    if err:
+        return None, err
     refs: list[tuple[str, int, str]] = []
-    for rel in filter(None, r.stdout.split("\0")):
+    for rel in tracked:
         if Path(rel).suffix not in COVERAGE_EXTS:
             continue
         p = repo / rel
@@ -465,16 +532,53 @@ def coverage(registry: Path, repo: Path) -> int:
     for rel, ln, mid in ghosts:
         print(f"  ★NG★ [GHOST-ID]     {rel}:{ln} が {mid} を名指すが台帳に実在せぬ"
               " (docstring 申告と台帳の食い違い = 四号 M9 型。登録するか申告を消せ)")
+
+    # ── ★視野計★ (付帯4・cmd_1370): 検知規則の recall を台帳で測り、盲を数字で言わせる ──
+    named, nerr = registry_named_test_bodies(entries, repo)
+    if nerr:
+        print(f"[gate-2 coverage] UNDETERMINED: {nerr}")
+        return 2
+    blind = {rel: ids for rel, ids in named.items() if rel not in cands}
+    for rel in sorted(blind):
+        print(f"  注   [RULE-BLIND]    {rel}: 台帳 {'/'.join(blind[rel])} が名指す変異試験だが"
+              " ★検知規則 D1/D2/D3 には見えておらぬ★ (台帳が在るゆえ守られてはおる。"
+              "同じ形の【未登録】は検知できぬ = 検知規則の視野の外)")
+    n_named, n_seen = len(named), len(named) - len(blind)
+    # ★物差しの長さを先に言う★: 対照は必ず当たる fixture ゆえ分母から除く。
+    #   除いた残りが 0 件なら【recall を測れておらぬ】= 「全部見えておる」ではない
+    #   (分母0と全員健全を区別する — cmd_1364 の流儀を検知器自身へ当てたもの)
+    non_ctl = sorted(set(named) - {control})
+    seen_non_ctl = [rel for rel in non_ctl if rel in cands]
+    if not non_ctl:
+        vision = ("★視野は測れておらぬ★ = 台帳が名指す test 本体が対照のみ"
+                  f" ({n_named} 件) ゆえ recall の物差しが無い")
+    elif not seen_non_ctl:
+        # 対照以外を1件も見えておらぬ = 対照が当たるだけで規則は実質死んでおる疑い。
+        # ★これは対照1件の検分より広い牙★ (対照は fixture ゆえ規則の生存を証明せぬ)
+        print(f"[gate-2 coverage] UNDETERMINED: ★検知規則が陽性対照 ({control}) 以外を"
+              f" 1 件も見えておらぬ★ = 台帳が名指す変異試験 {len(non_ctl)} 件"
+              f" ({'/'.join(non_ctl[:3])}…) がことごとく規則の外に在る"
+              " = 検出規則が死んでおる疑い (対照は必ず当たる fixture ゆえ生存を証明せぬ)")
+        return 2
+    else:
+        vision = (f"台帳既知の変異試験 {n_named} 件中 ★規則が見えるのは {n_seen} 件"
+                  f"・盲 {len(blind)} 件★")
+    print(f"  [視野] {vision} — 下の候補件数は【規則に見えた物】の勘定である")
+
     if unregistered or ghosts:
         print(f"[gate-2 coverage] FAIL: 候補 {len(cands)} 件中 ★台帳に無い変異test"
-              f" {len(unregistered)} 件★ / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件★")
+              f" {len(unregistered)} 件★ / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件★"
+              f" (視野: {vision})")
         print("  処方: 「赤を一度確認した」変異を config/mutation_registry.yaml へ登録せよ")
         print("        (登録の書式は本 file 冒頭 docstring)。登録すべきでない正当な理由が在るなら")
         print("        coverage_waivers へ【理由つきで】免除を書け (黙って外す道は無い)。")
         print("        幽霊 ID は台帳へ登録するか docstring の申告を消せ (申告≠実在を残すな)。")
         return 1
-    print(f"[gate-2 coverage] PASS: 変異testらしき候補 {len(cands)} 件すべて台帳登録済"
-          f" (免除 {n_waived} 件・免除は可視・ID言及 {len(refs)} 件に幽霊なし)")
+    # ★PASS の文言に視野を刻む★ = 「候補すべて登録済」を【全部検査した】と読ませぬための限定
+    #   (cmd_1364 の「検査した と 全部検査した を混同させぬ」を、検知器自身へ当てたもの)
+    print(f"[gate-2 coverage] PASS: ★規則に見えた★候補 {len(cands)} 件すべて台帳登録済"
+          f" (免除 {n_waived} 件・免除は可視・ID言及 {len(refs)} 件に幽霊なし)"
+          f" — ★但し視野は全域でない: {vision}★")
     return 0
 
 
@@ -525,6 +629,15 @@ _COV_ROGUE_BATS = '@test "quorum breaks when neutered (mutation proof)" {\n  tru
 _COV_DATAMUT_BATS = '@test "previews stale branch without mutation" {\n  true\n}\n'
 # D3 素材 (cmd_1355): pytest 型 = bats でも selftest 宣言でもない変異test
 _COV_ROGUE_PY = "# 変異試験: 順序を壊せば赤くなることを検める\ndef test_order_mutation_detected():\n    pass\n"
+# ★cmd_1370 素材★: 記号装飾つきの綴り = 実在の書き方 (backend の cmd_1366 test の写し)。
+# 旧 keyword (「変異試験|変異を当て|…」の語句固定) では ★1件も当たらぬ★ = 候補にすら挙がらぬ。
+_COV_DECORATED_PY = (
+    "# ★変異★= guard を戻せば ★本 test は赤★\n"
+    "def test_guard_is_alive():\n    pass\n"
+)
+# ★cmd_1370 素材2★: 変異語彙を一切持たぬ test 本体 (台帳が名指すゆえ変異試験と判る形)。
+# 実測 2026-07-26: 台帳既知 25 件中 8 件がこの形 = 綴りでは原理的に届かぬ族である。
+_COV_SILENT_PY = "def test_plain_contract():\n    assert True\n"
 
 
 def _cov_entry(eid: str, paths: list[str]):
@@ -734,6 +847,52 @@ def selftest() -> int:
                          _cov_entry("MUT-COV-ROGUE", ["tests/rogue_mutation.bats"])])
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
         expect("T21 幽霊ID言及=FAIL+名指し (四号M9型)", 1, rc, ghost_id, out)
+
+        # ── cmd_1370 selftests: 綴りの一般化 + 視野計 ──
+
+        # T23: ★記号装飾つきの綴り (「★変異★= …を戻せば赤」) を候補に挙げる★
+        #      = 軍師一号が cmd_1366 検分で見つけた実物の形。旧 keyword では候補にすら挙がらぬ
+        repo = _mk_git_repo(T / "t23", {ctl: _COV_CONTROL_BODY,
+                                        "tests/decorated_mutation.py": _COV_DECORATED_PY})
+        reg = T / "t23reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T23 装飾つき綴り=検出+FAIL名指し", 1, rc, "tests/decorated_mutation.py", out)
+
+        # T24: ★視野計★ = 台帳が名指す test 本体を規則が見えておらぬ時、[RULE-BLIND] で名指す
+        #      (盲は【印字して数える】= FAIL にはせぬ。永久に赤い gate は無視されて死ぬゆえ)
+        repo = _mk_git_repo(T / "t24", {ctl: _COV_CONTROL_BODY,
+                                        "tests/silent_body.py": _COV_SILENT_PY,
+                                        "tests/decorated_mutation.py": _COV_DECORATED_PY})
+        reg = T / "t24reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-SILENT", ["tests/silent_body.py"]),
+                         _cov_entry("MUT-COV-DEC", ["tests/decorated_mutation.py"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T24 視野計=盲を名指し", 0, rc, "[RULE-BLIND]", out)
+        expect("T24b 盲の file 名", 0, rc, "tests/silent_body.py", out)
+        expect("T24c PASS 文言に視野の限定", 0, rc, "但し視野は全域でない", out)
+
+        # T25: ★対照しか見えておらぬ = UNDETERMINED★ (対照は必ず当たる fixture ゆえ
+        #      規則の生存を証明せぬ。従来の「対照1件の検分」より広い牙)
+        repo = _mk_git_repo(T / "t25", {ctl: _COV_CONTROL_BODY,
+                                        "tests/silent_body.py": _COV_SILENT_PY})
+        reg = T / "t25reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-SILENT", ["tests/silent_body.py"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T25 対照しか見えぬ=UNDETERMINED", 2, rc, "陽性対照", out)
+
+        # T26: ★台帳が (対照以外の) test 本体を名指さぬ = 【測れておらぬ】と言う★
+        #      cmd_1364 で据えた「分母0と全員健全を区別せよ」の検知器版。
+        #      ★verdict は動かさぬ★ = 物差しが短いだけで赤にすると永久に赤い gate になり
+        #      無視されて死ぬ (家老の「登録したが永久に UNDETERMINED は免除より悪い」)。
+        #      規則の死そのものは陽性対照検分 (T12) と T25 が受け持つ。
+        repo = _mk_git_repo(T / "t26", {ctl: _COV_CONTROL_BODY})
+        reg = T / "t26reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T26 物差し不足=測れておらぬと明言 (緑を装わぬ)", 0, rc, "視野は測れておらぬ", out)
 
         # T22: 実在 ID の言及は幽霊扱いせぬ (誤検知抑止の負例)
         repo = _mk_git_repo(T / "t22", {ctl: _COV_CONTROL_BODY,

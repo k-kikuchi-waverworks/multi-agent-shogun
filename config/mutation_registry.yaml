@@ -637,6 +637,44 @@ mutations:
     expect: nonzero
     red_needle: "not ok 1 T-WIR-002"
 
+  - id: MUT-1370-001
+    origin: cmd_1370
+    suspected_by: ashigaru3
+    desc: |
+      変異 keyword を ★語句固定の旧版★ (変異試験|変異を当て|…) へ戻すと、T23
+      (記号装飾つきの綴り「★変異★= …を戻せば赤」を候補に挙げる) が赤くなるべき。
+      ★これは本 cmd 自身の自己適用である★ = 検知器の盲を直す任が、検知器で検知されぬのでは
+      示しがつかぬ。戻しても緑なら「綴りを狭めても誰も気付かぬ」= cmd_1366 の実物が
+      候補にすら挙がらなんだ状態 (軍師一号 R5 の実測) へ静かに戻る。
+      ★MUT-1352-005 との違い★ = あちらは「決して当たらぬ pattern へ折る」全滅形。
+      本変異は ★実際に起きた狭さへ戻す★ 形 = 全滅せぬゆえ陽性対照は生き残り、
+      T23 だけが落ちる (=「対照が当たるゆえ規則は生きておる」の裏をかく変異)。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^COVERAGE_MUT_KEYWORDS = .*/COVERAGE_MUT_KEYWORDS = r"変異試験|変異を当て|わざと壊|壊して赤|壊せば落ち|mutation"/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T23"  # 実測 2026-07-26: 旧綴りへ戻すと T23 が exit 2 (候補に挙がらぬ) へ落ちる
+
+  - id: MUT-1370-002
+    origin: cmd_1370
+    suspected_by: ashigaru3
+    desc: |
+      ★視野計★ (台帳を物差しに検知規則の recall を測る層) を「盲は無い」へ倒すと、
+      T24 (盲を [RULE-BLIND] で名指す) と T25 (対照しか見えぬ=UNDETERMINED) が
+      赤くなるべき。倒しても緑なら ★「候補 N 件すべて登録済 = PASS」が再び【候補に
+      挙がった物】だけの勘定に戻り、しかもそう読めることが画面から消える★。
+      = 本 cmd が塞いだ当のもの (数えておる、と申しておる者が、数え落としておる) の再発。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      sed -i 's/^    blind = {rel: ids for rel, ids in named.items() if rel not in cands}/    blind = {}/' scripts/gate_mutation_replay.py
+      sed -i 's/^    non_ctl = sorted(set(named) - {control})/    non_ctl = []/' scripts/gate_mutation_replay.py
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T24"  # 実測 2026-07-26: 視野計を倒すと T24 (盲の名指し) が落ちる
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

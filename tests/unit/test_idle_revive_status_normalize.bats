@@ -17,9 +17,17 @@
 #   T-STA-003: 「対象なし」行に eligible=N が印字される (busy でも分母に数える)
 #   T-STA-004: report 側の注記付き 'completed   # …' も完了と読める (帳簿漏れ型を
 #              stall_watchdog 領分へ残す既存契約が注記で破れぬ)
+#   T-STA-005: 'assigned:' 型の書き癖 drift でも読める (T-SWD-004 の兄側移植 =
+#              軍師二号 OBS-3: 変異 M-G1「句読点耐性だけ折る」が兄では 4/4 緑のまま
+#              生き残った = 上乗せ防御が一本の test にも守られておらなんだ穴)
+#   T-STA-006: '★assigned★家老dispatch★' (空白を挟まぬ ★ 密着) でも見える (軍師二号
+#              OBS-2: 家老は ★ を常用ゆえ、空白を挟まぬ日に盲目が戻る現実の的)
+#   T-STA-007: OBS-2 の読めぬ 9 形すべて + 乗っ取り耐性の直接契約 (normalize_status
+#              を module 直呼びで全形一括検分 — scan 経由 1 形ずつでは 9 形の網羅が重い)
 #
 # 変異登録 (config/mutation_registry.yaml): MUT-1154-001 (正規化を折る→T-STA-001 赤) /
-# MUT-1154-002 (eligible 印字を折る→T-STA-003 赤)。
+# MUT-1154-002 (eligible 印字を折る→T-STA-003 赤) /
+# MUT-1154-003 (allowlist 抽出を旧 blocklist 形へ退行→T-STA-006 赤)。
 # 本番 agent には触れない: fixture roster (ashigaru91-92 = 実在しない agent 名) +
 # pane-state-file 注入 + IDLE_REVIVE_INBOX_WRITE stub + probe monkeypatch で完全隔離
 # (test_idle_revive_quorum.bats と同型ハーネス)。
@@ -162,4 +170,89 @@ EOF
     echo "$output" | grep -q "revive 対象なし"
     echo "$output" | grep -q "eligible=0"
     [ ! -f "$INBOX_STUB_RECORD" ]
+}
+
+# ---------------------------------------------------------------------------
+# T-STA-005: 'assigned:' 型 (末尾句読点 drift) でも見える。弟分 T-SWD-004 の兄側移植。
+# ★なぜ今まで無かったか (軍師二号 OBS-3)★: 変異 M-G1「句読点耐性【だけ】を折る」を
+# 兄へ撃つと T-STA-001〜004 が 4/4 緑のまま生き残った = 「上乗せの防御」と誇った
+# 当の箇所が一本の test にも守られておらなんだ。弟には T-SWD-004 が在った — 兄へ
+# 戻すだけでよい、という名指しへの直接回答。
+# ---------------------------------------------------------------------------
+@test "T-STA-005: trailing-colon 'assigned:' drift is still readable — revive candidate (OBS-3 backport of T-SWD-004)" {
+    _write_task_status ashigaru91 "assigned:"
+    _write_pane_states ashigaru91:idle
+
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "ACTION=revive AGENT=ashigaru91"
+    grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
+}
+
+# ---------------------------------------------------------------------------
+# T-STA-006: '★assigned★家老dispatch★' (空白を挟まぬ ★ 密着) でも見える。
+# 軍師二号 OBS-2 の筆頭形: 家老は ★ を常用ゆえ「空白を挟まぬ日」は現実に来る。
+# 旧実装 (空白 split + :;,. rstrip) はこの形で盲目に戻る = blocklist の宿命。
+# これが落ちる形 = allowlist 抽出の退行 (MUT-1154-003 の的)。
+# ---------------------------------------------------------------------------
+@test "T-STA-006: star-adjacent '★assigned★note★' (no whitespace) IS visible — revive candidate (mutation proof: MUT-1154-003)" {
+    _write_task_status ashigaru91 "★assigned★家老dispatch=検知層の検分★"
+    _write_pane_states ashigaru91:idle
+
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "ACTION=revive AGENT=ashigaru91"
+    echo "$output" | grep -q "status=assigned未完"
+    grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
+}
+
+# ---------------------------------------------------------------------------
+# T-STA-007: OBS-2 の読めぬ 9 形すべての直接契約 + 乗っ取り耐性 (負例)。
+# scan 経由で 9 形を 1 本ずつ回すのは重いため normalize_status を直呼びで一括検分。
+# 負例 = 注記中の状態語に乗っ取られぬ (先に現れた語が勝つ) / 非文字列は素通し /
+# ASCII 語ゼロは "" (不可視のまま)。
+# ---------------------------------------------------------------------------
+@test "T-STA-007: all 9 OBS-2 decorated forms normalize to 'assigned'; note words cannot hijack" {
+    run "$VENV_PY" - <<'PY'
+import importlib.util, os
+spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
+irs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(irs)
+n = irs.normalize_status
+# OBS-2 の 9 形 (軍師二号実測: ★密着・全角括弧/句読点・…・—・/ で盲目が戻る)
+forms = [
+    "★assigned★家老dispatch=検知層の検分★",   # 1 ★密着 (空白なし)
+    "assigned（2026-07-26 07:23 家老dispatch）",  # 2 全角括弧密着
+    "【assigned】家老dispatch",                   # 3 全角隅付き括弧
+    "assigned。手番待ち",                          # 4 全角句点密着
+    "assigned、検証中",                            # 5 全角読点密着
+    "assigned：注記",                              # 6 全角コロン密着
+    "assigned…注記",                               # 7 三点リーダ密着
+    "assigned—注記",                               # 8 em-dash 密着
+    "assigned/注記",                               # 9 スラッシュ密着
+]
+ng = []
+for f in forms:
+    got = n(f)
+    if got != "assigned":
+        ng.append(f"形 {f!r} → {got!r} (expected 'assigned')")
+# 乗っ取り耐性: 注記中の 'assigned' が done を active に化けさせぬ (先勝ち契約)
+for f, want in [
+    ("done   # 家老dispatch=assigned直後に完遂", "done"),
+    ("★done★assigned待ちの注記★", "done"),
+    ("2026-07-26 assigned", "assigned"),  # 日付先行でも状態語へ届く (数字 run は語でない)
+    ("完了", ""),                          # ASCII 語ゼロ → 不可視のまま
+]:
+    got = n(f)
+    if got != want:
+        ng.append(f"負例 {f!r} → {got!r} (expected {want!r})")
+if n(None) is not None:
+    ng.append("非文字列 None が素通しされぬ")
+if ng:
+    print("\n".join(ng))
+    raise SystemExit(1)
+print("ALL_9_FORMS_OK")
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "ALL_9_FORMS_OK"
 }

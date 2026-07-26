@@ -15,6 +15,7 @@
 import argparse
 import datetime
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -32,8 +33,12 @@ SCANNED_AGENT_PREFIXES = ("ashigaru",)
 SCANNED_AGENT_NAMES = {"gunshi"}
 
 
+# status は機械 token ([a-z_]) — 最初の ASCII 語 run が status 本体。装飾は何であれ語ではない。
+_STATUS_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+
+
 def normalize_status(value):
-    """status 文字列を照合可能な正規形へ (先頭 token 化 + lowercase)。
+    """status 文字列を照合可能な正規形へ (最初の ASCII 語 run の抽出 + lowercase)。
 
     idle_revive_scan.py の同名関数と同型 (cmd_1356 d8fc7fd の同処方)。家老の帳簿慣行
     `status: 'assigned   # 2026-07-26 07:23 家老dispatch=…'` は YAML 上【引用符内の
@@ -42,16 +47,21 @@ def normalize_status(value):
     (COMPLETION_STATUSES 照合) の両方が同じ穴を持っておった = 帳簿漏れ alert が
     注記1つで永久に沈黙する (alert は「撃たれなかった」ことに誰も気付けぬ型)。
     注記は運用上有用ゆえ家老は書き続ける —「注記が在っても読める」側で吸収する。
-    末尾の :;,. も落とす = 'assigned:' 型の書き癖 drift でも盲目に戻らぬため。
-    idle_revive 側との copy drift は各 copy の変異登録 (MUT-1154-001 / MUT-0552-001,002)
-    が独立に見張る。
+
+    ★初版 (先頭空白 token + 末尾 :;,. 落とし) は装飾の blocklist であった★ —
+    軍師二号 OBS-2 が『★assigned★家老dispatch★』(空白を挟まぬ ★ 密着)・全角括弧/
+    全角句読点・…・—・/ の 9 形で盲目が戻ることを実証した (家老は ★ を常用ゆえ
+    現実の的)。blocklist は次の装飾文字で必ず破れる — ★語の側を allowlist で取る★:
+    status は機械 token ([A-Za-z][A-Za-z0-9_]*) ゆえ最初の ASCII 語 run が status。
+    最初の run を採る = 注記中の状態語には乗っ取られぬ (偽 HIT を作らぬ側の契約
+    T-SWD-002 は据え置き)。ASCII 語が一つも無ければ "" (従来どおり不可視)。
+    idle_revive 側との copy drift は各 copy の変異登録 (MUT-1154-001,003 /
+    MUT-0552-001,002,004) が独立に見張る。
     """
     if not isinstance(value, str):
         return value
-    tokens = value.strip().split(None, 1)
-    if not tokens:
-        return ""
-    return tokens[0].rstrip(":;,.").lower()
+    m = _STATUS_TOKEN_RE.search(value)
+    return m.group(0).lower() if m else ""
 
 
 def parse_task(path: Path):

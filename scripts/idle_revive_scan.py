@@ -804,8 +804,12 @@ def selftest_upstream():
 # ─────────────────────────────────────────────────────────────
 # YAML helpers (stall_watchdog_scan.py と同型)
 # ─────────────────────────────────────────────────────────────
+# status は機械 token ([a-z_]) — 最初の ASCII 語 run が status 本体。装飾は何であれ語ではない。
+_STATUS_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
+
+
 def normalize_status(value):
-    """status 文字列を照合可能な正規形へ (先頭 token 化 + lowercase)。
+    """status 文字列を照合可能な正規形へ (最初の ASCII 語 run の抽出 + lowercase)。
 
     家老の帳簿慣行 `status: 'assigned   # 2026-07-26 07:23 家老dispatch=…'` は
     YAML 上【引用符内の一つの文字列】であり、生のまま ACTIVE_STATUSES と完全一致
@@ -814,14 +818,21 @@ def normalize_status(value):
     家老degrade・上流障害台帳・R1/R2 の全経路が入口で消灯した)。
     注記は運用上有用ゆえ家老は書き続ける (agent_status.sh で一覧できる) —
     「注記を書くな」でなく「注記が在っても読める」側で吸収する (家老裁定 08:52)。
-    末尾の :;,. も落とす = 'assigned:' 型の書き癖 drift でも盲目に戻らぬため。
+
+    ★初版 (先頭空白 token + 末尾 :;,. 落とし) は装飾の blocklist であった★ —
+    軍師二号 OBS-2 が『★assigned★家老dispatch★』(空白を挟まぬ ★ 密着)・全角括弧/
+    全角句読点・…・—・/ の 9 形で盲目が戻ることを実証した (家老は ★ を常用ゆえ
+    現実の的)。blocklist は次の装飾文字で必ず破れる — ★語の側を allowlist で取る★:
+    status は機械 token ([A-Za-z][A-Za-z0-9_]*) ゆえ最初の ASCII 語 run が status。
+    最初の run を採る = 'done   # assigned直後…' の注記中の状態語には乗っ取られぬ
+    (先に現れた語が勝つ = 偽 active を作らぬ側の契約 T-STA-002 は据え置き)。
+    数字始まりの run は語でない ([A-Za-z] 先頭必須) = '2026-07-26 assigned' 型の
+    日付先行注記でも状態語へ届く。ASCII 語が一つも無ければ "" (従来どおり不可視)。
     """
     if not isinstance(value, str):
         return value
-    tokens = value.strip().split(None, 1)
-    if not tokens:
-        return ""
-    return tokens[0].rstrip(":;,.").lower()
+    m = _STATUS_TOKEN_RE.search(value)
+    return m.group(0).lower() if m else ""
 
 
 def parse_task(path: Path):

@@ -398,6 +398,7 @@ enqueue_recovery_task_assigned() {
         INBOX_PATH="$INBOX" AGENT_ID="$AGENT_ID" "$SCRIPT_DIR/.venv/bin/python3" - << 'PY'
 import datetime
 import os
+import re
 import uuid
 import yaml
 
@@ -423,6 +424,16 @@ try:
 
     # Task YAML status guard: skip auto-recovery if task is cancelled or idle.
     # This prevents restarting a task that Karo intentionally cancelled via clear_command.
+    #
+    # cmd_1356 OBS-4 (軍師二号): 旧実装は fail-OPEN の生照合が2枚重なっており guard は
+    # 実運用でほぼ死んでいた —
+    #   (1) top-level get("status") のみ = 標準の `task:` ネスト形 (実 task YAML の大半)
+    #       では常に None → guard 不発 (旧 T-RECOV-005 が characterization として固定)
+    #   (2) 完全一致 in ("cancelled","idle") = 家老の注記慣行 'cancelled   # 理由' で不発
+    # どちらも不発の向き = 家老が意図して止めた task へ再着手を促す (fail-OPEN)。
+    # 是正 = ネスト/flat 両対応 + normalize_status 同型 (idle_revive/stall_watchdog
+    # cmd_1356 の allowlist: 最初の ASCII 語 run) で読む。cancelled/idle 以外は従来
+    # どおり通す (guard の守備範囲は広げぬ)。
     task_yaml_path = os.path.join(
         os.path.dirname(os.path.dirname(inbox)), "tasks", f"{agent_id}.yaml"
     )
@@ -430,7 +441,18 @@ try:
         try:
             with open(task_yaml_path, "r", encoding="utf-8") as tf:
                 task_data = yaml.safe_load(tf) or {}
-            task_status = str(task_data.get("status") or "").strip().strip("'\"")
+            inner = (
+                task_data["task"]
+                if isinstance(task_data, dict) and isinstance(task_data.get("task"), dict)
+                else task_data
+            )
+            raw_status = inner.get("status") if isinstance(inner, dict) else None
+            m = (
+                re.search(r"[A-Za-z][A-Za-z0-9_]*", raw_status)
+                if isinstance(raw_status, str)
+                else None
+            )
+            task_status = m.group(0).lower() if m else ""
             if task_status in ("cancelled", "idle"):
                 print(f"SKIP_CANCELLED:{task_status}")
                 raise SystemExit(0)

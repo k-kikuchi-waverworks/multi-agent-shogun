@@ -255,9 +255,14 @@ mutations:
       上流障害台帳・R1/R2 の★全経路が入口で消灯★した実害 (誤clearゼロは手柄でなく
       盲目の副作用・cmd_1352「沈黙」family = data format drift による検知層の静かな無効化)
       の再来。注記は家老の運用慣行ゆえ書き続けられる — 読める側で吸収する契約 (家老裁定 08:52)。
+      ★mutate追随履歴★ 2026-07-26 09:5x: OBS-2 是正で函数本体が blocklist 形
+      (tokens[0].rstrip) → allowlist 形 (_STATUS_TOKEN_RE.search) へ書き換わり、旧 sed が
+      空振り = gate-2 replay が本 entry を UNDETERMINED で名指しした (★台帳が設計どおり
+      「静かな無効化」を捕まえた初の実例★)。mutate を新実装の return 行へ追随
+      (折り方の意味は不変 = 生の文字列をそのまま返す)。
     paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_status_normalize.bats]
     mutate: |
-      sed -i 's/^    return tokens\[0\].rstrip(":;,.").lower()$/    return value/' scripts/idle_revive_scan.py
+      sed -i 's/^    return m.group(0).lower() if m else ""$/    return value/' scripts/idle_revive_scan.py
     test: |
       mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
       bats --filter "T-STA-001" tests/unit/test_idle_revive_status_normalize.bats
@@ -341,6 +346,68 @@ mutations:
       bats --filter "T-SWD-005" tests/unit/test_stall_watchdog_status_normalize.bats
     expect: nonzero
     red_needle: "not ok 1 T-SWD-005"  # 実測 2026-07-26: 印字折りで assigned=2 が消え名指しで落ちる
+
+  - id: MUT-1154-003
+    origin: cmd_1356
+    suspected_by: gunshi2
+    desc: |
+      idle_revive の status 正規化を allowlist 抽出 (最初の ASCII 語 run を search) から
+      旧 blocklist 形 (先頭空白 token 相当 = 文字列先頭 anchor の match) へ退行させると、
+      T-STA-006 ('★assigned★家老dispatch★' = 空白を挟まぬ ★ 密着でも見える) が赤くなる
+      べき。退行しても緑なら、家老が ★ を空白なしで書いた日に番人の盲目が戻る。
+      ★由来 = 軍師二号 OBS-2★: 独自変異で「読めぬ形が 9 つ残る」(★密着・全角括弧/
+      句読点・…・—・/) を実証した = 作り手 (ashigaru1) が自分では疑わなんだ場所。
+      同検分の M-G1 (句読点耐性だけ折る→兄では 4/4 緑で生存) が OBS-3 として
+      T-STA-005 の兄側移植も生んだ — 本 entry の変異はその両方 (T-STA-005/006/007) を
+      同時に撃つが、名指しは家老の書き癖に最も近い T-STA-006 で検める。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_status_normalize.bats]
+    mutate: |
+      sed -i 's/    m = _STATUS_TOKEN_RE.search(value)$/    m = _STATUS_TOKEN_RE.match(value.strip())/' scripts/idle_revive_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-STA-006" tests/unit/test_idle_revive_status_normalize.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-STA-006"
+
+  - id: MUT-0552-004
+    origin: cmd_1356
+    suspected_by: gunshi2
+    desc: |
+      stall_watchdog の status 正規化を allowlist 抽出から旧 blocklist 形 (先頭 anchor の
+      match) へ退行させると、T-SWD-006 ('★assigned★…★' 密着の帳簿漏れが hit になる) が
+      赤くなるべき。退行しても緑なら、注記の書き方 1 つで帳簿漏れ alert が再び沈黙する。
+      MUT-1154-003 の弟側 (copy drift を各 copy の変異登録が独立に見張る契約の一部)。
+      由来 = 軍師二号 OBS-2 (作り手が自分では疑わなんだ場所)。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh,
+            tests/unit/test_stall_watchdog_status_normalize.bats]
+    mutate: |
+      sed -i 's/    m = _STATUS_TOKEN_RE.search(value)$/    m = _STATUS_TOKEN_RE.match(value.strip())/' scripts/stall_watchdog_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-SWD-006" tests/unit/test_stall_watchdog_status_normalize.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SWD-006"
+
+  - id: MUT-1160-001
+    origin: cmd_1356
+    suspected_by: gunshi2
+    desc: |
+      inbox_watcher auto-recovery の task status guard から標準ネスト形
+      (`task: { status: ... }`) の展開を折る (top-level 読みへ退行) と、T-RECOV-005
+      (ネスト形 cancelled が SKIP される新契約) が赤くなるべき。折っても緑なら
+      guard は実 task YAML の大半 (実測 12/13 がネスト形) で不発 = 家老が意図して
+      止めた task へ auto-recovery が再着手を促す fail-OPEN が全数で開き直る。
+      由来 = 軍師二号 OBS-4 (:434 の生 exact match の名指し)。注記付き
+      'cancelled   # 理由' の完全一致すり抜け (同じ fail-OPEN family) は T-RECOV-006 が
+      同じ normalize で守る — 本 entry の的はネスト展開の側 (先に死んでいた方)。
+    paths: [scripts/inbox_watcher.sh, scripts/lib, tests/unit/test_inbox_watcher_io.bats]
+    mutate: |
+      sed -i 's/if isinstance(task_data, dict) and isinstance(task_data.get("task"), dict)/if False/' scripts/inbox_watcher.sh
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-RECOV-005" tests/unit/test_inbox_watcher_io.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-RECOV-005"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。

@@ -16,13 +16,18 @@
 #   T-SWD-001: 注記付き 'assigned   # …' task の帳簿漏れが★見える★ (HIT になる)
 #   T-SWD-002: 注記付き 'done   # …' は assigned に化けぬ (正規化が偽 HIT を作らぬ)
 #   T-SWD-003: 注記付き 'completed   # …' report も完了と読める + alert へは正規化 token
-#   T-SWD-004: 'assigned:' 型の書き癖 drift でも読める (末尾 :;,. 落とし)
+#   T-SWD-004: 'assigned:' 型の書き癖 drift でも読める (末尾句読点耐性)
 #   T-SWD-005: hit 0 件時に分母 (assigned=N) が印字される (家老裁定 09:24 = 無出力を
 #              契約にせぬ。分母0の検知層は全PASSと区別がつかぬ — eligible=N と同処方)
+#   T-SWD-006: '★assigned★家老dispatch★' (空白を挟まぬ ★ 密着) でも見える (軍師二号
+#              OBS-2: 家老は ★ を常用ゆえ、空白を挟まぬ日に盲目が戻る現実の的)
+#   T-SWD-007: OBS-2 の読めぬ 9 形すべて + 乗っ取り耐性の直接契約 (normalize_status
+#              を module 直呼びで全形一括検分)
 #
 # 変異登録 (config/mutation_registry.yaml): MUT-0552-001 (task側正規化を折る→T-SWD-001 赤) /
 # MUT-0552-002 (report側正規化を折る→T-SWD-003 赤) /
-# MUT-0552-003 (分母印字を折る→T-SWD-005 赤)。
+# MUT-0552-003 (分母印字を折る→T-SWD-005 赤) /
+# MUT-0552-004 (allowlist 抽出を旧 blocklist 形へ退行→T-SWD-006 赤)。
 # 本番 queue には触れない: --queue-root 隔離 (queue_root 指定時は inbox 通知経路に入らぬ
 # = stall_watchdog_scan.py main() の契約) + fixture roster ashigaru91 (実在しない agent 名)。
 
@@ -147,4 +152,65 @@ _ts_minutes_ago() {
     [ "$status" -eq 0 ]
     [[ "$output" != *"AGENT="* ]]
     [[ "$output" == *"hit なし。assigned=2"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# T-SWD-006: '★assigned★家老dispatch★' (空白を挟まぬ ★ 密着) の帳簿漏れも見える。
+# 軍師二号 OBS-2 の筆頭形: 家老は ★ を常用ゆえ「空白を挟まぬ日」は現実に来る。
+# 旧実装 (空白 split + :;,. rstrip) はこの形で盲目に戻る = blocklist の宿命。
+# これが落ちる形 = allowlist 抽出の退行 (MUT-0552-004 の的)。
+# ---------------------------------------------------------------------------
+@test "T-SWD-006: star-adjacent '★assigned★note★' (no whitespace) bookkeeping omission IS a hit (mutation proof: MUT-0552-004)" {
+    local ts="$(_ts_minutes_ago 45)"
+    _write_task_q ashigaru91 subtask_swd_006 "★assigned★家老dispatch=同型穴の是正★"
+    _write_report_q ashigaru91 subtask_swd_006 "completed" "$ts"
+
+    run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"AGENT=ashigaru91"* ]]
+    [[ "$output" == *"TASK_ID=subtask_swd_006"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# T-SWD-007: OBS-2 の読めぬ 9 形すべての直接契約 + 乗っ取り耐性 (負例)。
+# idle_revive 側 T-STA-007 と同型 — copy drift は各 copy の試験が独立に見張る。
+# ---------------------------------------------------------------------------
+@test "T-SWD-007: all 9 OBS-2 decorated forms normalize to 'assigned'; note words cannot hijack" {
+    run "$PROJECT_ROOT/.venv/bin/python3" - <<'PY'
+import importlib.util, os
+spec = importlib.util.spec_from_file_location("sws", os.environ["SCAN_PY"])
+sws = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sws)
+n = sws.normalize_status
+forms = [
+    "★assigned★家老dispatch=検知層の検分★",   # 1 ★密着 (空白なし)
+    "assigned（2026-07-26 07:23 家老dispatch）",  # 2 全角括弧密着
+    "【assigned】家老dispatch",                   # 3 全角隅付き括弧
+    "assigned。手番待ち",                          # 4 全角句点密着
+    "assigned、検証中",                            # 5 全角読点密着
+    "assigned：注記",                              # 6 全角コロン密着
+    "assigned…注記",                               # 7 三点リーダ密着
+    "assigned—注記",                               # 8 em-dash 密着
+    "assigned/注記",                               # 9 スラッシュ密着
+]
+ng = []
+for f in forms:
+    got = n(f)
+    if got != "assigned":
+        ng.append(f"形 {f!r} → {got!r} (expected 'assigned')")
+for f, want in [
+    ("done   # 家老dispatch=assigned直後に完遂", "done"),
+    ("★completed★assigned側の検分済★", "completed"),
+    ("完了", ""),
+]:
+    got = n(f)
+    if got != want:
+        ng.append(f"負例 {f!r} → {got!r} (expected {want!r})")
+if ng:
+    print("\n".join(ng))
+    raise SystemExit(1)
+print("ALL_9_FORMS_OK")
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "ALL_9_FORMS_OK"
 }

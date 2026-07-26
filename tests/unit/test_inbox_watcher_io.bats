@@ -386,11 +386,17 @@ YAML
     [ "$(grep -c 'msg_auto_recovery_' "$TEST_INBOX_DIR/ashigaru9.yaml")" -eq 1 ]
 }
 
-# CHARACTERIZATION: the status guard reads task_data.get("status") at the TOP
-# level of the task YAML, so it only fires for a FLAT `status:` key. T-RECOV-003/004
-# lock the flat-format skip path; T-RECOV-005 locks that the STANDARD nested
-# (`task: { status: ... }`) format bypasses the guard entirely — a latent gap the
-# cmd-3D/3E extraction should consciously decide to keep or fix.
+# Status guard contract (cmd_1356 OBS-4 rewrite): the guard reads BOTH the flat
+# `status:` key and the standard nested `task: { status: ... }` format, and
+# normalizes the value (first ASCII word run, lowercased — same shape as
+# idle_revive/stall_watchdog normalize_status) before matching cancelled/idle.
+#
+# 旧 T-RECOV-005 は「ネスト形は guard を素通りする」を characterization として
+# 固定していた (cmd-3D/3E で意識的に決めよ、との旗)。その決定が下った:
+# 実 task YAML の大半 (実測 12/13) はネスト形ゆえ、素通り契約のままでは guard は
+# 実運用でほぼ死んでいる — 家老が意図して止めた task へ auto-recovery が再着手を
+# 促す fail-OPEN (軍師二号 OBS-4 名指し)。契約の削除でなく新契約 green で書換える
+# (cmd_1357 二号の作法)。T-RECOV-003/004 (flat 形の skip) は無改変で残る。
 
 @test "T-RECOV-003: enqueue_recovery_task_assigned skips when a flat-format task is cancelled" {
     cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
@@ -433,10 +439,9 @@ YAML
     echo "$output" | grep -q "SKIP_CANCELLED:idle"
 }
 
-@test "T-RECOV-005: enqueue_recovery_task_assigned does NOT skip for the standard nested task format" {
-    # The standard task YAML nests status under `task:`. task_data.get("status")
-    # then reads None at the top level, so the cancel guard never fires and
-    # auto-recovery proceeds. Locked as-is (flag for cmd-3D/3E).
+@test "T-RECOV-005: enqueue_recovery_task_assigned SKIPS for the standard nested task format (cmd_1356 OBS-4 new contract)" {
+    # 旧契約 (素通り) の書換え。実 task YAML の大半はこのネスト形 — ここで guard が
+    # 効かねば「家老が意図して止めた task へ再着手を促す」fail-OPEN が実運用の全数で開く。
     cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
 messages:
   - {id: old, read: true, type: report_received, content: done}
@@ -445,6 +450,55 @@ YAML
 task:
   task_id: cmd_x
   status: cancelled
+YAML
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        AGENT_ID="ashigaru9"
+        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
+        LOCKFILE="${INBOX}.lock"
+        enqueue_recovery_task_assigned
+    '
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "SKIP_CANCELLED:cancelled"
+    ! grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"
+}
+
+@test "T-RECOV-006: annotated nested 'cancelled   # note' still skips — the raw exact match was the fail-OPEN (cmd_1356 OBS-4)" {
+    # 家老の注記慣行そのまま (agent_status.sh で一覧するため書き続けられる)。
+    # 旧実装は完全一致照合ゆえ注記1つで guard が外れた — 正規化 (最初の ASCII 語 run)
+    # で読む新契約。★密着形も normalize 同型ゆえ同時に効く。
+    cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
+messages:
+  - {id: old, read: true, type: report_received, content: done}
+YAML
+    cat > "$TEST_TASKS_DIR/ashigaru9.yaml" << 'YAML'
+task:
+  task_id: cmd_x
+  status: 'cancelled   # 2026-07-26 家老が意図して停止 = 再着手を促すな'
+YAML
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        AGENT_ID="ashigaru9"
+        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
+        LOCKFILE="${INBOX}.lock"
+        enqueue_recovery_task_assigned
+    '
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "SKIP_CANCELLED:cancelled"
+    ! grep -q "auto-recovery" "$TEST_INBOX_DIR/ashigaru9.yaml"
+}
+
+@test "T-RECOV-007: annotated nested 'assigned   # note' does NOT skip — guard scope stays cancelled/idle only" {
+    # 負例: 正規化が guard の守備範囲を広げぬ (assigned/done 等は従来どおり recovery 続行)。
+    # これが落ちる形 = 正規化の入れ方を誤って「注記があるだけで skip」に化けた時。
+    cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
+messages:
+  - {id: old, read: true, type: report_received, content: done}
+YAML
+    cat > "$TEST_TASKS_DIR/ashigaru9.yaml" << 'YAML'
+task:
+  task_id: cmd_x
+  status: 'assigned   # 2026-07-26 07:23 家老dispatch=検知層の検分'
 YAML
     run bash -c '
         source "'"$TEST_HARNESS"'"

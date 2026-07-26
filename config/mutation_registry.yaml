@@ -562,6 +562,81 @@ mutations:
     expect: nonzero
     red_needle: "not ok 1 N-001"  # 実測 2026-07-26 (lib/config 同梱で baseline 緑を確認済)
 
+  # ═══ cmd_1359: 帳簿漏れの番人へ「呼ぶ者」を配線 ════════════════════════
+  # 病 = ★stall_watchdog は 2026-04-22 の設置以来3ヶ月、目は開いておったが
+  # 【呼ぶ者が居らぬ】まま発報0件★ (cron に無し/supervisor の7本に不在/log file すら無し。
+  # 唯一の呼び口は家老が手で回す時だけ = 家老 degrade 時に一緒に沈む)。
+  # 配線と同時に ★task_id 再利用の裁定★ が要った (軍師二号=配線した途端、真の漏れでない
+  # のに鳴り続ける。的は家老が同じ task_id へ新しい手番を載せる癖)。
+
+  - id: MUT-1359-001
+    origin: cmd_1359
+    suspected_by: gunshi2
+    desc: |
+      再dispatch判定 (updated_at が report より新しければ鳴らさぬ) を「常に再dispatch」へ
+      倒すと、★真の帳簿漏れが黙って握り潰される★ ゆえ T-RDP-003 が赤くなるべき。
+      緑のままなら、鳴り続ける煩さを消すために ★番人を丸ごと黙らせた★ 状態と区別がつかぬ
+      = 本 cmd が直した病 (呼ばれぬ番人) を、別の形 (鳴かぬ番人) で再発させることになる。
+      由来 = 軍師二号の警告「配線した途端に真の漏れでないのに鳴り続ける」への対処が
+      行き過ぎておらぬかを見張る側の変異。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
+    mutate: |
+      sed -i 's/    return (dt > report_dt), "updated_at"/    return True, "updated_at"/' scripts/stall_watchdog_scan.py
+    test: |
+      bats tests/unit/test_stall_watchdog_redispatch.bats --filter T-RDP-003
+    expect: nonzero
+    red_needle: "not ok 1 T-RDP-003"
+
+  - id: MUT-1359-002
+    origin: cmd_1359
+    suspected_by: ashigaru1
+    desc: |
+      「再dispatchと判定し鳴らさず」の log 印字を消すと T-RDP-002 が赤くなるべき。
+      ★黙った事実を黙って黙る★ = 再dispatch判定が効きすぎて全部握り潰しておる状態と
+      本当に漏れが無い状態が log 上で見分けられなくなる (分母印字 eligible=N /
+      assigned=N と同じ考え方の、抑制側の顔)。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
+    mutate: |
+      sed -i '/再dispatchと判定し鳴らさず/d' scripts/stall_watchdog_scan.py
+    test: |
+      bats tests/unit/test_stall_watchdog_redispatch.bats --filter T-RDP-002
+    expect: nonzero
+    red_needle: "not ok 1 T-RDP-002"
+
+  - id: MUT-1359-003
+    origin: cmd_1359
+    suspected_by: ashigaru1
+    desc: |
+      alert 疲れの番 (cooldown) を「常に cooldown 中」へ倒すと T-CD-001 が赤くなるべき。
+      ★cooldown は諸刃★ = 鳴りすぎを抑えるための仕掛けが、倒れると ★一度鳴った漏れが
+      二度と鳴らぬ★ へ変わる。緑のままなら「無視されて死ぬ」を避けたつもりが
+      「鳴らずに死ぬ」へ移っただけになる。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
+    mutate: |
+      sed -i 's/^    return (now - last).total_seconds() < cooldown_min \* 60/    return True/' scripts/stall_watchdog_scan.py
+    test: |
+      bats tests/unit/test_stall_watchdog_redispatch.bats --filter T-CD-001
+    expect: nonzero
+    red_needle: "not ok 1 T-CD-001"
+
+  - id: MUT-1359-004
+    origin: cmd_1359
+    suspected_by: ashigaru1
+    desc: |
+      gate_nightly の ★配線消失検知★ (毎朝 crontab を読んで stall_watchdog の呼び口が
+      在ることを確かめる) を「常に在る」へ倒すと T-WIR-002 が赤くなるべき。
+      ★これが本 cmd で最も大事な変異である★ = 配線は repo の外 (crontab) に在るゆえ、
+      誰かが crontab を書き直せば ★3ヶ月 発報0件の状態へ静かに戻る★。
+      しかも ★alert の不在は無音と区別がつかぬ★ ゆえ、戻ったことに誰も気付けぬ。
+      「番人を作る」だけでなく「番人が呼ばれておることを毎朝確かめる」までが本 cmd の任。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
+    mutate: |
+      sed -i 's/grep -q "stall_watchdog_cmd1359"/grep -q ""/' scripts/gate_nightly.sh
+    test: |
+      bats tests/unit/test_stall_watchdog_redispatch.bats --filter T-WIR-002
+    expect: nonzero
+    red_needle: "not ok 1 T-WIR-002"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

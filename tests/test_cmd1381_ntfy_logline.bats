@@ -152,3 +152,52 @@ PY
   [ "$status" -eq 0 ]
   [[ "$output" == *"0 件の NG / 検 26 本"* ]]
 }
+
+# ── cmd_1400 = ★試験が本番の記録を汚さぬこと★ を構造で縛る ──────────────────
+# ★実害の再演★= test_cmd1363 が偽 curl で ntfy.sh を走らせ、本番 log へ 4 行 書いた。
+#   ★書き手の規律 (各試験が NTFY_LOG_FILE を書く) では足りぬ = 忘れることが当の不具合であった★。
+
+@test "C1 ★NTFY_LOG_FILE を書き忘れた試験でも本番 log へ届かぬ★ (既定が tmp へ向く)" {
+  unset NTFY_LOG_FILE                      # ★忘れっぽい試験の再現★
+  local before after
+  before="$(md5sum "$REAL_LOG" | awk '{print $1}')"
+  FAKE_CURL_MODE=ok run bash "$REPO/scripts/ntfy.sh" "★C1 忘れっぽい試験★"
+  [ "$status" -eq 0 ]
+  after="$(md5sum "$REAL_LOG" | awk '{print $1}')"
+  [ "$before" = "$after" ]                 # ★本番は 1 byte も動いておらぬ★
+  [ -f "$BATS_TEST_TMPDIR/ntfy_send.log" ] # ★而して記録そのものは失われておらぬ (tmp に在る)★
+  run grep -c 'HTTP=200 curl_rc=0 ' "$BATS_TEST_TMPDIR/ntfy_send.log"
+  [ "$output" = "1" ]
+  export NTFY_LOG_FILE="$TMP/ntfy_send.log"
+}
+
+@test "C2 ★明示の NTFY_LOG_FILE は guard より優先★ (試験が己で行き先を決める道を塞がぬ)" {
+  FAKE_CURL_MODE=ok run bash "$REPO/scripts/ntfy.sh" "★C2 明示★"
+  [ "$status" -eq 0 ]
+  [ -f "$NTFY_LOG_FILE" ]
+  [ ! -f "$BATS_TEST_TMPDIR/ntfy_send.log" ]   # ★tmp の既定へは逃げておらぬ★
+}
+
+@test "C3 ★試験行の除外は sha256 照合ゆえ silencer にならぬ★ (1 byte 違えば当たらぬ)" {
+  local d="$TMP/c3"; mkdir -p "$d"
+  local L="$d/ntfy_send.log"
+  local stamp; stamp="$(date '+%Y-%m-%dT%H:%M:%S%:z')"
+  printf '[%s] HTTP=500 curl_rc=0 title=試験由来\n' "$stamp" > "$L"
+  printf '[%s] HTTP=500 curl_rc=0 title=本物の失敗\n' "$stamp" >> "$L"
+  # ★1 行目だけを名指す名簿を作る★
+  local h; h="$(head -1 "$L" | tr -d '\n' | sha256sum | awk '{print $1}')"
+  printf 'schema: ntfy-send-testlines/1\nlines:\n  - sha256: %s\n' "$h" > "$d/ntfy_send.testlines.yaml"
+  run python3 "$REPO/scripts/gate_ntfy_sendlog.py" --log-file "$L"
+  [ "$status" -eq 1 ]                                  # ★本物の失敗は生き残って鳴る★
+  [[ "$output" == *"[NTFY-SEND-DEAD]"* ]]
+  [[ "$output" == *"除いた行 1 本"* ]]                  # ★除いた本数を黙らず出す★
+}
+
+@test "C4 ★名簿が無ければ何も除かぬ★ (除外は足す側の働き = 既定は安全側)" {
+  local d="$TMP/c4"; mkdir -p "$d"
+  local L="$d/ntfy_send.log"
+  printf '[%s] HTTP=500 curl_rc=0 title=失敗\n' "$(date '+%Y-%m-%dT%H:%M:%S%:z')" > "$L"
+  run python3 "$REPO/scripts/gate_ntfy_sendlog.py" --log-file "$L"
+  [ "$status" -eq 1 ]
+  [[ "$output" != *"除いた行"* ]]
+}

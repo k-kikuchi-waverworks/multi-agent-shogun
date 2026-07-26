@@ -33,7 +33,31 @@ restore_all() {
   done
   [ "$bad" -eq 0 ] || echo "★★手で戻せ★★ 原本は $WORK/orig に在る" >&2
 }
-trap restore_all EXIT
+# ★★本 harness 自身が本番 log を汚す (cmd_1400・2026-07-27 実測で判った)★★
+#   ■ ★機序★= MUT-1400-209 は ★guard を外す変異★ ゆえ、其の下で走る C1 は
+#     ★NTFY_LOG_FILE を持たぬまま本番 logs/ntfy_send.log へ 1 行 書く★。
+#     ★C1 が赤くなるのは【正しく捕えた】ゆえだが、其の副作用として記録が汚れる★。
+#   ■ ★実測★= 本 harness を 2 度 走らせ、本番 log に 2 行 積まれておるのを見つけた
+#     (01:45:56 / 01:46:44 「★C1 忘れっぽい試験★」)。
+#   ■ ★処し方 = 予防でなく【封じ込め】★= C1 は本物の path を検めてこそ意味が在るゆえ
+#     書込そのものは止められぬ ⇒ ★byte 完全な複製から戻す★ (script を戻すのと同じ作法)。
+#     ★之は【記録の書き換え】ではない★= ★本 harness が 60 秒前に己で作った物を、己で畳んでおる★。
+LOGBK="$WORK/ntfy_send.log.orig"
+[ -f "$REPO/logs/ntfy_send.log" ] && cp "$REPO/logs/ntfy_send.log" "$LOGBK"
+restore_prod_log() {
+  [ -f "$LOGBK" ] || return 0
+  if ! cmp -s "$LOGBK" "$REPO/logs/ntfy_send.log"; then
+    local n
+    n=$(( $(wc -l < "$REPO/logs/ntfy_send.log") - $(wc -l < "$LOGBK") ))
+    echo "※ ★本 harness が本番 log へ $n 行 書いた (MUT-1400-209 が guard を外した下で C1 が走るゆえ)★ → 戻す"
+    cp "$LOGBK" "$REPO/logs/ntfy_send.log"
+    cmp -s "$LOGBK" "$REPO/logs/ntfy_send.log" \
+      && echo "※ ★本番 log を byte 完全に戻した★" \
+      || echo "★★本番 log を戻せなんだ★★ 原本は $LOGBK に在る" >&2
+  fi
+}
+
+trap 'restore_all; restore_prod_log' EXIT
 
 backup() {
   mkdir -p "$WORK/orig"
@@ -140,8 +164,30 @@ mutate MUT-1381-207 "curl の死 (rc≠0) を見ぬ→繋がらぬのに緑を�
   "python3 scripts/gate_ntfy_sendlog.py --selftest" \
   "★NG★ S9"
 
+# ★(cmd_1400) 側 = 試験が本番の記録を汚さぬ守り★
+mutate MUT-1400-209 "bats 既定を tmp へ向ける守りを外す→忘れっぽい試験が本番 log を汚す" \
+  scripts/ntfy.sh \
+  '   [ -n "${BATS_TEST_FILENAME:-}${BATS_TEST_TMPDIR:-}${BATS_RUN_TMPDIR:-}" ]; then' \
+  '   false; then' \
+  "bats tests/test_cmd1381_ntfy_logline.bats -f 'C1'" \
+  "not ok 1 C1"
+
+mutate MUT-1400-210 "除外を【全行に当たる】形へ壊す→本物の失敗まで黙る (silencer 化)" \
+  scripts/gate_ntfy_sendlog.py \
+  'if hashlib.sha256(line.encode("utf-8")).hexdigest() in testline_hashes:' \
+  'if True:' \
+  "bats tests/test_cmd1381_ntfy_logline.bats -f 'C3'" \
+  "not ok 1 C3"
+
+mutate MUT-1400-211 "除いた本数の名乗りを外す→黙って数を減らす門になる" \
+  scripts/gate_ntfy_sendlog.py \
+  "    if excluded or side_note:" \
+  "    if False:" \
+  "bats tests/test_cmd1381_ntfy_logline.bats -f 'C3'" \
+  "not ok 1 C3"
+
 # ── ★★負の対照 = 此の道具そのものが【常に ok を出す物】でないことの証★★ ─────────────
-#   ★上の 7 本は全て「赤が出た」で ok を出しておる★ = ★然れば【何を撃っても赤が出る道具】と
+#   ★上の 10 本は全て「赤が出た」で ok を出しておる★ = ★然れば【何を撃っても赤が出る道具】と
 #   区別がつかぬ★ (本日 全軍で積んだ「鳴る側と鳴らぬ側を同数 撃て」の、変異台帳の側の顔)。
 #   ⇒ ★振舞いを 1 bit も変えぬ変異 (註釈のみ) を撃ち、道具が【捕まらなんだ】と正しく申すかを見る★。
 NG_BEFORE=$NG
@@ -159,7 +205,7 @@ else
   NG=$((NG + 1))
 fi
 
-echo "── 変異 7 本 + 負の対照 1 本 / NG $NG 件 ──"
+echo "── 変異 10 本 + 負の対照 1 本 / NG $NG 件 ──"
 # ★最後にもう一度 復元を確かめる★ (試験の途中で落ちても、盤面を汚したままにせぬ)
 git diff --stat -- scripts/ntfy.sh scripts/gate_ntfy_sendlog.py > "$WORK/after.txt" 2>/dev/null || true
 exit $((NG > 0 ? 1 : 0))

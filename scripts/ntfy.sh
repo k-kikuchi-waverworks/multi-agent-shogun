@@ -49,6 +49,26 @@ esac
 # ★NTFY_LOG_FILE = 試験の口★ (既定は従前どおり logs/ntfy_send.log)。
 #   ★之が無ければ (c) の変異試験は【本物の log を汚す】か【撃たぬ】かの二択になる★。
 LOG_FILE="${NTFY_LOG_FILE:-$SCRIPT_DIR/logs/ntfy_send.log}"
+
+# ★★cmd_1400 (2026-07-27 足軽四号) — 試験の既定を tmp へ向ける★★
+#   ■ ★何ゆえ要るか = 現に実害が出たゆえ★:
+#     test_cmd1363 が偽 curl で本 script を走らせ ★本番 logs/ntfy_send.log へ 4 行 書いた★。
+#     ★矢は一本も飛んでおらぬ (偽 curl) が、記録は現に汚れた★ ⇒ ★段5(b) の判定子が其の試験行の
+#     500 を数え、初回の実読みで【偽の赤 (BURST)】を出した★ = 本番の記録が試験で汚れた実害である。
+#   ■ ★何ゆえ「各試験が NTFY_LOG_FILE を書け」で足りぬか★:
+#     ★忘れることが当の不具合であった★ = 忘れられる仕掛けは、いつか必ず忘れられる。
+#     ⇒ ★書き手の規律でなく、道具の既定で塞ぐ★ = ★試験の中では、何も書かずとも本番へ届かぬ★。
+#   ■ ★判じ方 = bats が立てる env のみを見る★ (己で「試験か」を推し量らぬ)。
+#     ★明示の NTFY_LOG_FILE は常に優先★ = 試験が己で行き先を決めたいなら、其れを妨げぬ。
+#   ■ ★答えぬ問い (名乗っておく)★ = ★bats 以外の枠組み (素の bash 試験・pytest) は之では捕まらぬ★。
+#     其方は ★NTFY_LOG_FILE を明示せよ★ = 本 guard は bats の分だけを構造で塞ぐ物である。
+if [ -z "${NTFY_LOG_FILE:-}" ] && \
+   [ -n "${BATS_TEST_FILENAME:-}${BATS_TEST_TMPDIR:-}${BATS_RUN_TMPDIR:-}" ]; then
+  _TESTDIR="${BATS_TEST_TMPDIR:-${BATS_RUN_TMPDIR:-${TMPDIR:-/tmp}}}"
+  LOG_FILE="$_TESTDIR/ntfy_send.log"
+  echo "[ntfy] ★試験の中ゆえ log を tmp へ向けた★: $LOG_FILE (本番 log は汚さぬ / cmd_1400)" >&2
+fi
+
 mkdir -p "$(dirname "$LOG_FILE")"
 
 # ★★cmd_1381 段5 (a) — log を【機械が読める1行】にする (2026-07-27 足軽四号)★★

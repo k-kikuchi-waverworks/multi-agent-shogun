@@ -38,6 +38,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as _dt
+import hashlib
 import io
 import os
 import re
@@ -113,6 +114,25 @@ def classify(http: str, rc: str | None) -> str:
     return "reject"  # 000 / NONE / 4xx / 5xx / 其の他
 
 
+def load_testline_hashes(log_path: Path) -> tuple[set[str], str]:
+    """★試験由来と名指された行の sha256 を読む (cmd_1400)★ → (hashes, 註記)
+
+    ★何ゆえ sha256 か = 之が silencer にならぬ唯一の造りゆえ★:
+      時刻や題や pattern で照合すれば ★将来の本物の失敗まで巻き添えで黙らせる道★ が開く。
+      ★行 全体の hash なら 1 byte 違えば当たらぬ★ = 名指しできるのは【既に在る其の行】だけである。
+    ★読めぬ・無い時は空集合★ = ★除外は【足す】側の働きゆえ、読めねば何も除かぬのが安全側★。
+    """
+    side = log_path.with_name(log_path.name.replace(".log", "") + ".testlines.yaml")
+    if not side.exists():
+        return set(), ""
+    try:
+        raw = side.read_bytes().decode("utf-8", errors="replace")
+    except OSError as e:
+        return set(), f" ※ 試験行の名簿が読めぬ ({e}) = 何も除いておらぬ"
+    hashes = {m.group(1) for m in re.finditer(r"^\s*-?\s*sha256:\s*([0-9a-f]{64})\s*$", raw, re.M)}
+    return hashes, ""
+
+
 def parse_lines(text: str, local_tz: _dt.tzinfo | None) -> tuple[list[Event], int, int]:
     """→ (事象, 解けなんだ行数, 総行数)。★空行は数に入れぬ★ (末尾改行で1行 増えて見えるのを防ぐ)。
 
@@ -178,6 +198,18 @@ def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
     text = blob.decode("utf-8", errors="replace")
     damaged = text.count("�")
 
+    # ★cmd_1400 = 試験由来と名指された行を除く★。★除いた本数は必ず所見へ出す (黙って減らさぬ)★。
+    testline_hashes, side_note = load_testline_hashes(log_path)
+    excluded = 0
+    if testline_hashes:
+        keep: list[str] = []
+        for line in text.splitlines():
+            if hashlib.sha256(line.encode("utf-8")).hexdigest() in testline_hashes:
+                excluded += 1
+                continue
+            keep.append(line)
+        text = "\n".join(keep)
+
     events, unparsed, total = parse_lines(text, now.tzinfo)
 
     if total == 0:
@@ -225,6 +257,10 @@ def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
         )
         return UNDET, out
 
+    excl_note = ""
+    if excluded or side_note:
+        excl_note = (f" ※ ★試験由来として除いた行 {excluded} 本★ (cmd_1400 の名簿 = 行 全体の sha256 照合)"
+                     if excluded else "") + side_note
     dmg_note = ""
     if damaged:
         dmg_note = (f" ※ log 中に不正 byte {damaged} 箇所 (段5(a) 以前の多byte切断の跡) "
@@ -238,7 +274,7 @@ def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
         out.append(
             f"[NTFY-SEND-SILENT] UNDETERMINED: 直近 {window_min:.0f} 分に ★送信そのものが 1 件も無い★ "
             f"(log 全体 {len(events)} 件・最後の送信は {age_min:.1f} 分前 = {newest.isoformat()})"
-            f"{shape_note}{dmg_note} — ★沈黙は【死んでおる】の証ではない★ "
+            f"{shape_note}{dmg_note}{excl_note} — ★沈黙は【死んでおる】の証ではない★ "
             "(実測: 送信間隔は 中央 13.1 分・p95 280.5 分ゆえ、空窓は平常に起こる) "
             "⇒ ★検分できておらぬは緑でも赤でもない★"
         )
@@ -255,7 +291,7 @@ def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
     if not ok:
         out.append(
             f"[NTFY-SEND-DEAD] FAIL: ★窓の中の送信が【一つも届いておらぬ】★ — {denom}。"
-            f"内訳={worst}{shape_note}{dmg_note} "
+            f"内訳={worst}{shape_note}{dmg_note}{excl_note} "
             "⇒ ★殿へ通知は届いておらぬ公算が高い★ "
             "(★但し本 script が見ておるのは ntfy.sh の応答までであり、殿の端末が鳴ったか迄は見ておらぬ★)"
         )
@@ -264,7 +300,7 @@ def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
     if len(bad) >= max_fail:
         out.append(
             f"[NTFY-SEND-BURST] FAIL: ★失敗が {len(bad)} 件 (閾 {max_fail} 件) 積み上がっておる★ — {denom}。"
-            f"内訳={worst}{shape_note}{dmg_note} "
+            f"内訳={worst}{shape_note}{dmg_note}{excl_note} "
             "⇒ ★成功も在るゆえ全断ではないが、取りこぼしが現に出ておる★ "
             "(実測: 本 log の非2xx は全期間で 15 件ゆえ、3h に 3 件は平常ではない)"
         )
@@ -272,7 +308,7 @@ def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
 
     out.append(
         f"ok [NTFY-SEND-OK] PASS: ★直近 {age_min:.1f} 分前に現に届いておる★ — {denom}"
-        f"{shape_note}{dmg_note}"
+        f"{shape_note}{dmg_note}{excl_note}"
     )
     return PASS, out
 

@@ -1056,6 +1056,81 @@ YAML
     echo "$output" | grep -q "BUSY_DURING_COOLDOWN"
 }
 
+# --- T-BUSY-017 (cmd_1404 帯): /clear cooldown の閾を【両側で挟む】---
+#
+# ★何故 之が要るか — 本夜の実測が唯一の根拠である (2026-07-27 04:1x)★
+#   軍師一号の型 (plans/cmd_1404_point_vs_band_minimal_type.md) =
+#   ★変異は【点】を撃つ。境界は【帯】である★。其の型を本 file へ当てて出た実物:
+#     ・★潰す変異★ (cooldown 枝ごと `if false` へ)  → T-BUSY-005 / T-BUSY-007 が ★赤★
+#       = ★点は現に守られておる (harness は赤を出せる)★
+#     ・★動かす変異★ (閾 30 → 15)                     → ★T-BUSY-003/005/006/007 すべて緑★
+#       = ★誰も帯を見ておらぬ★
+#   ★機序 = 既存の点は 5s / 10s / 40s の三つのみ★ (閾 30 に対し比 0.17 / 0.33 / 1.33)
+#   ⇒ ★比 [0.5, 1.0) の帯 = 閾の【直下】に一点も無い★ ⇒ 閾を緩められても誰も気付かぬ。
+#   ★之は軍師一号が cmd_1392 で掘った形 (比 0.07/0.25/1.26/2.0・帯 [0.5,1.0) が空) の
+#     独立した再現である★ = ★標本 1 であった型が、別の file で 2 例目を得た★。
+#
+# ★★初版は【借りて】書き、其れが誤りであった — 実測で己が潰した (04:2x)★★
+#   初版 = 閾を production から実行時に読み、其の値で両側を挟んだ。M2 の再演 (焼き付け) を
+#   避けたつもりであった。★然れど機械が即座に反証した★:
+#     MUT-1404-014 (閾 30→15) → ★緑のまま★ / MUT-1404-015 (閾 30→60) → ★緑のまま★
+#   ★機序 = 試験が閾を production から読むゆえ、閾が動けば試験も一緒に動く★
+#   = ★★「動かす変異」を原理的に検知できぬ★★ = ★帯を見ておらぬのと同じ★。
+#
+# ★★ゆえに分ける — 焼き付けてよい物と、いけぬ物★★
+#   ・★いけぬ★= ★他所の表から導かれる【事実】★ (M2 = 「此の stem は除外表の外に在る」)
+#     ⇒ 他人が表を変えれば ★黙って偽になる★。
+#   ・★よい★  = ★契約の【値】そのもの★ (= 「/clear cooldown は 30 秒である」)
+#     ⇒ 誰かが動かせば ★必ず赤くなる★ = ★黙らぬ★。★意図して動かすなら此処も直せ★ =
+#       其の一行が ★意図の記録★ になる (履歴を消さず現役を示す形)。
+#   ⇒ ★契約と実装が割れたら【どちらへも寄らず】其の割れを名乗る★ = 本試験の芯。
+@test "T-BUSY-017 (cmd_1404 帯): /clear cooldown は閾の直下で busy・閾ちょうどで idle" {
+    # ★契約★ = /clear の処理に要する時間 (Claude Code の /clear は 10〜30s)。
+    # ★動かすなら此の一行も直せ★ — 直さねば下で赤くなる (= 黙って動かせぬ)。
+    local declared=30
+    local cooldown
+    cooldown=$(grep -oP 'now_busy - LAST_CLEAR_TS\)\)" -lt \K[0-9]+' "$WATCHER_SCRIPT" | head -n1)
+    if [ -z "$cooldown" ]; then
+        echo "★前提を立てられぬ★: $WATCHER_SCRIPT から /clear cooldown の閾を読めなんだ" >&2
+        echo "  (枝ごと消えたか、綴りが変わった。★黙って skip すれば帯は再び空く★)" >&2
+        return 1
+    fi
+    if [ "$cooldown" != "$declared" ]; then
+        echo "★契約と実装が割れた★: 契約 ${declared}s / 実装 ${cooldown}s" >&2
+        echo "  ⇒ 意図して動かしたのなら ★此の試験の declared も直せ★ (= 意図を記録せよ)。" >&2
+        echo "  ⇒ 意図せぬのなら ★之が【閾が黙って動いた】の当の徴である★。" >&2
+        return 1
+    fi
+    [ "$cooldown" -ge 2 ]  # 直下 (閾-1) が意味を持つ最小条件
+
+    # ★時計を止めて撃つ★ = 経過秒を厳密に固定する (1 秒跨ぎの気紛れを作らぬ)
+    # ── 直下 = 閾-1 秒 経過 → ★まだ busy★ (抑止される側) ──
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        date() { echo 1000000; }
+        LAST_CLEAR_TS=$(( 1000000 - '"$((cooldown - 1))"' ))
+        if agent_is_busy; then echo "BUSY"; else echo "IDLE"; fi
+    '
+    [ "$status" -eq 0 ]
+    if ! echo "$output" | grep -q "BUSY"; then
+        echo "★閾が【下へ】動いた★: 経過 $((cooldown - 1))s は閾 ${cooldown}s の直下ゆえ busy である筈" >&2
+        return 1
+    fi
+
+    # ── 直上 = 閾ちょうど 経過 → ★もう idle★ (抑止されぬ側。`-lt` ゆえ境界は idle) ──
+    run bash -c '
+        source "'"$TEST_HARNESS"'"
+        date() { echo 1000000; }
+        LAST_CLEAR_TS=$(( 1000000 - '"$cooldown"' ))
+        if agent_is_busy; then echo "BUSY"; else echo "IDLE"; fi
+    '
+    [ "$status" -eq 0 ]
+    if ! echo "$output" | grep -q "IDLE"; then
+        echo "★閾が【上へ】動いた★: 経過 ${cooldown}s は閾 ${cooldown}s ゆえ idle である筈 (-lt は境界を含まぬ)" >&2
+        return 1
+    fi
+}
+
 # --- T-BUSY-008: idle prompt at bottom overrides old busy markers (false-busy fix) ---
 # Bug: 59ec12f / 69c1ecb — old "Working" or "esc to interrupt" lingered in scroll-back
 # above the idle prompt, causing false-busy. Fix: only check bottom 5 lines, idle first.

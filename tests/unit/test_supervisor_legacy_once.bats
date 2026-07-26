@@ -105,10 +105,36 @@ OLD
     [ "$(_legacy_count "$TEST_TMPDIR/err3.log")" -eq 1 ]
 }
 
+# ★★空振り検知の書き替え (cmd_1404・家老裁定(b)・2026-07-27 04:3x)★★
+#
+# ★旧版の主張★= 「変異後の写しに `: > "$marker"` が★残っておらぬ★」(負の主張)。
+# ★旧版が刃を持たなんだ機序 (写しの木で実射して確かめた)★:
+#   (1) ★消え残りは原理的に起こり得ぬ★= 試験は自ら sed '/PAT/d' で消してから
+#       ★同じ綴り PAT★ を grep する ⇒ ★grep に掛かる行は必ず sed にも掛かる★。
+#   (2) ★而も production から marker 書込が失われた場合★= sed が何も消さず・
+#       grep も何も見つけず・「spam 12 行」という期待まで ★そのまま満たされる★
+#       ⇒ ★★空虚に緑★★ (実測 = marker 書込を消す変異で ★T-LEG-004 は ok・T-LEG-001 は not ok★)。
+# ⇒ ★旧版は production の退行を単独では一切 検知せなんだ★。
+#
+# ★新版の主張★= 「其の sed が ★現に 1 行以上 消した★」= ★偽にできる主張★=
+#   production から marker 書込が失われれば 削除数 0 ⇒ ★赤★。
+#
+# ★註 (次に来る者へ)★= ★warn-once 契約を現に守っておるのは T-LEG-001 の側★である。
+#   本 T-LEG-004 は「其の牙が載っておる盤面が本物か」を検める ★連れ★ であって、牙ではない。
+#   ★連れを牙と数えるな★ (= 「登録した」と「壊せば落ちる」を混ぜる形・本夜の族)。
 @test "T-LEG-004 (mutation): killing the marker write reverts to 12-line spam = check is load-bearing" {
     sed '/: > "\$marker"/d' "$SUPERVISOR_SCRIPT" > "$TEST_TMPDIR/mutated_supervisor.sh"
-    # 変異が実際に当たったことを確認 (空振り変異の防止)
-    if grep -q ': > "\$marker"' "$TEST_TMPDIR/mutated_supervisor.sh"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    # ★変異が現に当たった事を【消した行数】で示す (空振り変異の防止)★
+    local before after deleted
+    before=$(wc -l < "$SUPERVISOR_SCRIPT")
+    after=$(wc -l < "$TEST_TMPDIR/mutated_supervisor.sh")
+    deleted=$(( before - after ))
+    if [ "$deleted" -lt 1 ]; then
+        echo "★変異が空振りした★: sed が 1 行も消しておらぬ (before=$before after=$after)" >&2
+        echo "  ⇒ production から marker 書込 (: > \"\$marker\") が既に失われておる疑い。" >&2
+        echo "  ⇒ ★其の時 warn-once を守るのは T-LEG-001 の側である★ — 其方の赤を見よ。" >&2
+        return 1
+    fi
     bash "$TEST_TMPDIR/harness.sh" "$TEST_TMPDIR/mutated_supervisor.sh" 12 \
         2> "$TEST_TMPDIR/err_mut.log"
     [ "$(_legacy_count "$TEST_TMPDIR/err_mut.log")" -eq 12 ]

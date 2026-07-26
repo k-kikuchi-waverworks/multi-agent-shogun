@@ -550,6 +550,20 @@ def selftest() -> int:
         check("T15f expect: 0 を足せば needle 欠が消える",
               count_book(str(b))["missing_needle"] == [])
 
+    # T16 ★★契約の値を【宣言して production と突合する】★★ (家老 03:54 の第三の形)
+    #  ★機序★= 本 selftest は GATE_PAIRS_FLOOR を production から【読んで】おった (T8b の `>= FLOOR`)
+    #    ⇒ ★閾が動けば試験も一緒に動く★= ★動かす変異が見えぬ★。
+    #  ★実測 (2026-07-27 03:5x・git archive HEAD を展開した木の上)★=
+    #    ★2 → 1 に緩めても 33/33 ALL PASS = 何も鳴らなんだ★ (2 → 0 と 2 → 99 は鳴った)
+    #    = ★★見張りを【弱める】向きの一歩だけが、すり抜けておった★★。
+    #  ★処方★= ★declared をここに書き、production と突き合わせる★=
+    #    ★割れたら どちらへも寄らず【割れを名乗る】★・★意図して動かす日は此の一行も直せ★
+    #    = ★★其の一行が【意図の記録】になる★★ (「黙って動いた」と「意図して動かした」を分ける唯一の場所)。
+    DECLARED_GATE_PAIRS_FLOOR = 2
+    check(f"T16 契約の値 GATE_PAIRS_FLOOR は宣言 {DECLARED_GATE_PAIRS_FLOOR} と一致する"
+          f" (実物 = {GATE_PAIRS_FLOOR})",
+          GATE_PAIRS_FLOOR == DECLARED_GATE_PAIRS_FLOOR)
+
     # T9 ★Windows 綴りを解く★ (★之を落とすと木が丸ごと消える★)
     check("T9 C:/x → /mnt/c/x", win_to_wsl("C:/x/y") == "/mnt/c/x/y")
     check("T9b 既に POSIX の物は触らぬ", win_to_wsl("/home/a") == "/home/a")

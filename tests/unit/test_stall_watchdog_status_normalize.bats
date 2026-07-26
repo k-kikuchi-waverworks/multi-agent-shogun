@@ -33,7 +33,10 @@
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-    export SCAN_SH="$PROJECT_ROOT/scripts/stall_watchdog_scan.sh"
+    # ★番人は cron (15分毎) で現に走っておる★ ⇒ 変異は【複写】へ当てる
+    # (test_stall_watchdog_scan.bats と同じ流儀)。★之が無ければ、複写へ当てた変異が
+    # interpreter へ届かず【本番を撃って緑】= 偽の安心になる (2026-07-27 に現に踏んだ)★。
+    export SCAN_SH="${STALL_SCAN_SH_OVERRIDE:-$PROJECT_ROOT/scripts/stall_watchdog_scan.sh}"
     export SCAN_PY="$PROJECT_ROOT/scripts/stall_watchdog_scan.py"
     [ -f "$SCAN_SH" ] || return 1
     [ -f "$SCAN_PY" ] || return 1

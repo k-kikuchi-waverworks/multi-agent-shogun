@@ -28,6 +28,17 @@
 #   T-AGE-008 牙(1) 齢は必ず育つ = 抑止は【遅延】であって【免除】ではない
 #   T-AGE-009 牙(3) 抑止の総量を毎 scan 名乗る (0 の時も名乗る)
 #   T-AGE-010 成り立たぬ主張を quorum の分子へ混ぜぬ (家老へ偽の停電型を上げぬ)
+#   T-AGE-011 ★境界の帯 [0.5, 1.0) の内側★= 比 0.99 でも抑止は効く   (軍師一号 差し戻し)
+#   T-AGE-012 ★帯の上端の直上★= 比 1.01 は抑止せぬ (T-AGE-011 と両側で挟む)
+#
+# ★★軍師一号の差し戻し (2026-07-27 03:16) = 「変異は【点】を撃つ。境界は【帯】である」★★
+#   T-AGE-001〜010 が使う 齢/沈黙 の比 = 0.07 / 0.25 / 1.26 / 2.0 の ★4 点のみ★ で、
+#   ★[0.5, 1.0) の帯を一本も跨いでおらなんだ★ ⇒ 閾を `age_sec < claimed` から
+#   ★`age_sec <= claimed * 0.5`★ へ緩める変異が ★10/10 緑のまま生き残った★
+#   (拙者も 03:2x に己の複写で再現 = 10/10 緑)。
+#   ★実害の形★= 齢 80 分の pane が「沈黙 95 分」と名乗られる (比 0.84) =
+#   真に不可能な主張であるのに抑止が外れる ⇒ ★00:24 の実害の【時間が伸びた版】★。
+#   ⇒ T-AGE-011/012 は ★点でなく帯の両端を挟む★ ために在る。
 #
 # ★負の対照 (T-AGE-007) が要である理由★:
 #   本設計の最大の危険は ★撃たなくなること★ である。他の 9 本は「抑止が効くか」
@@ -365,4 +376,47 @@ PY
     FAKE_PROC_AGE=99999 run _run_main_py
     [ "$status" -eq 0 ]
     [ "$(_count_record '停電型')" -eq 1 ]
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-011 (軍師一号 差し戻し・帯の【内側】)★★
+# 齢 94 分 の process が「沈黙 95 分」と名乗られる = ★比 0.99★。
+# ★1 分でも足らねば其の主張は成り立たぬ★ = 抑止は此処でも効かねばならぬ。
+# ⇒ 閾を `< claimed` から `<= claimed * 0.5` へ緩める変異は、★此の 1 本でのみ★赤くなる
+#   (T-AGE-001〜010 の比 0.07/0.25 は緩めた閾でも尚 抑止側ゆえ緑のまま)。
+# ★余裕★= 主張 95 分 と 齢 94 分 の差は 60 秒 = scan までの経過 (数秒) に対し十分。
+# ---------------------------------------------------------------------------
+@test "T-AGE-011: the band's inside — age 94min vs silence 95min (ratio 0.99) still suppresses" {
+    _write_stuck_task ashigaru91 '95 minutes ago'
+    _write_pane_states ashigaru91:idle
+
+    FAKE_PROC_AGE=5640 run _run_main_py          # 94 分
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "^ACTION=impossible_claim_suppressed AGENT=ashigaru91"
+    echo "$output" | grep -q "PROC_AGE_MIN=94.0"
+    # ★撃っておらぬ★ — 帯の内側でも実害 (/clear) は起きぬ
+    _refute_file "$INBOX_STUB_RECORD" "clear_command"
+    _refute_output "^ACTION=revive AGENT=ashigaru91"
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-012 (帯の【上端の直上】= T-AGE-011 の対★)★★
+# 齢 96 分 > 沈黙 95 分 = ★比 1.01★ ⇒ 主張は成り立つ ⇒ ★従来どおり撃つ★。
+# T-AGE-007 は比 1.26 で同じ向きを縛るが、★境界から遠い点★である =
+# 抑止を上へ僅かに広げる誤り (例 `< claimed * 1.05`) は ★1.26 では捕えられず 1.01 で捕える★
+# (実測 = 其の変異で T-AGE-012 のみ赤・T-AGE-007 は緑)。
+# ★T-AGE-011 と併せて、境界の帯を両側から挟む★。
+# ★限界を先に名乗る★= 丁度の等号 (`<=` へ倒す誤り) は本 2 本では捕えられぬ =
+#   claimed は task YAML の mtime から scan 時に測るゆえ、齢と丁度 等しい盤面は作れぬ。
+# ---------------------------------------------------------------------------
+@test "T-AGE-012: just above the band — age 96min vs silence 95min (ratio 1.01) fires as before" {
+    _write_stuck_task ashigaru91 '95 minutes ago'
+    _write_pane_states ashigaru91:idle
+
+    FAKE_PROC_AGE=5760 run _run_main_py          # 96 分
+    [ "$status" -eq 0 ]
+    _refute_output "ACTION=impossible_claim_suppressed"
+    echo "$output" | grep -q "^ACTION=revive AGENT=ashigaru91"
+    echo "$output" | grep -q "OUTCOME=revive_fired AGENT=ashigaru91"
+    grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
 }

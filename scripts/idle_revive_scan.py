@@ -123,6 +123,14 @@ BLACKOUT_STATE_FILE = "blackout_suppress"  # queue/state/ 配下の throttle 専
 # 上流障害 (account/API 層) の pane 兆候文字列。★clear では直らない障害に限定する★:
 # 新 session を張っても同じ壁に当たる account/認証/枠系のみ。一時的な API 5xx は
 # /clear+再読で復帰しうるため含めない (過剰抑止で真の固着を見逃さないための境界)。
+#
+# ★★cmd_1385: この tuple は【抑止】の引き金であり、【断定】の根拠ではない★★
+#   pane 本文に文言が在ることは「壁を見た」ことを意味せぬ — banner は枠が戻った後も
+#   scrollback に残り続ける (cmd_1355 が既に実測し、T-QRM-012 は解除側でそれを前提に
+#   書かれておる)。★同じ事実を、解除の側では前提にしながら検知の側では無視しておった★
+#   のが 2026-07-26 の実害の機序である (詳細は upstream_wall_verdict の docstring)。
+#   ⇒ 抑止は本 tuple で広く (誤って抑止しても /clear を1回見送るだけ)、
+#     ★断定 (家老への上流障害警報) は upstream_wall_verdict の "live" に限る★。
 UPSTREAM_FAILURE_PATTERNS = (
     "usage limit",              # Claude usage limit reached 型 (殿 token 枠)
     "rate limit", "rate_limit", # rate_limit_error / Rate limited
@@ -142,6 +150,27 @@ UPSTREAM_FAILURE_PATTERNS = (
     "session limit",            # You've hit your session limit · resets 4:30am (Asia/Tokyo)
     "/usage-credits",           # /usage-credits to finish what you’re working on. (CLI 誘導行)
 )
+
+# ── cmd_1385: 主文 (head) と 続き行 (continuation) の区別 ──
+# 凍結 fixture (tests/fixtures/upstream_session_limit_pane.txt = 本物の塞がった pane) の
+# 実測: banner は 4 行の塊であり、
+#   非空行#1 「⎿  You've hit your session limit · resets 4:30am」  ← 主文 (期限も同一行)
+#   非空行#2 「   (Asia/Tokyo)」                                   ← 続き行
+#   非空行#3 「   /usage-credits to finish what you’re working」   ← 続き行
+#   非空行#4 「   on.」                                            ← 続き行
+# ★主文だけが「壁」を名乗れる★。続き行は主文にぶら下がる断片にすぎぬ。
+UPSTREAM_CONTINUATION_PATTERNS = ("/usage-credits",)
+UPSTREAM_HEAD_PATTERNS = tuple(
+    p for p in UPSTREAM_FAILURE_PATTERNS if p not in UPSTREAM_CONTINUATION_PATTERNS)
+
+# ★己の期限を banner 自身が名乗る族★ — 上記 fixture で "resets 4:30am" が主文と
+# ★同一行★に在ることを byte で確かめた pattern のみを入れる。推測で広げぬ
+# ("credit balance" / "authentication_error" 等は期限を持たぬ族ゆえ対象外 = 従来どおり
+#  人が直すまで壁であり続ける)。
+UPSTREAM_TIMED_HEAD_PATTERNS = ("session limit",)
+
+UPSTREAM_LIVE = "live"          # 壁は今も立っておる (断定してよい)
+UPSTREAM_RESIDUE = "residue"    # 壁の痕は在るが、既に崩れておる (断定してはならぬ)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -344,6 +373,71 @@ def detect_upstream_failure(text):
     return None
 
 
+def upstream_wall_verdict(text, now=None):
+    """★壁が【今も立っておるか】★ を三値で判ずる。(verdict, pattern, reason) を返す。
+
+    verdict ∈ {UPSTREAM_LIVE, UPSTREAM_RESIDUE, None}。
+
+    ★何故 detect_upstream_failure では足りぬか (cmd_1385・2026-07-26 の実害)★:
+      番人は「pane に文言が在る」を「上流が塞がっておる」と読み替えて家老へ断定を
+      送っておった。だが ★banner は枠が戻った後も pane に残る★ — この事実は
+      cmd_1355 が既に実測し、T-QRM-012 (「resume notice fires ... even with banner
+      still on pane」) として ★解除の側では前提に書かれておった★。
+      ★同じ事実を、検知の側だけが見ておらなんだ★。
+      実害 = 家老が残渣を live と読み、19:30 に殿へ「週次上限ゆえ3日待つか従量課金か」
+      の3択を誤った前提で迫りかけた (19:39 撤回)。
+
+    ★判定 (いずれも実測に基づく。推測で広げておらぬ)★:
+      (1) 主文が無く続き行だけが見える → RESIDUE。
+          根拠 = 続き行は主文の 2 行下にぶら下がる断片ゆえ、続き行が見えて主文が
+          見えぬのは ★banner が画面上端へ流れた★ = その後に出力が在った、という
+          こと以外に起こりようが無い。本日の偽陽性 3 件中 2 件 (ashigaru3 19:30 /
+          gunshi1 20:00) がこの形であった (家老へ届いた警報本文の検知文言が
+          『/usage-credits to finish what you’re working』= 続き行 単独、かつ
+          resets ETA=解釈不能 = 主文も期限も画面外、と二重に裏づく)。
+      (2) 期限を名乗る族の主文で、その期限が読めぬ / 既に過ぎておる → RESIDUE。
+          根拠 = fixture で "session limit" と "resets 4:30am" は同一行ゆえ、
+          主文が生きて見えておるなら期限も必ず読める。読めぬのは行が崩れた証。
+          過ぎておる判定は既存 MAX_RESETS_ETA_AHEAD_HOURS を流用する
+          (parse_resets_eta は【次の】到来時刻を返すゆえ、既に過ぎた 4:30am は
+           翌日へ繰上がり検知時刻から 6h 超先になる = cmd_1356 が確立した読み方)。
+      (3) それ以外 → LIVE。
+
+    ★この関数は【抑止】には使わぬ★ — 抑止 (/clear の見送り) は誤っても安いゆえ
+    detect_upstream_failure のまま広く掛ける。本関数が絞るのは ★断定★ だけである。
+    """
+    if now is None:
+        now = datetime.datetime.now()
+    if not text:
+        return None, None, ""
+    low = text.lower()
+    head = next((p for p in UPSTREAM_HEAD_PATTERNS if p in low), None)
+    if head is None:
+        cont = next((p for p in UPSTREAM_CONTINUATION_PATTERNS if p in low), None)
+        if cont is None:
+            return None, None, ""
+        return (UPSTREAM_RESIDUE, cont,
+                f"続き行『{cont}』のみが見え、主文が画面に居らぬ = banner は既に流れた "
+                f"(= その後に出力が在った)")
+    if head in UPSTREAM_TIMED_HEAD_PATTERNS:
+        eta = parse_resets_eta(text, now)
+        if eta is None:
+            return (UPSTREAM_RESIDUE, head,
+                    f"主文『{head}』が己の reset 時刻を名乗らぬ = 同一行に在る筈の "
+                    f"resets が画面外へ落ちておる (行が崩れた banner の断片)")
+        ahead_h = (eta - now).total_seconds() / 3600.0
+        if ahead_h > MAX_RESETS_ETA_AHEAD_HOURS:
+            return (UPSTREAM_RESIDUE, head,
+                    f"主文『{head}』の reset 時刻は既に過ぎておる "
+                    f"(次の到来が {eta.isoformat(timespec='minutes')} = "
+                    f"{round(ahead_h, 1)}h 先 > 妥当域 {MAX_RESETS_ETA_AHEAD_HOURS}h)")
+        return (UPSTREAM_LIVE, head,
+                f"主文『{head}』が生きた期限 "
+                f"({eta.isoformat(timespec='minutes')} = {round(ahead_h, 1)}h 先) を名乗っておる")
+    return (UPSTREAM_LIVE, head,
+            f"主文『{head}』を検知 (期限を持たぬ族 = 人が直すまで壁であり続ける)")
+
+
 # ─────────────────────────────────────────────────────────────
 # cmd_1355: 上流障害の台帳 + ★枠が戻った時に誰が起こすのか★
 # ─────────────────────────────────────────────────────────────
@@ -474,6 +568,70 @@ def save_outage(state_dir: Path, episode):
     tmp.replace(p)
 
 
+# ★cmd_1385: episode を閉じる時、その一件を追記式の台帳へ焼く★
+#   2026-07-26 に「本日の警報は何本で、何本が偽陽性であったか」を数えようとして、
+#   ★数えられなんだ★ = (a) 番人の log は 16,000 行あって 1 行も時刻を持たぬ
+#   (b) upstream_outage.yaml は episode close で削除され、検知文言も resets_hint も
+#   消える (c) 家老 inbox は流れる — 実測: 18:24 の1通は調査開始前に既に消えており、
+#   19:30 の1通は ★本調査の最中 (20:46→20:56 の間) に消えた★。
+#   ⇒ 警報の是非を後から検分できぬ番人は、感度を直すことも出来ぬ。
+#   ⇒ 閉じる瞬間に、その episode の全てを 1 record として残す。
+#     ★とりわけ close_reason="all_recovered" は【当人は現に働けた】= 偽陽性の
+#      機械証拠である★ (番人自身が 剪定 の際にそう判じておる)。
+UPSTREAM_HISTORY_FILE = "upstream_outage_history.yaml"
+UPSTREAM_HISTORY_MAX = 500  # 追記式ゆえ際限なく伸びる — 古い順に落とす (掃除屋)
+
+
+def outage_history_append(state_dir: Path, episode, close_reason, now=None):
+    """閉じた episode を追記式台帳へ 1 record 焼く。失敗しても本流は止めぬ。"""
+    if now is None:
+        now = datetime.datetime.now()
+    first = parse_iso_to_naive_local(episode.get("first_detected"))
+    rec = {
+        "first_detected": episode.get("first_detected"),
+        "closed_ts": now.isoformat(timespec="seconds"),
+        "close_reason": close_reason,
+        "lived_min": (round((now - first).total_seconds() / 60.0, 1)
+                      if first is not None else None),
+        "resets_hint": episode.get("resets_hint"),
+        "resets_eta": episode.get("resets_eta"),
+        # ★断定を上げたか★ — 上げた警報だけが家老/殿の判断へ届く。
+        "detect_notified_ts": episode.get("detect_notified_ts"),
+        "resume_notified_ts": episode.get("resume_notified_ts"),
+        "agents": {
+            a: {k: e.get(k) for k in ("pattern", "excerpt", "verdict",
+                                      "verdict_reason", "detected_ts", "task_id")}
+            for a, e in sorted((episode.get("agents") or {}).items())
+            if isinstance(e, dict)
+        },
+    }
+    p = state_dir / UPSTREAM_HISTORY_FILE
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        data = None
+        if p.is_file():
+            with p.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        eps = data.get("episodes") if isinstance(data, dict) else None
+        if not isinstance(eps, list):
+            eps = []
+        eps.append(rec)
+        doc = {
+            "# managed by": "scripts/idle_revive_scan.py (cmd_1385) — append-only",
+            "# read me": ("close_reason=all_recovered は【当人は現に働けた】= "
+                          "その episode は偽陽性であったことの機械証拠"),
+            "episodes": eps[-UPSTREAM_HISTORY_MAX:],
+        }
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
+        tmp.replace(p)
+    except (OSError, yaml.YAMLError) as e:
+        # 台帳は証拠であって本流ではない。焼けなんだ事実は名乗るが scan は止めぬ。
+        print(f"[idle_revive] WARN: outage 履歴の追記に失敗 ({close_reason}): {e}",
+              file=sys.stderr)
+
+
 def _excerpt_line(text, pattern):
     """pattern を含む最初の物理行を空白圧縮 120 字以内で返す (台帳の証拠引用)。"""
     for line in (text or "").splitlines():
@@ -513,15 +671,39 @@ def outage_record(state_dir: Path, agent, pattern, text, task_id=None, now=None)
                 episode["resets_hint"] = _excerpt_line(text, pattern)
     added = False
     if agent not in episode["agents"]:
+        # cmd_1385: ★見た物は全部残し、断定だけを絞る★ — verdict を entry へ焼く。
+        # 台帳は【抑止した事実】の記録であって【壁が立っておる証明】ではない、を
+        # entry 自身に名乗らせる (次に読む者が台帳を断定と読み違えぬため)。
+        verdict, _vpat, vreason = upstream_wall_verdict(text, now)
         episode["agents"][agent] = {
             "detected_ts": now.isoformat(timespec="seconds"),
             "pattern": pattern,
             "task_id": task_id,
             "excerpt": _excerpt_line(text, pattern),
+            "verdict": verdict,
+            "verdict_reason": vreason,
         }
         added = True
     save_outage(state_dir, episode)
     return episode, created, added
+
+
+def episode_has_live_wall(episode):
+    """★断定してよいか★ — 台帳の agent に一人でも LIVE が居るか。
+
+    cmd_1385: 家老への「上流障害検知」警報は ★壁が今も立っておる★ という断定ゆえ、
+    RESIDUE (banner の残渣) しか無い episode では上げてはならぬ。抑止・台帳・
+    R1/R2 の再開通知はそのまま働く = 北極星 (枠が戻った時に誰かが起こす) は死なぬ。
+
+    ★verdict key を持たぬ旧 entry は LIVE 扱いにする★ = 旧台帳・手編集で断定が
+    黙って消えるほうが危ういゆえ、後方互換は「鳴る側」へ倒す。
+    """
+    for e in (episode.get("agents") or {}).values():
+        if not isinstance(e, dict):
+            continue
+        if e.get("verdict", UPSTREAM_LIVE) == UPSTREAM_LIVE:
+            return True
+    return False
 
 
 def outage_release_check(episode, agent_states, now):
@@ -638,6 +820,7 @@ def outage_maintain(state_dir: Path, pane_states, tasks_dir: Path, now=None):
     if first is not None and (now - first).total_seconds() / 3600.0 >= OUTAGE_EXPIRE_HOURS:
         print(f"[idle_revive] outage 台帳 expire ({OUTAGE_EXPIRE_HOURS}h 超過) — episode close",
               file=sys.stderr)
+        outage_history_append(state_dir, episode, "expired", now)
         save_outage(state_dir, None)
         return None
     agents = episode.get("agents") or {}
@@ -653,8 +836,11 @@ def outage_maintain(state_dir: Path, pane_states, tasks_dir: Path, now=None):
         agent_states[agent] = st
     if not remaining:
         # 全員回復 = 上流障害は終わった。通知不要 (起こす相手が居らぬ)。
+        # ★cmd_1385: 此処こそ偽陽性の判定点★ — 「抑止した相手が現に働いた」を
+        # 番人自身が判じた瞬間ゆえ、閉じる前に追記台帳へ焼く。
         print("[idle_revive] outage 台帳: 全 agent 回復 — episode close (通知不要)",
               file=sys.stderr)
+        outage_history_append(state_dir, episode, "all_recovered", now)
         save_outage(state_dir, None)
         return None
     if remaining != agents:
@@ -792,12 +978,69 @@ def selftest_upstream():
         if load_outage(sdir) is not None:
             ng.append("U7b expire 後も台帳が畳まれておらぬ (掃除屋が働かぬ)")
 
+    # ── U8: ★壁の生死の三値判定 (cmd_1385)★ ──
+    # 2026-07-26 の実害 = 番人が banner の残渣を live と読み、家老が其れを信じて
+    # 殿へ誤った3択を迫りかけた。★両側で撃つ★ = 残渣を live と言わぬこと (偽陽性)
+    # かつ 本物を residue と言わぬこと (★偽陰性 = こちらを壊すと壁の最中に /clear が
+    # 飛び、cmd_1355 の北極星が死ぬ★)。MUT-1385-001/002 の的。
+    #
+    # 時刻を撃ち込む形にしてある = 「今 何時か」で結果が変わる試験は
+    # 【緑が何も証明せぬ】族ゆえ (cmd_1356 が同じ理由で resets_eta の蓋を
+    #  parse 時でなく使用点へ置いた)。
+    cont_only = ("     /usage-credits to finish what you’re working\n"
+                 "     on.\n"
+                 "✻ Worked for 3m 46s")
+    v, pat, why = upstream_wall_verdict(cont_only, datetime.datetime(2026, 7, 26, 20, 0))
+    if v != UPSTREAM_RESIDUE:
+        ng.append(f"U8a 続き行だけの pane を残渣と判ぜぬ (本日 gunshi1 20:00 / ashigaru3 "
+                  f"19:30 の実形 = 偽陽性2件がそのまま戻る): verdict={v} pat={pat!r}")
+    elif "/usage-credits" not in (pat or ""):
+        ng.append(f"U8b 残渣と判じたが根拠の pattern を名指しせぬ: pat={pat!r} why={why!r}")
+
+    # 本物の塞がった pane (byte 凍結)。★検知が reset より前なら LIVE★。
+    v, _p, why = upstream_wall_verdict(real, datetime.datetime(2026, 7, 26, 2, 0))
+    if v != UPSTREAM_LIVE:
+        ng.append(f"U8c 本物の session-limit pane (reset 2.5h 先) を live と判ぜぬ = "
+                  f"★壁の最中に /clear が飛び context が死ぬ★: verdict={v} why={why!r}")
+    # ★同じ pane を、reset が過ぎた後に見た時は残渣★ (本日 ashigaru5 18:24 の時刻)。
+    v, _p, why = upstream_wall_verdict(real, datetime.datetime(2026, 7, 26, 18, 24))
+    if v != UPSTREAM_RESIDUE:
+        ng.append(f"U8d reset 済 (次の到来が翌日 = 10h 先) の banner を残渣と判ぜぬ: "
+                  f"verdict={v} why={why!r}")
+    elif "4:30" not in why and "04:30" not in why:
+        ng.append(f"U8e 残渣の理由が信じなんだ時刻を名指しせぬ (人が気付ける経路): why={why!r}")
+    # 主文は在るが期限を名乗らぬ = 行が崩れた断片。
+    v, _p, _w = upstream_wall_verdict("You've hit your session limit",
+                                      datetime.datetime(2026, 7, 26, 2, 0))
+    if v != UPSTREAM_RESIDUE:
+        ng.append(f"U8f 期限を名乗らぬ session limit 行を残渣と判ぜぬ: verdict={v}")
+    # ★期限を持たぬ族は従来どおり LIVE★ = 蓋を広げすぎておらぬことの確認 (偽陰性側)。
+    for benign_head in ("Your credit balance is too low",
+                        "API Error: authentication_error",
+                        "Please run /login to authenticate"):
+        v, _p, _w = upstream_wall_verdict(benign_head, datetime.datetime(2026, 7, 26, 2, 0))
+        if v != UPSTREAM_LIVE:
+            ng.append(f"U8g 期限を持たぬ族 {benign_head!r} が live でなくなった = "
+                      f"人が直すまでの壁を見逃す: verdict={v}")
+    # 良性文言は三値でも None。
+    if upstream_wall_verdict("Read 2 files, ran 9 shell commands",
+                             datetime.datetime(2026, 7, 26, 2, 0))[0] is not None:
+        ng.append("U8h 良性文言に verdict が付いた")
+    # episode_has_live_wall = 断定の門。両側 + 旧台帳の後方互換。
+    if episode_has_live_wall({"agents": {"x": {"verdict": UPSTREAM_RESIDUE}}}):
+        ng.append("U8i 残渣のみの episode で断定の門が開いた = 家老へ偽の上流障害警報が飛ぶ")
+    if not episode_has_live_wall({"agents": {"x": {"verdict": UPSTREAM_RESIDUE},
+                                             "y": {"verdict": UPSTREAM_LIVE}}}):
+        ng.append("U8j live が1体でも居るのに断定の門が閉じた = 本物の障害を報せぬ")
+    if not episode_has_live_wall({"agents": {"x": {"detected_ts": "t"}}}):
+        ng.append("U8k verdict を持たぬ旧 entry で門が閉じた = 旧台帳の断定が黙って消える")
+
     if ng:
         for line in ng:
             print(f"★NG★ {line}")
         print(f"selftest_upstream: FAIL ({len(ng)}件)")
         return 1
-    print("selftest_upstream: PASS (U1-U7 全て契約どおり)")
+    print("selftest_upstream: PASS (U1-U8 全て契約どおり)")
     return 0
 
 
@@ -1772,6 +2015,14 @@ def main(argv=None):
         if blackout is not None:
             episode["detect_notified_ts"] = now.isoformat(timespec="seconds") + " (blackout警報へ相乗り)"
             save_outage(state_dir, episode)
+        elif not episode_has_live_wall(episode):
+            # ★cmd_1385: 残渣しか無い episode では断定を上げぬ★。
+            # detect_notified_ts は ★立てない★ = 同じ episode で後から本物の壁
+            # (生きた期限を名乗る主文) が見えたなら、その時に改めて1通上がる。
+            for a, e in sorted((episode.get("agents") or {}).items()):
+                print(f"[idle_revive] 上流障害の断定を保留: {a} は "
+                      f"{e.get('verdict')} — {e.get('verdict_reason')} "
+                      f"(抑止と台帳は据え置き・cmd_1385)", file=sys.stderr)
         elif upstream_alert_throttled(state_dir, args.upstream_alert_throttle_min, now):
             print("[idle_revive] 上流障害検知警報 throttle 中 — 次 scan で再試行", file=sys.stderr)
         else:

@@ -305,6 +305,28 @@ _load_real_pane_text() {
     export FAKE_PANE_TEXT="$(cat "$PROJECT_ROOT/tests/fixtures/upstream_session_limit_pane.txt")"
 }
 
+# ★cmd_1385: 「其の banner を【何時】見たのか」を試験に名乗らせる★
+#   凍結 fixture の reset 時刻は 4:30am である。cmd_1385 で番人は
+#   ★reset 時刻が過ぎた banner を残渣と判ずる★ようになったゆえ、fixture を
+#   生のまま使うと「試験を走らせた時刻」で live / residue が変わる =
+#   ★緑が何も証明せぬ族★ になる (実際 T-QRM-010 が 21:0x の実行で落ちた)。
+#   ⇒ 時刻だけを now 基準へ差し替える。★byte 凍結の値打ち (· と ’ の実バイト・
+#     折返し・行構成) はそのまま残る★ = 差し替えるのは時分と am/pm のみ。
+#   live 版 = 検知から 2h 先 (妥当域 6h の内側) / stale 版 = 10h 先へ繰上がる形。
+_load_live_pane_text() {
+    local hhmm
+    hhmm="$(date -d '+2 hours' '+%-I:%M%P')"
+    export FAKE_PANE_TEXT="$(sed "s/resets 4:30am/resets ${hhmm}/" \
+        "$PROJECT_ROOT/tests/fixtures/upstream_session_limit_pane.txt")"
+}
+
+_load_stale_pane_text() {
+    local hhmm
+    hhmm="$(date -d '+10 hours' '+%-I:%M%P')"
+    export FAKE_PANE_TEXT="$(sed "s/resets 4:30am/resets ${hhmm}/" \
+        "$PROJECT_ROOT/tests/fixtures/upstream_session_limit_pane.txt")"
+}
+
 # ---------------------------------------------------------------------------
 # T-QRM-010: 実文言で /clear 抑止 + 台帳記録 + 家老へ検知警報ちょうど1通 (episode once)
 # ---------------------------------------------------------------------------
@@ -312,7 +334,9 @@ _load_real_pane_text() {
     for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do _write_task "$a"; done
     # 1体のみ stall = quorum 不成立 → 個別経路の挙動を観測 (今夜の実態: 対象が少数でも起きる)
     _write_pane_states ashigaru91:idle ashigaru92:busy ashigaru93:busy ashigaru94:busy
-    _load_real_pane_text
+    # cmd_1385: ★生きた期限を名乗る banner★ (reset は 2h 先 = 妥当域の内側) を見せる。
+    # 生 fixture (4:30am) のままだと実行時刻次第で残渣判定になり、試験が時計に依る。
+    _load_live_pane_text
 
     run _run_main_py --no-karo-check
     [ "$status" -eq 0 ]
@@ -516,4 +540,53 @@ print("OK all patterns")
 PY
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "OK all patterns"
+}
+
+# ---------------------------------------------------------------------------
+# T-QRM-016 (cmd_1385): ★banner の残渣で【上流障害】を断定せぬ★ — scan 級・両側
+#
+# 2026-07-26 の実害: 番人が pane に残る banner を live と読み家老へ断定を送り、
+# 家老は 19:30 に殿へ「週次上限ゆえ3日待つか従量課金か」の3択を誤った前提で
+# 迫りかけた (19:39 撤回)。本日の警報 3 本は全て偽陽性であった。
+#
+# 契約 = ★抑止と台帳は据え置き、断定だけを絞る★:
+#   残渣 → /clear 抑止 する / 台帳へ記録 する / ★家老への上流障害警報は出さぬ★
+#   本物 → 従来どおり 1 通出る (T-QRM-010 が守る = 偽陰性側)
+# ---------------------------------------------------------------------------
+@test "T-QRM-016 (cmd_1385): residue banner still suppresses the clear and records the ledger, but raises NO upstream assertion" {
+    for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do _write_task "$a"; done
+    _write_pane_states ashigaru91:idle ashigaru92:busy ashigaru93:busy ashigaru94:busy
+    # reset が 10h 先へ繰上がる = その時刻は既に過ぎておる = 残渣
+    _load_stale_pane_text
+
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    # 抑止は据え置き (誤って抑止しても /clear を1回見送るだけ = 安い)
+    [ "$(_count_record 'clear_command')" -eq 0 ]
+    echo "$output" | grep -q "上流障害gate"
+    # 台帳は残る = 証拠を捨てぬ (R1/R2 の再開通知の入力も死なぬ)
+    [ -f "$Q/state/upstream_outage.yaml" ]
+    grep -q "ashigaru91" "$Q/state/upstream_outage.yaml"
+    grep -q "verdict: residue" "$Q/state/upstream_outage.yaml"
+    # ★断定は出さぬ★ — ここが本 cmd の芯
+    [ "$(_count_record '上流障害(枠切れ/account系)検知')" -eq 0 ]
+    echo "$output" | grep -q "上流障害の断定を保留"
+    # 断定を保留した episode は detect_notified_ts を立てぬ = 後から本物の壁が
+    # 見えたなら、その時に改めて1通上がる (黙って永久に口を塞がぬ)
+    ! grep -q "detect_notified_ts: '2" "$Q/state/upstream_outage.yaml"
+}
+
+@test "T-QRM-017 (cmd_1385): continuation line alone is residue — today's ashigaru3/gunshi1 shape raises no assertion" {
+    for a in ashigaru91 ashigaru92 ashigaru93 ashigaru94; do _write_task "$a"; done
+    _write_pane_states ashigaru91:idle ashigaru92:busy ashigaru93:busy ashigaru94:busy
+    # 本日 家老へ届いた警報の検知文言そのもの (主文も resets も画面外)
+    export FAKE_PANE_TEXT="     /usage-credits to finish what you’re working
+     on.
+✻ Worked for 3m 46s"
+
+    run _run_main_py --no-karo-check
+    [ "$status" -eq 0 ]
+    [ "$(_count_record 'clear_command')" -eq 0 ]        # 抑止は据え置き
+    [ "$(_count_record '上流障害(枠切れ/account系)検知')" -eq 0 ]   # ★断定せぬ★
+    grep -q "verdict: residue" "$Q/state/upstream_outage.yaml"
 }

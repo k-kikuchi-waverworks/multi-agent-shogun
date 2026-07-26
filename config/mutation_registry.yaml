@@ -248,6 +248,78 @@ mutations:
     expect: nonzero
     red_needle: "★NG★ U6a"  # 実測 2026-07-26: 蓋殺しで U6a (23.8h窓) / U6f (注記) が名指しで落ちる
 
+  - id: MUT-1385-001
+    origin: cmd_1385
+    suspected_by: karo
+    desc: |
+      ★続き行を主文へ戻す★ = UPSTREAM_CONTINUATION_PATTERNS を空にすると、selftest U8a
+      (続き行『/usage-credits』だけの pane を残渣と判ずる) が赤くなるべき。折っても緑なら
+      2026-07-26 の偽陽性 2 件 (ashigaru3 19:30 / gunshi1 20:00) がそのまま戻る —
+      ★家老へ届いた警報本文の検知文言が『/usage-credits to finish what you’re working』
+      = 続き行 単独、かつ resets ETA=解釈不能 = 主文も期限も画面外★ と二重に裏づいた形。
+      機序: 続き行は主文の2行下にぶら下がる断片ゆえ、続き行が見えて主文が見えぬのは
+      banner が画面上端へ流れた (= その後に出力が在った) 以外に起こりようが無い。
+      実害 = 家老が残渣を live と読み 19:30 に殿へ誤った3択を迫りかけた (19:39 撤回)。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    mutate: |
+      sed -i 's|^UPSTREAM_CONTINUATION_PATTERNS = ("/usage-credits",)$|UPSTREAM_CONTINUATION_PATTERNS = ()|' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U8a"  # 実測 2026-07-26: anchor 一意 (grep -x -F hits=1) を先に数えた上で当てた
+
+  - id: MUT-1385-002
+    origin: cmd_1385
+    suspected_by: karo
+    desc: |
+      ★期限の蓋を外す★ = UPSTREAM_TIMED_HEAD_PATTERNS を空にすると、selftest U8d
+      (reset 時刻が既に過ぎた banner を残渣と判ずる) / U8f (期限を名乗らぬ session limit 行) が
+      赤くなるべき。折っても緑なら本日の偽陽性 1 件目 (ashigaru5 18:24・pattern='session limit')
+      が戻る。根拠 = 凍結 fixture で "session limit" と "resets 4:30am" は★同一行★ゆえ、
+      主文が生きて見えておるなら期限も必ず読める。読めぬ/過ぎておるのは行が崩れた証。
+      ★是は既存 MAX_RESETS_ETA_AHEAD_HOURS (cmd_1356) を【解除の側だけでなく検知の側にも】
+      当て直した物である★ — 同じ事実 (banner は残る) を解除では前提にしながら検知では
+      無視しておった、というのが本 cmd の芯にござる (T-QRM-012 が其の証人)。
+    paths: [scripts/idle_revive_scan.py, tests/fixtures/upstream_session_limit_pane.txt]
+    mutate: |
+      sed -i 's|^UPSTREAM_TIMED_HEAD_PATTERNS = ("session limit",)$|UPSTREAM_TIMED_HEAD_PATTERNS = ()|' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U8d"  # 実測 2026-07-26: U8d + U8f が名指しで落ちる
+
+  - id: MUT-1385-003
+    origin: cmd_1385
+    suspected_by: karo
+    desc: |
+      ★断定の門を常時開く★ = episode_has_live_wall を無条件 True にすると、selftest U8i
+      (残渣のみの episode で断定の門が開かぬ) が赤くなるべき。折っても緑なら
+      「抑止は広く・断定は狭く」の分離が死に、残渣でも家老へ上流障害を断定する旧挙動へ戻る。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    mutate: |
+      sed -i 's|^        if e.get("verdict", UPSTREAM_LIVE) == UPSTREAM_LIVE:$|        if True:|' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U8i"
+
+  - id: MUT-1385-004
+    origin: cmd_1385
+    suspected_by: karo
+    desc: |
+      ★偽陰性側の牙★ = episode_has_live_wall を無条件 False にすると、selftest U8j
+      (live が1体でも居れば断定する) / U8k (verdict を持たぬ旧 entry は鳴る側へ倒す) が
+      赤くなるべき。折っても緑なら ★本物の枠切れを家老へ一言も報せぬ番人★ が出来る —
+      cmd_1355 の北極星 (枠が戻った時に誰かが起こす) が黙って死ぬ。
+      ★偽陽性を潰す変更は、必ず此の側も同時に縛らねばならぬ★ (家老下命(3))。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_quorum.bats]
+    mutate: |
+      sed -i 's|^        if e.get("verdict", UPSTREAM_LIVE) == UPSTREAM_LIVE:$|        if False:|' scripts/idle_revive_scan.py
+    test: |
+      python3 scripts/idle_revive_scan.py --selftest-upstream
+    expect: nonzero
+    red_needle: "★NG★ U8j"
+
   - id: MUT-1154-001
     origin: cmd_1356
     suspected_by: ashigaru1
@@ -1019,6 +1091,93 @@ mutations:
       python3 scripts/gate_ntfy_alive.py --selftest
     expect: nonzero
     red_needle: "★NG★ T19 local が JST でない"  # 実測 2026-07-26: 暦 guard の不在を T19 が捕える
+
+  # ── cmd_1381 段3 差し戻し (軍師一号 A) の処方を守る牙 3本 ────────────────────
+  #   ★此の3本は【番人の番人】である★= 先の 101〜104 は「通知路の生死を誤読せぬか」を守るが、
+  #   本 3本は ★番人自身の落ち度を通知路の罪にせぬか★ と ★run() が射程に入っておるか★ を守る。
+  - id: MUT-1381-105
+    origin: cmd_1381
+    suspected_by: gunshi_a  # ★軍師一号の差し戻し F-2 が起源 (拙者=四号 は見落としておった側)
+    desc: |
+      ★★差し戻し F-2 の処方を殺す★★= 読めぬ byte 列を受ける節を丸ごと除く。
+      ★UnicodeDecodeError は ValueError の子であって OSError の子ではない★ ゆえ、
+      除けば except OSError を素通りし ★番人自身が traceback で落ちる★ =
+      旧版では ★rc=1 = 「殿への通知路は死んでおる」★ と出た (拙者が先頭 byte 0xff で再現済)。
+      ⇒ ★我らの側の落ち度 (書き手の encoding 違い・書込中の断片) を、通知路の罪に着せる形★。
+      除けば T22 (不正 UTF-8) が落ちるべき
+      (受け皿が rc は UNDETERMINED に留めるゆえ、捕えるのは ★札が [NTFY-SHAPE] でない★ の側)。
+    paths: [scripts/gate_ntfy_alive.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_ntfy_alive.py"
+      s = open(p, encoding="utf-8").read()
+      old = '''    except ValueError as e:
+        # ★cmd_1381 差し戻し F-2 (軍師一号)★= ★UnicodeDecodeError は ValueError の子であって
+        #   OSError の子ではない★ ⇒ 旧版は素通り → traceback → rc=1 → gate_nightly が
+        #   ★「殿への通知路=FAIL」= 通知路に無い罪を着せた★ (実測: 先頭 byte 0xff で再現)。
+        #   ★我らの側の落ち度 (読めぬ byte 列) を、通知路の罪にせぬ★ ゆえ未検分へ倒す。
+        out.append(
+            f"[NTFY-SHAPE] UNDETERMINED: {STATE_REL} の byte 列が UTF-8 として読めぬ "
+            f"({type(e).__name__}: {e}) = ★読めぬは「届かなんだ」ではない★ "
+            "(書き手の encoding 違い / 書込中の断片 / file 破損の疑い)"
+        )
+        return UNDET, out
+'''
+      # ★規律(8)★ 撃つ前に数える = 一意でなければ狙いは別の場所へ着弾する
+      assert s.count(old) == 1, f"MUT-1381-105: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "", 1))
+      PY
+    test: |
+      python3 scripts/gate_ntfy_alive.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ T22 不正 UTF-8"  # 実測 2026-07-26: 節を除くと T22 の札が [NTFY-CRASH] へ化けて落ちる
+
+  - id: MUT-1381-106
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    desc: |
+      ★受け皿の色を「届かなんだ」へ倒す★= 番人自身が例外で落ちた時に FAIL を返す。
+      ★番人の crash は、通知路の生死について何一つ語っておらぬ★ ゆえ之は嘘である =
+      ★F-2 の一般形★ (個々の例外を潰しても、次の未知の例外で同じ嘘が出る形を構造で塞いだ当の箇所)。
+      倒せば T25 (番人自身の crash) が落ちるべき。
+    paths: [scripts/gate_ntfy_alive.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_ntfy_alive.py"
+      s = open(p, encoding="utf-8").read()
+      old = "        rc = UNDET\n        out = [\n            f\"[NTFY-CRASH]"
+      assert s.count(old) == 1, f"MUT-1381-106: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, old.replace("rc = UNDET", "rc = FAIL"), 1))
+      PY
+    test: |
+      python3 scripts/gate_ntfy_alive.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ T25: 番人が例外で落ちた時"  # 実測 2026-07-26: 己の crash を赤で出す形を T25 が捕える
+
+  - id: MUT-1381-107
+    origin: cmd_1381
+    suspected_by: gunshi_a  # ★軍師一号の変異 GX-A1 そのもの (T21 の真空 PASS を暴いた弾)
+    desc: |
+      ★★差し戻し F-1 = run() の既定 now を固定日時へ差し替える (軍師一号の GX-A1)★★。
+      ★之は旧 selftest 21本を丸ごと素通りしておった★= T21 は「既定の now が実時刻である検」と
+      名乗っておったが ★己で datetime.now() を呼んで盤面の時計を見ておるだけ★ であり、
+      ★selftest は judge() のみを呼び run() を一度も通らなんだ★ = ★真空 PASS (六号の T-502 と同型)★。
+      ★規律(7)「暦は思い出すな、撃って写せ」を守る当の門が、武装しておらなんだ★。
+      倒せば T24 (境界の外 24.02h 前) が落ちるべき = run() を実際に通す検が射程を作った証。
+    paths: [scripts/gate_ntfy_alive.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_ntfy_alive.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    now = _dt.datetime.now().astimezone()"
+      assert s.count(old) == 1, f"MUT-1381-107: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(old, '    now = _dt.datetime.fromisoformat("2020-01-01 00:00:00+09:00")', 1))
+      PY
+    test: |
+      python3 scripts/gate_ntfy_alive.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ T24 run() 既定 now"  # 実測 2026-07-26: 固定日時を T24 が捕える (旧版は 0 NG であった)
 
 coverage_waivers: []
 

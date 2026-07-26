@@ -1400,6 +1400,309 @@ mutations:
     expect: nonzero
     red_needle: "CLAUDEMD-BOUNDARY"  # 実測 2026-07-27: 境界を全位置へ広げると主張3 の 2 件が名指しで落ちる
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 変異 entry — cmd_1381 段5 / cmd_1400 (足軽四号の牙・★代筆=足軽六号★) の 12 件。
+#
+# ■ ★誰の疑いを、誰の名で載せたか★ (家老 02:22 の枷(a))
+#   ★suspected_by: ashigaru4★ = ★牙を設計し tests/mutation_cmd1381_stage5.sh を書いたのは四号★。
+#   ★六号は【代筆】である★ (台帳の単独書込権 RACE-001)。四号は己で台帳へ書かず具申に留めた。
+#
+# ■ ★数の食い違いを隠さず記す★ (家老の号令は「四号 8 本」であった)
+#   ★四号の報告 §f は「MUT-1381-201〜208 = 8 本」と書いておるが、★harness の実物は 12 本★★
+#   (201〜207 + ★cmd_1400 の 209/210/211/212★ + 負の対照 208)。
+#   ⇒ ★報告の §g / O-7 の方が新しく、§f が古い★ = ★実物 (harness) を正として 12 本 登録した★。
+#   ★8 で止めれば、四号が現に据えた牙 4 本が台帳の外に残る★ゆえ。家老へは報告で名指しする。
+#
+# ■ ★六号の独立実測 (2026-07-27 02:5x)★ = ★四号の harness は走らせておらぬ★
+#   (harness は【本番の作業ツリー】を一時的に壊す道ゆえ、他 agent の在走中に撃つ物ではない)。
+#   ⇒ ★台帳の形 (scratch 複製の上で走る道) で 12 本すべて撃ち直した★:
+#     ・錨 12/12 とも hit=1 (実物を明示 path で読んで数えた)
+#     ・★11 本は「変異後 赤 + declared の針が名指し」まで実見★
+#     ・★208 (負の対照) のみ expect: '0' = 変異後も緑が期待値★ ★赤ではない = 取り違えるな★
+#
+# ■ ★★負の対照 208 は【一度 偽にして】から登録した★★ (家老 02:12 の全軍規律)
+#   ★註釈でなく【振舞い】を変える変異 (WINDOW_MIN=999999) を expect:'0' のまま撃った★ ⇒
+#   ★現に FAIL「無効化された変異 1 件」が出た★ = ★208 の緑は【何を撃っても緑】ではない★。
+#   ★之を見ずに登録しておれば、208 は「常に緑を返す紙」であっても誰も気付けなんだ★。
+#
+# ■ ★★paths が 6 本 (212 のみ) / 5 本 (他 11 本) 要るのは【実測】である★★
+#   ★初版 (3 本) では 12 本中 5 本が UNDETERMINED であった★ = ★baseline が scratch で赤★:
+#     ・lib/ntfy_auth.sh          … ntfy.sh が source する。欠くと rc=1 (A1/A2/A3/C1 が落ちる)
+#     ・config/settings.yaml      … 更に其の先で要る。欠くと rc=2
+#     ・logs/ntfy_send.log (212のみ) … ★A7 は【本番の log】を読み「総 1000 行超が今も解ける」を検める★
+#   ⇒ ★足して 12/12 PASS へ復した★。★之は「据えた」でなく「効いておると示した」形にござる★。
+#
+# ■ ★★正直に名乗る限界 = 此の 12 本は【fresh clone では緑にならぬ】★★
+#   ★config/settings.yaml と logs/ntfy_send.log は git 追跡下に無い★ (前者=local 設定・後者=本番記録)。
+#   ⇒ ★配られた木では baseline が赤 ⇒ 判定は UNDETERMINED★。
+#   ★★而して【緑の嘘】にはならぬ★★ = ★UNDETERMINED は毎朝 名指しで鳴る札であり、緑ではない★。
+#   ★之を書いておく理由★ = 本夜 我らが繰り返し掘った族は ★「手元では通る」が【黙って緑】になる形★ =
+#   ★此の 12 本は同じ依存を持ちながら、壊れ方が【喧しい側】へ倒れておる★ = 其の差を記録に残す。
+#   ★A7 は更に「本番 log が 1000 行を割れば baseline 赤」でもある★ (log 回転で起きうる)。
+# ─────────────────────────────────────────────────────────────────────────────
+  - id: MUT-1381-201
+    desc: "ntfy.sh の【制御文字を除く守り】を外すと A2 が赤くなること = 改行を含む題で log の行が割れ、後に読む者が別の行と誤読する形の後退線"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/ntfy.sh")
+      s = p.read_text(encoding="utf-8")
+      old = r"tr -d '\000-\037\177' | head -c 80"
+      new = "head -c 80"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/test_cmd1381_ntfy_logline.bats -f 'A2'
+    expect: nonzero
+    red_needle: "not ok 1 A2"
+    timeout: 300
+
+  - id: MUT-1381-202
+    desc: "ntfy.sh の【iconv の漉し】を外すと A3 が赤くなること = 多byte を途中で切って不正 UTF-8 が log へ落ち、読み手の道具が黙って壊れる形の後退線"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/ntfy.sh")
+      s = p.read_text(encoding="utf-8")
+      old = "| iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true"
+      new = "|| true"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/test_cmd1381_ntfy_logline.bats -f 'A3'
+    expect: nonzero
+    red_needle: "not ok 1 A3"
+    timeout: 300
+
+  - id: MUT-1381-203
+    desc: "成功行から curl_rc を落とすと A1 が赤くなること = 場が固定でなくなり、後に読む判定子が【何処を見れば rc が在るか】を失う形の後退線"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/ntfy.sh")
+      s = p.read_text(encoding="utf-8")
+      old = 'HTTP=${_http_status:-NONE} curl_rc=$_curl_rc title='
+      new = 'HTTP=${_http_status:-NONE} title='
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/test_cmd1381_ntfy_logline.bats -f 'A1'
+    expect: nonzero
+    red_needle: "not ok 1 A1"
+    timeout: 300
+
+  - id: MUT-1381-204
+    desc: "判定子の【空窓は沈黙と読む】契約を外すと selftest S3 が赤くなること = ★静かな夜に毎回 鳴る門★へ堕ち、鳴る門は外されるゆえ番人ごと失う形の後退線"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = "    if not win:"
+      new = "    if False:"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      python3 scripts/gate_ntfy_sendlog.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ S3"
+    timeout: 300
+
+  - id: MUT-1381-205
+    desc: "非2xx を成功と読ませると selftest S8 が赤くなること = ★死んでおる通知路を緑と呼ぶ★形の後退線 (殿へ届いておらぬのに届いたと申す)"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = r'    if re.fullmatch(r"2\d\d", http):'
+      new = "    if True:"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      python3 scripts/gate_ntfy_sendlog.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ S8"
+    timeout: 300
+
+  - id: MUT-1381-206
+    desc: "窓 (180分) を無限へ広げると selftest S14 が赤くなること = 古い赤を毎朝 鳴らし、且つ【今は沈黙しておる】を判じ損なう形の後退線"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = "WINDOW_MIN = 180.0"
+      new = "WINDOW_MIN = 999999.0"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      python3 scripts/gate_ntfy_sendlog.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ S14"
+    timeout: 300
+
+  - id: MUT-1381-207
+    desc: "curl の死 (rc≠0) を見ぬようにすると selftest S9 が赤くなること = ★網が繋がらぬのに緑を出す★形の後退線 (HTTP 応答が無い時こそ最も危うい)"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = '        if rc != "0":'
+      new = "        if False:"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      python3 scripts/gate_ntfy_sendlog.py --selftest
+    expect: nonzero
+    red_needle: "★NG★ S9"
+    timeout: 300
+
+  - id: MUT-1400-209
+    desc: "bats 既定を tmp へ向ける守りを外すと C1 が赤くなること = ★忘れっぽい試験が本番 log を汚し、其の汚れを我らの門が読んで偽の赤を出す★形の後退線 (2026-07-27 に現に起きた実害の再発線)"
+    origin: cmd_1400
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/ntfy.sh")
+      s = p.read_text(encoding="utf-8")
+      old = '   [ -n "${BATS_TEST_FILENAME:-}${BATS_TEST_TMPDIR:-}${BATS_RUN_TMPDIR:-}" ]; then'
+      new = "   false; then"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/test_cmd1381_ntfy_logline.bats -f 'C1'
+    expect: nonzero
+    red_needle: "not ok 1 C1"
+    timeout: 300
+
+  - id: MUT-1400-210
+    desc: "試験行の除外を【全行に当たる】形へ壊すと C3 が赤くなること = ★除外が silencer へ転じ、本物の失敗まで黙る★形の後退線 (除外は「試験行のみ」でなければ門を殺す)"
+    origin: cmd_1400
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'if hashlib.sha256(line.encode("utf-8")).hexdigest() in testline_hashes:'
+      new = "if True:"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/test_cmd1381_ntfy_logline.bats -f 'C3'
+    expect: nonzero
+    red_needle: "not ok 1 C3"
+    timeout: 300
+
+  - id: MUT-1400-211
+    desc: "除いた本数の名乗りを外すと C3 が赤くなること = ★黙って数を減らす門★になる形の後退線 (減らすこと自体でなく【黙って】が罪である)"
+    origin: cmd_1400
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = "    if excluded or side_note:"
+      new = "    if False:"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/test_cmd1381_ntfy_logline.bats -f 'C3'
+    expect: nonzero
+    red_needle: "not ok 1 C3"
+    timeout: 300
+
+  - id: MUT-1400-212
+    desc: "★牙の牙★ 後方互換を壊す (curl_rc を必須へ) と A7 が赤くなること = ★「成功行の byte 一致を手放した」裁可は【A7 が生きておる限り】妥当ゆえ、A7 自身に牙が在ることを示す★ (A7 が死ねば裁可は「証拠を捨てただけ」に転ずる)"
+    origin: cmd_1400
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml, logs/ntfy_send.log]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = r'    r"(?: curl_rc=(?P<rc>\S+))?"'
+      new = r'    r" curl_rc=(?P<rc>\S+)"'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/test_cmd1381_ntfy_logline.bats -f 'A7'
+    expect: nonzero
+    red_needle: "not ok 1 A7"
+    timeout: 300
+
+  - id: MUT-1381-208
+    desc: "★負の対照★ 註釈だけを書き換えた変異は【捕まらぬ】のが正しいこと (expect: 0 = 変異後も selftest は緑) = ★之が無ければ上の 11 本は【何を撃っても赤が出る道具】と区別が付かぬ★。★赤が期待値でない唯一の entry ゆえ取り違えるな★"
+    origin: cmd_1381
+    suspected_by: ashigaru4
+    paths: [scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, tests/test_cmd1381_ntfy_logline.bats, lib/ntfy_auth.sh, config/settings.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_ntfy_sendlog.py")
+      s = p.read_text(encoding="utf-8")
+      old = "★北極星 (cmd_1381 の起源)★"
+      new = "★北極星 (cmd_1381 の起源・此の行は註釈ゆえ振舞いを変えぬ)★"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      python3 scripts/gate_ntfy_sendlog.py --selftest
+    expect: '0'
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

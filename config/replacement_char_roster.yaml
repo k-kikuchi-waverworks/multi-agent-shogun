@@ -1,0 +1,642 @@
+# ★U+FFFD 名簿★ — 「既に見た箇所」の名指し (cmd_1394 追補・ashigaru3・2026-07-27)
+#
+# ■ 之は何か / ★何でないか★
+#   ・★之は【既に見た】の名簿である★。★【壊れておらぬ】の証ではない★。
+#   ・門 scripts/gate_replacement_char.py は ★此処に名の無い箇所だけを赤で名指す★。
+#     ⇒ 緑が言うのは ★「本名簿を据えて以降、新たに焼けた物は無い」★ ただ其れだけ。
+#
+# ■ ★造りの掟★
+#   ・★除外は path と 行の sha256 の【完全一致】のみ★。★pattern の欄は元より無い★
+#     = ★将来の本物を匿う道を構造で持たせておらぬ★ (四号 cmd_1400 の設計を借りた)。
+#   ・★1 byte でも行が変われば当たらぬ★ = 匿えるのは【今 此処に在る其の行】だけ。
+#   ・★門に --seed の口は付けておらぬ★ = ★一手で名簿を塗り替えて新しい焼けを匿う道を作らぬ★。
+#     足す時は ★人が 1 件ずつ書く★ (面倒である事が守りである)。
+#   ・★sha256 は【行の byte】で採る★ = decode を経由せぬ (decode を経由する形が当の実害を生んだ)。
+#   ・★本名簿は U+FFFD の実体を 1 個も持たぬ★ = 名簿が己で分母を汚さぬため。
+#
+# ■ category (機械は読まぬ。★人が二つの事故を混ぜぬための札★)
+#   legitimate   … U+FFFD そのもの／文字化けを【論じ・数え・引用しておる】正当な記録。★直せば証拠が壊れる★。
+#   known_damage … ★既に焼けた記録★。★直さぬ★ (元 byte は戻らぬ・推し量らぬ)。
+#
+# ■ ★連の長さが二族に割れる (2026-07-27 の実測)★
+#   ・連長 2〜3 … 多byte 文字が【byte 毎に】置換された跡 (UTF-8 decoder の所業ではない)
+#   ・連長 1   … UTF-8 decoder が不正列 1 つを 1 個へ畳んだ形 (四号の ntfy_send.log と同族)
+#   ⇒ ★「U+FFFD が在る」で一括りにすると、別々の事故が同じ顔になる★。
+
+sites:
+  - path: .venv/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py
+    line_sha256: 74981172fafc6c00a25652e4271063810eb8ec1a8f99946494a69991d06e9fc4
+    line: 2010          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: legitimate
+    note: 第三者 (pip vendor) が意図して置いた literal。サードパーティゆえ手を出さぬ域。
+  - path: logs/ntfy_send.log
+    line_sha256: 8a2b018e5450b8f24e9ca8a505a44e81cd8d4265e630075dd4cab674fcbfdfe9
+    line: 249          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: ecd682770adfc311c14cabaad1dee9b1e710ae7212d6159742aae125d3ca763d
+    line: 259          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 9d472beb74825408cd0910be6351f2084e258b1469534870b397caa9cc1a8063
+    line: 260          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 368462ffc956813f220717fd1bd9af78a79345683082289fc76a54215ef1e683
+    line: 272          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: c9a2ef8230ccac94a9247b2168a89393475a2c1ce341ed78e2ed12bca2bf0e78
+    line: 316          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 6bb2c3e0c7b0b44b7ff54cc8e7a80e55fb6c708677e813dd37cb529f53e2e40f
+    line: 741          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 677fed7ba4a34f0d1238d46ad8bbf62b826bd47bc9622b661d45cc739f8b5ec3
+    line: 931          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 3e8fbe9073557dbeceebf060dc1c276bc8c893ce387eae0082d93fba636e00e5
+    line: 950          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 0df355a5af3dd4d20fc20ef02d8adb031f9bd5c45d55bf5707224b8f42d1e586
+    line: 952          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: f5ff9c38c24576dbed8855fce243ab05ba9e6e26f2388cf4c4ef1453f7c00de7
+    line: 953          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 584ced2ce614e8063581c01356bc78f05476233ef2ee717f92910a813faf04c5
+    line: 954          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 31cd3183a1d90eb9f551b9a0832810e64f85dd557175808f69972a979f033f53
+    line: 972          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: e0f09619748db05ab2425c47678e06a101c48c3faeaed3849bc0de45190c4f2c
+    line: 980          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 85fe09805ad773c76f2316155c4563ec3ec4f2c73d48e3f6b121170ade24c6f2
+    line: 984          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: abe2ae11ead8736c81fdcec6ff619aefd196d58c917b2b0635c1b7fbb8de7b54
+    line: 1003          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 0e4f803864b1b1ede79d40d2bd7e9af1d128bddf08297376ca8b5134d8de1a37
+    line: 1018          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 4f6373e74745ce3022899297371b5db31a1bb70838e9d0fa045128990f5c7eeb
+    line: 1025          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 0d1c5b93287de5f7231de558251a05d49472721b274cf3b1f240c780cd380c1c
+    line: 1026          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 98d747fc4d3703fad2180630e3923915c09545f332be38370d9c67e5e4cbd3ed
+    line: 1032          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 8eb23c6e97c0d350406e0d1a71d793e16fa86ee99349166dc5ad2825aacb0e0e
+    line: 1049          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: bb1053cef7f1308036d551c2502a8c21f39c2600f44e13ece3061681d3efdc66
+    line: 1060          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 946e4d8f98aedd76ac512dff825574a50099c4b0140362431d8fa8de075b5b1d
+    line: 1071          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 8b5bb5a4765df899bd2a435368078e0fb0820b0464c66538c5ca1845b2f07989
+    line: 1075          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 05e7541b3da7c010c7e4c9b8bea4a3033681bac798b5175aad02f804d8211c4e
+    line: 1076          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: dd9ecbdac62cea6fa959cb7b8ea7fe65f3fd7946311269ca2c08e8c68dfe9bb7
+    line: 1079          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 8bba7d0ba089475055018489b099dbb7ffc4a6caa0de8e38097bfbe2af0cfffb
+    line: 1082          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: a2601c02733f30bc73cdcf47afc4aed071017625dc0bc8fb748b4912beafccff
+    line: 1085          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 8f01e909f6ef494d136a9bd6931a8a2865d2ee6e61003566f309d37fac6b312a
+    line: 1086          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: logs/ntfy_send.log
+    line_sha256: 49bd894de5b240aa657092f945a8175d93b3d5839bce5b3b6e8f8120772e7e23
+    line: 1087          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 足軽四号が cmd_1400 で decode 経由の書き戻しにより恒久に焼いた 29 個 (元 byte は復元不能)。
+  - path: plans/cmd_1244_engine_plan_autolink_design.md
+    line_sha256: d3b6413d294862367da2f0bde8fd7a637f8d939df4809e5ff44cb13aaff2ba1f
+    line: 228          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: plans/cmd_1276_harness/data/reference_items.jsonl
+    line_sha256: 58a5623eae5120a2ac7781a938c3d0c2e8484add4164f5ad23f55367a78d49c5
+    line: 18          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1276_harness/data/reference_items.jsonl
+    line_sha256: d0073a08abde3416822fd10c0fe9a1659be9bca7651e0fceeb7aa5a9135540a5
+    line: 19          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1301_blind_scores.md
+    line_sha256: 962a59160b979897773ec548c2a47d0aeee39ef1ace41bc839013b01f3a2c21e
+    line: 63          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: legitimate
+    note: 同上 (cmd_1301 の目隠し採点)。
+  - path: plans/cmd_1301_final_verdict.md
+    line_sha256: c6129b6899883df0473c882c16f53cc192eda3e72a3f766e836a1c9335d9da34
+    line: 43          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 1
+    category: legitimate
+    note: LLM 出力の文字化けを【評価対象として】引用した記録。書き換えれば証拠が消える。
+  - path: plans/cmd_1301_harness/eval/blind_pairs.jsonl
+    line_sha256: 463d77d881cedb4bba05fac959ef73a0e594bd70dcd47e0374f9594dc0f2e083
+    line: 4          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1301_harness/eval/blind_pairs.jsonl
+    line_sha256: c8bd7db9aba4210a93e566024611d6662934768ca856dd3b5a378241d377d9ec
+    line: 55          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1301_harness/eval/responses_swallow_ep3_awq.jsonl
+    line_sha256: 9ae4f56f90a9638dc5207bca47df0fef4ef261a54f9190c266238688f5abe47a
+    line: 4          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1301_harness/eval/responses_swallow_ep3_awq.jsonl
+    line_sha256: aac57e2abd4647054342ffc91bd8edeb60607f2226410285060779c688fbe699
+    line: 55          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/_runaway_r2_evidence/blind_r2_RUNAWAY/blind_pairs_r2.jsonl
+    line_sha256: 3b55584365e6d331735a54fa45e87528aa0ffff2c6e48809b33687f827575b9a
+    line: 8          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/_runaway_r2_evidence/blind_r2_RUNAWAY/blind_pairs_r2.jsonl
+    line_sha256: 39f900a55ebc823a68db2f3a3eafac4536be45ce337b54526c961ff4941357bf
+    line: 25          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/_runaway_r2_evidence/responses_awq_s2_ep3_fab.RUNAWAY.jsonl
+    line_sha256: 3b1075b517d29e7e8b0ef97092039001d016033a4b68cf591be655a27b99e453
+    line: 8          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/_runaway_r2_evidence/responses_awq_s2_ep3_fun.RUNAWAY.jsonl
+    line_sha256: 5dfe12f471b0ad7dc1fc0a2b93f23956a1e76551b0ee7d0bcf57991e6acb8f5a
+    line: 4          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/blind_r2/blind_pairs_r2.jsonl
+    line_sha256: 4cceb1aba1d08d71d5f0bc34d5a0ef9ab54f714473be0e0791a13cc674aafc12
+    line: 8          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/blind_r2/gunshi1_verdict_awq_r2_koi.md
+    line_sha256: 67e87d46f1ce0fe5a69e4b93dddfd396443b3a09b233ecbe8349f79d728fa98d
+    line: 38          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: legitimate
+    note: 同上 (cmd_1305 R2 の検分)。
+  - path: plans/cmd_1305_harness/blind_r2/gunshi1_verdict_awq_r2_koi.md
+    line_sha256: a5aead2a1ee9564a182446633bf7ad93ae6dd3d690318899abab2cea5b0a21ed
+    line: 89          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: legitimate
+    note: 同上 (cmd_1305 R2 の検分)。
+  - path: plans/cmd_1305_harness/blind_r2/gunshi1_verdict_awq_r2_koi.md
+    line_sha256: 4900f5a729b5def32796a9524b596ca0464473e27e50acb97d840a0441ebcff3
+    line: 129          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: legitimate
+    note: 同上 (cmd_1305 R2 の検分)。
+  - path: plans/cmd_1305_harness/responses_akari_ep2.jsonl
+    line_sha256: ea1388a6a9b5b9b2883e033261ff297c49489d6e113242fde75ba2095ef523db
+    line: 2          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/responses_akari_ep3.jsonl
+    line_sha256: 3d1d240ca6ad9417bb479a1c0eeee88d86ce6edba7ba4e6446336eb3432e55bd
+    line: 9          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: plans/cmd_1305_harness/responses_awq_s2_ep3_fab.jsonl
+    line_sha256: e70007ef69cb6fa131542e9420c061337f6f58717f139f62821a641e6671f279
+    line: 8          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: known_damage
+    note: LLM 応答を捕えた生記録。壊れは【捕えた時】に入っておる公算 (連長 1)。直せば評価の原本が変わる。
+  - path: projects/reports/2025-07-monthly-summary.md
+    line_sha256: c196926972ccb7bdf226db963265fa9f72ad90262cf64376746110af7b646880
+    line: 104          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 6
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: projects/reports/2025-07-monthly-summary.md
+    line_sha256: 200bbecbb2e88a3ea42e8acf48316e802f24ba1f159f2a7fa8e6327ba9223dc3
+    line: 105          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: projects/reports/2026-02-monthly-summary.md
+    line_sha256: e6d8e397326d2bcd8461c84576ba94bb1f7d0d627a7517023d7a133fa5dd0c23
+    line: 57          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: projects/reports/2026-02-monthly-summary.md
+    line_sha256: de1d4c980df87144d45a4deb73212709b95487d0efa9e693bba4004ebf1a7579
+    line: 61          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 6
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: projects/reports/2026-02-monthly-summary.md
+    line_sha256: 418acea7591c9a6e0472b8314ab13f183fc3bde7e2c766bf9ae467abf51191c5
+    line: 130          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 6
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: projects/reports/2026-02-monthly-summary.md
+    line_sha256: 2b8aacadfc3d3d22c784b15eb13a684925d77251294fe223f97e224207f3bf94
+    line: 131          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 9
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: projects/reports/2026-04-monthly-summary.md
+    line_sha256: 8ea09dcc783ccc39987ef6e24ac1893082104189bb3ec8990e47c1af487d96dc
+    line: 122          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 5
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: projects/reports/2026-04-monthly-summary.md
+    line_sha256: d55956054763193ae44d3d0cad28718c212ad1c254f5aedee88b210367471403
+    line: 123          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 7
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_ashigaru1_20260405185751.yaml
+    line_sha256: 6eeca6fbc7923f0f2117ae90b8efde5f732a4f01ef9bc30e6239efa72e125461
+    line: 135          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_ashigaru2_20260405185751.yaml
+    line_sha256: 18e83ca68c146a1c00083893c80dd08453cd7e28378e0e93158a8ce7cab2cd90
+    line: 85          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 6
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_ashigaru7_20260405185751.yaml
+    line_sha256: 84798da3567622007224d85a4fadba7054d676e9c268a3695cc3be9fecab5c27
+    line: 46          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_gunshi_20260404174727.yaml
+    line_sha256: 48fea340b96642487e57db392dc6290c4d38ca9ee9887e66dddc484790d83bfe
+    line: 50          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_gunshi_20260417095756.yaml
+    line_sha256: 04b08372f105ad95ba5a9b4eb7436c1f76cb2105c12af98baa7c4d85721df609
+    line: 2          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_karo_20260405185751.yaml
+    line_sha256: c6a393aff67c1fc53502a5bb413823b0c62598908919ce3f445dd93d8a79a81e
+    line: 28          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_karo_20260405185751.yaml
+    line_sha256: fafbdbcb4c81ee84c20b6f34fc036083737c66ac0e2fa83cb2e40de4b997577c
+    line: 98          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/inbox_karo_20260417094735.yaml
+    line_sha256: b8e266de85486a60ba5bd1e0a53bd2cec2346b77123daf74e004820516101b51
+    line: 47          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/reports/ashigaru6_cmd300_report.yaml
+    line_sha256: 226545ed9c8ebc69aed6d3380f904f54826e8c11ab25e64e1c44c018db911880
+    line: 31          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 日本語の語の途中が失われた壊れた記録。git 非追跡ゆえ復元経路は無い。何が失われたかは推し量らぬ。
+  - path: queue/archive/shogun_to_karo_archive_20260629.yaml
+    line_sha256: 62989c8355ae501017ba2410b61f875cc2ea2ae9bdb217c083d760f781a60890
+    line: 7170          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_archive_20260629.yaml
+    line_sha256: b99d5223ee1d7f890bcec27fd0fb3791d3e08be8f3da325957db7129f9a92ee1
+    line: 7323          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_archive_20260629.yaml
+    line_sha256: f9fc224a8b050cded2427d47476900380b5ef746e3088c5cb375bbdc1f35d66e
+    line: 7326          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_archive_20260629.yaml
+    line_sha256: 5063fbe981fcb4927c9831be2d78158ac0d15d50361608525230ebc4bc63b1e5
+    line: 7327          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_archive_20260629.yaml
+    line_sha256: 82089e39b7e8ec383dd2b6919a7fcec2205e1793b62d1f8da03da87e879841d5
+    line: 7331          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_backup_20260629.yaml
+    line_sha256: 62989c8355ae501017ba2410b61f875cc2ea2ae9bdb217c083d760f781a60890
+    line: 7708          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_backup_20260629.yaml
+    line_sha256: b99d5223ee1d7f890bcec27fd0fb3791d3e08be8f3da325957db7129f9a92ee1
+    line: 7861          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_backup_20260629.yaml
+    line_sha256: f9fc224a8b050cded2427d47476900380b5ef746e3088c5cb375bbdc1f35d66e
+    line: 7864          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_backup_20260629.yaml
+    line_sha256: 5063fbe981fcb4927c9831be2d78158ac0d15d50361608525230ebc4bc63b1e5
+    line: 7865          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/archive/shogun_to_karo_backup_20260629.yaml
+    line_sha256: 82089e39b7e8ec383dd2b6919a7fcec2205e1793b62d1f8da03da87e879841d5
+    line: 7869          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 1 件の事故が控えへ写された物 (4 本で壊れ行 sha256 一致)。git 非追跡ゆえ無傷の版は無い。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099
+    line_sha256: 62989c8355ae501017ba2410b61f875cc2ea2ae9bdb217c083d760f781a60890
+    line: 7708          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099
+    line_sha256: b99d5223ee1d7f890bcec27fd0fb3791d3e08be8f3da325957db7129f9a92ee1
+    line: 7861          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099
+    line_sha256: f9fc224a8b050cded2427d47476900380b5ef746e3088c5cb375bbdc1f35d66e
+    line: 7864          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099
+    line_sha256: 5063fbe981fcb4927c9831be2d78158ac0d15d50361608525230ebc4bc63b1e5
+    line: 7865          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099
+    line_sha256: 82089e39b7e8ec383dd2b6919a7fcec2205e1793b62d1f8da03da87e879841d5
+    line: 7869          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099b
+    line_sha256: 62989c8355ae501017ba2410b61f875cc2ea2ae9bdb217c083d760f781a60890
+    line: 7708          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099b
+    line_sha256: b99d5223ee1d7f890bcec27fd0fb3791d3e08be8f3da325957db7129f9a92ee1
+    line: 7861          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099b
+    line_sha256: f9fc224a8b050cded2427d47476900380b5ef746e3088c5cb375bbdc1f35d66e
+    line: 7864          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099b
+    line_sha256: 5063fbe981fcb4927c9831be2d78158ac0d15d50361608525230ebc4bc63b1e5
+    line: 7865          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 2
+    run_max: 2
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: queue/shogun_to_karo.yaml.bak_cmd1099b
+    line_sha256: 82089e39b7e8ec383dd2b6919a7fcec2205e1793b62d1f8da03da87e879841d5
+    line: 7869          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 3
+    run_max: 3
+    category: known_damage
+    note: 台帳の控え。壊れ行は archive 2 本と sha256 完全一致 = 1 件の事故が写された物。現役台帳は無傷。
+  - path: scripts/gate_ntfy_sendlog.py
+    line_sha256: a9c0d628bb37680ecb2d423dfb793c42a7f728f461fea64d803cf6dd85924825
+    line: 212          # 参考 (照合には使わぬ = 行がずれても hash で当たる)
+    occ: 1
+    run_max: 1
+    category: legitimate
+    note: U+FFFD を数える検出子リテラル (四号の gate の心臓)。書き換えれば当の検出が死ぬ。

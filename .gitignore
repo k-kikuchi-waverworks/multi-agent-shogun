@@ -213,6 +213,13 @@ scripts/seo_qc.sh
 # ★本日 同型の 7 度目★ (cmd_1395 の申告が 6 度目) = .gitignore:7 の * に黙って弾かれておった
 #  (git check-ignore -v で実測: `.gitignore:7:*  scripts/gate_ntfy_sendlog.py`)。
 !scripts/gate_ntfy_sendlog.py
+# cmd_1394 追補 (2026-07-27): ★焼けた事を後から必ず知る口★ (U+FFFD の名簿と門)。
+# ★本日 同型の 8 度目★ = 据えた其の場で git check-ignore を撃ち、.gitignore:7 の * に
+#  弾かれておることを実測してから此処へ書いた (書き忘れて「配られておる」と思い込む道を先に塞いだ)。
+# ★門と名簿は必ず対で配れ★= 名簿だけが欠ければ門は 88 箇所を「新たに焼けた」と誤って赤で名指し、
+#  門だけが欠ければ名簿は誰にも読まれぬ紙になる。
+!scripts/gate_replacement_char.py
+!config/replacement_char_roster.yaml
 
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)

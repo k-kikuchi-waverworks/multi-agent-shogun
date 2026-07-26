@@ -15,8 +15,23 @@ from pathlib import Path
 
 import yaml
 
-CANONICAL_TASKS = {f'ashigaru{i}' for i in range(1, 9)} | {'gunshi'}
-CANONICAL_REPORTS = {f'ashigaru{i}_report' for i in range(1, 9)} | {'gunshi_report'}
+# ★canonical = 「常駐の持ち場」= 終端に達しても file を消さず idle stub へ戻す相手★。
+# 非 canonical は終端で ★file ごと archive へ移される★ (= 次の /clear 復帰で読む物が無い)。
+#
+# ★cmd_1395/1397 (2026-07-27): gunshi1/gunshi2 の追随漏れを是正★
+#   cmd_652 (2026-05-16) で軍師が 2 人体制 (gunshi1/gunshi2) になった時、此の表が追随しておらなんだ。
+#   ★実害は仮定ではない (写しの盤面で実走して確かめた)★:
+#     ・queue/tasks/gunshi2.yaml は status=done で現に在り ⇒ 次の家老 cycle で ★file ごと消えておった★
+#     ・壊れた gunshi1_report.yaml は load_yaml が {} を返し「非 active」と判じられ ★archive へ攫われた★
+#       (壊れる頻度も此の二人が 1 位 28 件・2 位 27 件 = 最も落ちる者が最も守られておらなんだ)
+#   ★gunshi_a / gunshi_b は加えぬ★= 旧 2 人体制の deprecated alias であり status='archived' (非終端) ゆえ
+#     slim_tasks は元より触れぬ。canonical へ入れれば ★居らぬ pane の idle stub を毎 cycle 立て直す★ =
+#     退場した者を帳簿の上で蘇らせる形になる。
+#   ★karo.yaml は本任の scope 外ゆえ触れておらぬ★= 但し同じ形の危うさが在る (非 canonical ゆえ
+#     status が done になった日に file ごと消える)。今は status='archived' で当たっておらぬ。家老へ具申済。
+CANONICAL_TASKS = {f'ashigaru{i}' for i in range(1, 9)} | {'gunshi', 'gunshi1', 'gunshi2'}
+CANONICAL_REPORTS = ({f'ashigaru{i}_report' for i in range(1, 9)}
+                     | {'gunshi_report', 'gunshi1_report', 'gunshi2_report'})
 IDLE_STUB = {'task': {'status': 'idle'}}
 TOP_LEVEL_IDLE_STUB = {'status': 'idle'}
 TERMINAL_STATUSES = {'done', 'cancelled', 'paused'}

@@ -11,6 +11,22 @@ SETTINGS="$SCRIPT_DIR/config/settings.yaml"
 # shellcheck source=../lib/ntfy_auth.sh
 source "$SCRIPT_DIR/lib/ntfy_auth.sh"
 
+# ★★cmd_1080 追補 (2026-07-27 足軽四号) — 「file が無い」と「設定されておらぬ」を分ける★★
+#   ■ ★病 (実測)★= 殿の機の外 (git archive HEAD を展開した木) で撃つと、
+#     ★`grep: …/config/settings.yaml: No such file or directory` の一行だけを残して rc=2 で打ち切れた★
+#     (set -euo pipefail の下で代入が非0を拾うゆえ)。★何が起きたのか・咎が何処に在るのかを名乗っておらぬ★。
+#   ■ ★之は cmd_1381 F-2 / morning_readiness.sh と同じ族にござる★=
+#     ★「log が無い」は「届かなんだ」ではない★ ⇒ ★「settings.yaml が無い」は「通知が死んでおる」ではない★。
+#   ■ ★config/settings.yaml は .gitignore:7 (`*`) ゆえ配られぬのが【正しい】★=
+#     ★first_setup.sh:620 が其の機で作る物である★ (実物を読んで確かめた = 推測ではない)。
+#   ■ ★rc は変えておらぬ★= ★従前も grep の rc がそのまま 2 で出ておった★ ⇒ ★呼び手から見て 1 つも変わらぬ★。
+#     ★変えたのは【口上】だけである★。
+if [ ! -f "$SETTINGS" ]; then
+  echo "[ntfy] ★検めておらぬ★: $SETTINGS が此の木に無い。" >&2
+  echo "[ntfy]   ★.gitignore:7 ゆえ配られぬのが正しい★ = ★first_setup.sh が其の機で作る物★。" >&2
+  echo "[ntfy]   ⇒ ★通知路が死んでおるのではない。此の木に設定が無いだけである★ (rc=2 = 未検分)。" >&2
+  exit 2
+fi
 TOPIC=$(grep 'ntfy_topic:' "$SETTINGS" | awk '{print $2}' | tr -d '"')
 if [ -z "$TOPIC" ]; then
   echo "ntfy_topic not configured in settings.yaml" >&2

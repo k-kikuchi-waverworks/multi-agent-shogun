@@ -18,10 +18,20 @@
 #   legitimate   … U+FFFD そのもの／文字化けを【論じ・数え・引用しておる】正当な記録。★直せば証拠が壊れる★。
 #   known_damage … ★既に焼けた記録★。★直さぬ★ (元 byte は戻らぬ・推し量らぬ)。
 #
-# ■ ★連の長さが二族に割れる (2026-07-27 の実測)★
-#   ・連長 2〜3 … 多byte 文字が【byte 毎に】置換された跡 (UTF-8 decoder の所業ではない)
-#   ・連長 1   … UTF-8 decoder が不正列 1 つを 1 個へ畳んだ形 (四号の ntfy_send.log と同族)
-#   ⇒ ★「U+FFFD が在る」で一括りにすると、別々の事故が同じ顔になる★。
+# ■ ★連の長さが二つの塊に割れる (2026-07-27 の実測)★
+#   ・連長 2〜3 の族 … 13 file (台帳の控え・月次まとめ・古い inbox 等)
+#   ・連長 1 の族   … 6 file (四号の logs/ntfy_send.log と harness の jsonl と同じ形)
+#   ⇒ ★「U+FFFD が在る」で一括りにすると、壊れ方の違う物が同じ顔になる★。
+#
+#   ★★但し【連長は codec を指さぬ】= 拙者は一度 之を誤って断じ、撃って訂正した★★
+#     実測 (python3・同じ errors="replace"):
+#       b"\x82\xa0"      (cp932 の あ)          を utf-8/replace ⇒ 連長 2
+#       b"\xff\x97\xa5"  (先頭を壊した 3byte)   を utf-8/replace ⇒ 連長 3
+#       b"\xe6\x97"      (途中で切れた 3byte)   を utf-8/replace ⇒ 連長 1
+#       上記いずれも cp932/replace では U+FFFD は ★1 個も出ぬ★
+#     ⇒ ★連長が言うのは【其の位置で幾つの maximal subpart が読めぬと判ぜられたか】だけ★
+#       = ★壊れ方 (何 byte が巻き込まれたか) を映すが、codec は指さぬ★。
+#     ⇒ ★連長 2〜3 と 連長 1 は、同じ utf-8 errors="replace" からどちらも出る★。
 
 sites:
   - path: .venv/lib/python3.12/site-packages/pip/_vendor/pkg_resources/__init__.py

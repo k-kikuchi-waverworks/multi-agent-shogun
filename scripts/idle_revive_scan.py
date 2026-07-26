@@ -167,6 +167,11 @@ UPSTREAM_HEAD_PATTERNS = tuple(
 # ★同一行★に在ることを byte で確かめた pattern のみを入れる。推測で広げぬ
 # ("credit balance" / "authentication_error" 等は期限を持たぬ族ゆえ対象外 = 従来どおり
 #  人が直すまで壁であり続ける)。
+#
+# ★cmd_1389 で本 tuple の役目は【狭まった】★ — 次の一点だけを担う:
+#   ★「期限を読めなんだ時に、其れを【行が崩れた証】と読んでよい族か」★。
+#   ★期限が読めた時は本 tuple を一度も見ぬ★ (下の upstream_wall_verdict を見よ) =
+#   ★族の登録漏れが【期限を名乗る banner】に対しては構造的に起こらぬ★。
 UPSTREAM_TIMED_HEAD_PATTERNS = ("session limit",)
 
 UPSTREAM_LIVE = "live"          # 壁は今も立っておる (断定してよい)
@@ -373,6 +378,29 @@ def detect_upstream_failure(text):
     return None
 
 
+def select_informative_pattern(cands):
+    """★並び順に依らず★ 候補から最も情報の多い pattern を1つ選ぶ (cmd_1389)。
+
+    ★何故 first-match を捨てたか (2026-07-26 22:25・軍師二号 A3 の実測)★:
+      旧実装は `next((p for p in HEAD if p in low), None)` = ★台帳の並び順が勝者を決める★。
+      "usage limit" は tuple の【先頭】に居るゆえ、"usage limit" と "session limit ·
+      resets 4:30am" が同じ pane に在れば ★usage limit が勝ち、期限を見る枝へ一度も
+      入らなんだ★ = ★残渣判定を丸ごと迂回する★。
+      ⇒ ★判定を支配しておったのは【台帳の並び順】という無関係な事情である★。
+
+    ★選び方 (三段・全て並び順に依らぬ)★:
+      (1) ★己の期限を名乗る族 (TIMED) を先に採る★ = 期限が読めなんだ時に
+          「行が崩れた」と読んでよい、という ★fixture 裏づけの積極的な知識★ を
+          持っておる分だけ情報が多い (持たぬ族は「人が直すまで壁」としか言えぬ)。
+      (2) 同族内では ★長い literal★ = より具体的に名指しておる方。
+      (3) なお同じなら辞書順 = ★決定的にする為だけの最後の綱★ (意味は無い)。
+    """
+    return sorted(
+        cands,
+        key=lambda p: (p not in UPSTREAM_TIMED_HEAD_PATTERNS, -len(p), p),
+    )[0]
+
+
 def upstream_wall_verdict(text, now=None):
     """★壁が【今も立っておるか】★ を三値で判ずる。(verdict, pattern, reason) を返す。
 
@@ -395,47 +423,78 @@ def upstream_wall_verdict(text, now=None):
           gunshi1 20:00) がこの形であった (家老へ届いた警報本文の検知文言が
           『/usage-credits to finish what you’re working』= 続き行 単独、かつ
           resets ETA=解釈不能 = 主文も期限も画面外、と二重に裏づく)。
-      (2) 期限を名乗る族の主文で、その期限が読めぬ / 既に過ぎておる → RESIDUE。
+      (2) ★期限が読めた★ 主文で、その期限が既に過ぎておる → RESIDUE。
           根拠 = fixture で "session limit" と "resets 4:30am" は同一行ゆえ、
-          主文が生きて見えておるなら期限も必ず読める。読めぬのは行が崩れた証。
+          主文が生きて見えておるなら期限も必ず読める。
           過ぎておる判定は既存 MAX_RESETS_ETA_AHEAD_HOURS を流用する
           (parse_resets_eta は【次の】到来時刻を返すゆえ、既に過ぎた 4:30am は
            翌日へ繰上がり検知時刻から 6h 超先になる = cmd_1356 が確立した読み方)。
-      (3) それ以外 → LIVE。
+      (3) 期限が ★読めず★、且つ主文が己の期限を名乗る族 (TIMED) → RESIDUE。
+          根拠 = 同一行に在る筈の resets が見えぬのは行が崩れた証。
+      (4) それ以外 → LIVE。
+
+    ★cmd_1389 の是正 (2026-07-26 22:25 軍師二号 A3・実測)★:
+      旧実装は (2)(3) へ入る条件を ★pattern 名 (head ∈ TIMED)★ で決めており、しかも
+      head の選び方が ★first-match★ であった。⇒ ★"usage limit" が tuple 先頭に居るゆえ、
+      「usage limit」と「session limit · resets 4:30am」が同居する pane では
+      usage limit が勝ち、期限を見る枝へ一度も入らぬ = 残渣判定を丸ごと迂回した★。
+      是正は二本:
+        (1) ★期限を読めたか (parse_resets_eta が値を返したか) を先に問う★ =
+            ★pattern 名に依らぬ★ ⇒ ★族の登録漏れが【期限を名乗る banner】に対して
+            構造的に起こらなくなる★ (新しい文言が来ても自動で期限の枝へ入る)。
+        (2) ★first-match をやめ、全 pattern を当てて最も情報の多い物を採る★
+            (select_informative_pattern) ⇒ ★台帳の並び順が判定を支配せぬ★。
+      ★TIMED tuple は消しておらぬ★ = 「期限を【読めなんだ】時に其れを行崩れと読んでよい族か」
+      という一点だけを担う (=(3))。此処だけは fixture の裏づけが要るゆえ pattern 名で判ずる。
+
+    ★残しておる限り (正直明示・cmd_1389 では塞いでおらぬ)★:
+      ★parse_resets_eta が読めるのは "resets <時刻>" の形のみ★ ゆえ、軍師二号が
+      例に挙げた「Your limit will reset at 4:30am」(★resets でなく reset at★) は
+      依然 読めず → 期限を持たぬ族として LIVE になる。★之を塞ぐには実 pane の
+      byte 凍結が要る★ (推測で網を広げれば「在りもせぬ物に効く網」が増える) =
+      ★次に其の banner を見た者が capture-pane で凍結せよ★。
 
     ★この関数は【抑止】には使わぬ★ — 抑止 (/clear の見送り) は誤っても安いゆえ
     detect_upstream_failure のまま広く掛ける。本関数が絞るのは ★断定★ だけである。
+    (detect_upstream_failure 側の first-match は ★是正の対象外★ = 其処の戻り値は
+     【抑止するか否か】でなく【台帳へ焼く札】にすぎず、hit の有無は並び順に依らぬ。)
     """
     if now is None:
         now = datetime.datetime.now()
     if not text:
         return None, None, ""
     low = text.lower()
-    head = next((p for p in UPSTREAM_HEAD_PATTERNS if p in low), None)
-    if head is None:
-        cont = next((p for p in UPSTREAM_CONTINUATION_PATTERNS if p in low), None)
-        if cont is None:
+    heads = [p for p in UPSTREAM_HEAD_PATTERNS if p in low]
+    if not heads:
+        conts = [p for p in UPSTREAM_CONTINUATION_PATTERNS if p in low]
+        if not conts:
             return None, None, ""
+        cont = select_informative_pattern(conts)
         return (UPSTREAM_RESIDUE, cont,
                 f"続き行『{cont}』のみが見え、主文が画面に居らぬ = banner は既に流れた "
                 f"(= その後に出力が在った)")
-    if head in UPSTREAM_TIMED_HEAD_PATTERNS:
-        eta = parse_resets_eta(text, now)
-        if eta is None:
-            return (UPSTREAM_RESIDUE, head,
-                    f"主文『{head}』が己の reset 時刻を名乗らぬ = 同一行に在る筈の "
-                    f"resets が画面外へ落ちておる (行が崩れた banner の断片)")
+    head = select_informative_pattern(heads)
+    others = sorted(p for p in heads if p != head)
+    also = f" (同じ画面に他の主文も見えておる: {'/'.join(others)})" if others else ""
+    eta = parse_resets_eta(text, now)
+    if eta is not None:
         ahead_h = (eta - now).total_seconds() / 3600.0
         if ahead_h > MAX_RESETS_ETA_AHEAD_HOURS:
             return (UPSTREAM_RESIDUE, head,
                     f"主文『{head}』の reset 時刻は既に過ぎておる "
                     f"(次の到来が {eta.isoformat(timespec='minutes')} = "
-                    f"{round(ahead_h, 1)}h 先 > 妥当域 {MAX_RESETS_ETA_AHEAD_HOURS}h)")
+                    f"{round(ahead_h, 1)}h 先 > 妥当域 {MAX_RESETS_ETA_AHEAD_HOURS}h){also}")
         return (UPSTREAM_LIVE, head,
-                f"主文『{head}』が生きた期限 "
-                f"({eta.isoformat(timespec='minutes')} = {round(ahead_h, 1)}h 先) を名乗っておる")
+                f"主文『{head}』と同じ画面が生きた期限 "
+                f"({eta.isoformat(timespec='minutes')} = {round(ahead_h, 1)}h 先) "
+                f"を名乗っておる{also}")
+    if head in UPSTREAM_TIMED_HEAD_PATTERNS:
+        return (UPSTREAM_RESIDUE, head,
+                f"主文『{head}』が己の reset 時刻を名乗らぬ = 同一行に在る筈の "
+                f"resets が画面外へ落ちておる (行が崩れた banner の断片){also}")
     return (UPSTREAM_LIVE, head,
-            f"主文『{head}』を検知 (期限を持たぬ族 = 人が直すまで壁であり続ける)")
+            f"主文『{head}』を検知 (期限を読めず・期限を持たぬ族 = "
+            f"人が直すまで壁であり続ける){also}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1076,12 +1135,90 @@ def selftest_upstream():
             if "再開せよ" not in body:
                 ng.append(f"U8l3 再開通知の本文から命令が消えた (家老が何をすべきか読めぬ): {body[:80]!r}")
 
+    # ── U9: ★番人の迂回路を【構造で】塞ぐ (cmd_1389)★ ──
+    # 2026-07-26 22:25 軍師二号 A3 の実測 = ★"usage limit" が HEAD_PATTERNS の先頭に居り、
+    # 照合が first-match ゆえ、期限を名乗る banner と同居すると期限の枝へ一度も入らぬ★。
+    # ⇒ ★己の reset 時刻を literal で名乗っておる banner でさえ live と断ずる★。
+    # 是正は二本 = (1)期限を読めたかで判ずる (2)並び順に依らぬ選び方。両方を此処で縛る。
+    # 時刻は撃ち込む (「今 何時か」で結果が変わる試験は緑が何も証明せぬ族ゆえ)。
+    bypass = ("Claude usage limit reached. Try again later.\n"
+              "  ⎿  You've hit your session limit · resets 4:30am\n"
+              "     (Asia/Tokyo)")
+    # U9a: ★本件の実害そのもの★ — reset を過ぎた banner が、先頭 pattern に隠れて live になる。
+    v, pat, why = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 18, 24))
+    if v != UPSTREAM_RESIDUE:
+        ng.append(f"U9a ★期限を名乗る banner が【先頭 pattern に隠れて】live と断ぜられた★ = "
+                  f"cmd_1389 の迂回路が戻った (残渣判定を丸ごと迂回する形): "
+                  f"verdict={v} pat={pat!r} why={why!r}")
+    elif "04:30" not in why and "4:30" not in why:
+        ng.append(f"U9b 残渣と判じたが、信じなんだ期限を名指しせぬ (人が気付ける経路): why={why!r}")
+    # U9c: ★偽陰性側★ — 同じ pane を reset の前に見た時は LIVE のまま (蓋を広げておらぬ)。
+    v, _p, why = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 2, 0))
+    if v != UPSTREAM_LIVE:
+        ng.append(f"U9c 生きた期限 (2.5h 先) を名乗る pane が live でなくなった = "
+                  f"★壁の最中に /clear が飛ぶ★: verdict={v} why={why!r}")
+    # U9d: ★退行なきこと★ — 期限を名乗らぬ純 usage limit は従来どおり live。
+    v, _p, why = upstream_wall_verdict("Claude usage limit reached. Try again later.",
+                                       datetime.datetime(2026, 7, 26, 2, 0))
+    if v != UPSTREAM_LIVE:
+        ng.append(f"U9d 期限を名乗らぬ純 usage limit banner が live でなくなった = "
+                  f"期限を読めぬ族まで残渣へ倒しておる (蓋の広げすぎ): verdict={v} why={why!r}")
+    # U9e: ★順序独立の実証★ — HEAD_PATTERNS を並べ替えても判定が1件も変わらぬこと。
+    #      ★台帳の並び順という【無関係な事情】が判定を支配しておらぬか★ を機械に問う。
+    corpus = [
+        (bypass, datetime.datetime(2026, 7, 26, 18, 24)),
+        (bypass, datetime.datetime(2026, 7, 26, 2, 0)),
+        (real, datetime.datetime(2026, 7, 26, 2, 0)),
+        (real, datetime.datetime(2026, 7, 26, 18, 24)),
+        (cont_only, datetime.datetime(2026, 7, 26, 20, 0)),
+        ("Claude usage limit reached.", datetime.datetime(2026, 7, 26, 2, 0)),
+        ("You've hit your session limit", datetime.datetime(2026, 7, 26, 2, 0)),
+        ("Your credit balance is too low", datetime.datetime(2026, 7, 26, 2, 0)),
+        ("rate_limit_error · resets 4:30am", datetime.datetime(2026, 7, 26, 2, 0)),
+        ("Read 2 files, ran 9 shell commands", datetime.datetime(2026, 7, 26, 2, 0)),
+    ]
+    base_out = [upstream_wall_verdict(t, n) for t, n in corpus]
+    g = globals()
+    orig_heads = g["UPSTREAM_HEAD_PATTERNS"]
+    perms = {
+        "逆順": tuple(reversed(orig_heads)),
+        "辞書順": tuple(sorted(orig_heads)),
+        "1つ回転": orig_heads[1:] + orig_heads[:1],
+    }
+    try:
+        for label, perm in perms.items():
+            g["UPSTREAM_HEAD_PATTERNS"] = perm
+            out = [upstream_wall_verdict(t, n) for t, n in corpus]
+            if out == base_out:
+                continue
+            j = next(i for i in range(len(out)) if out[i] != base_out[i])
+            ng.append(f"U9e ★HEAD_PATTERNS を{label}に並べ替えたら判定が変わった★ = "
+                      f"台帳の並び順が判定を支配しておる (first-match の順序依存が戻った): "
+                      f"corpus#{j} {base_out[j]!r} → {out[j]!r}")
+            break
+    finally:
+        g["UPSTREAM_HEAD_PATTERNS"] = orig_heads
+    # U9f: ★族の登録に依らぬことの実証★ — TIMED tuple を空にしても、期限が読めた pane の
+    #      判定は変わらぬ (= 登録漏れが【期限を名乗る banner】に対して構造的に起こらぬ)。
+    #      ★U8f/U8d と役割が別である★: 彼は「期限を読めなんだ時」を縛り、此は「読めた時」を縛る。
+    orig_timed = g["UPSTREAM_TIMED_HEAD_PATTERNS"]
+    try:
+        g["UPSTREAM_TIMED_HEAD_PATTERNS"] = ()
+        v_stale, _p, _w = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 18, 24))
+        v_live, _p, _w = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 2, 0))
+    finally:
+        g["UPSTREAM_TIMED_HEAD_PATTERNS"] = orig_timed
+    if v_stale != UPSTREAM_RESIDUE or v_live != UPSTREAM_LIVE:
+        ng.append(f"U9f ★TIMED 族の登録を空にしたら、期限を読めた pane の判定が変わった★ = "
+                  f"期限の枝が pattern 名に依存しておる (族の登録漏れが再び効く形): "
+                  f"reset後={v_stale} reset前={v_live}")
+
     if ng:
         for line in ng:
             print(f"★NG★ {line}")
         print(f"selftest_upstream: FAIL ({len(ng)}件)")
         return 1
-    print("selftest_upstream: PASS (U1-U8 全て契約どおり)")
+    print("selftest_upstream: PASS (U1-U9 全て契約どおり)")
     return 0
 
 

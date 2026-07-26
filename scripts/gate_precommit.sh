@@ -27,8 +27,14 @@ fi
 worst=0
 out1="$(bash "$SCRIPT_DIR/scripts/gate_artifact_capture.sh" --all 2>&1)"; rc1=$?
 out2="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --sanity 2>&1)"; rc2=$?
+# gate-3 (cmd_1387): ★触った file に anchor を持つ牙の【着弾数】だけを実測する★。
+#   ★anchor の一意性は牙の性質でなく【今の盤面の性質】ゆえ、他人の commit が他人の牙を鈍らせうる★
+#   (実例 = 7d35e40 が MUT-1355-001 を非一意化した。書いた者は知る術を持たなんだ)。
+#   ★1 を返さぬ設計ゆえ commit を止めることは無い★ (UNDETERMINED=2 で警告するのみ)。
+#   ★所要 = 触った file を持つ牙のみ・物差しB のみゆえ 0.2s 級 (実測)★。
+out3="$(python3 "$SCRIPT_DIR/scripts/gate_anchor_touched.py" 2>&1)"; rc3=$?
 
-for pair in "gate-1:$rc1" "gate-2:$rc2"; do
+for pair in "gate-1:$rc1" "gate-2:$rc2" "gate-3:$rc3"; do
     rc="${pair#*:}"
     if [ "$rc" -eq 1 ]; then worst=1
     elif [ "$rc" -eq 2 ] && [ "$worst" -ne 1 ]; then worst=2; fi
@@ -39,6 +45,7 @@ if [ "$worst" -eq 1 ]; then
     echo "[gate] ★FAIL — commit を止めた★ (沈黙する落とし穴 gate / cmd_1352)"
     [ "$rc1" -ne 0 ] && printf '%s\n' "$out1"
     [ "$rc2" -ne 0 ] && printf '%s\n' "$out2"
+    [ "$rc3" -ne 0 ] && printf '%s\n' "$out3"
     echo "  詳細と処方: docs/content/ops/cmd_1352_silent_pitfall_gates.md"
     echo "  緊急回避 (理由必須): SHOGUN_GATE_SKIP=1 git commit ..."
     echo "════════════════════════════════════════════════════════════════"
@@ -49,9 +56,10 @@ if [ "$worst" -eq 2 ]; then
     echo "[gate] ⚠ UNDETERMINED — ★緑ではない★ (通すが、放置するな)"
     [ "$rc1" -ne 0 ] && printf '%s\n' "$out1"
     [ "$rc2" -ne 0 ] && printf '%s\n' "$out2"
+    [ "$rc3" -ne 0 ] && printf '%s\n' "$out3"
     echo "  gate_nightly.sh (cron) が家老へ警告する。今直せるなら今直せ。"
     echo "════════════════════════════════════════════════════════════════"
     exit 0
 fi
-echo "[gate] PASS: gate-1 (manifest捕捉) + gate-2 (台帳sanity) 緑"
+echo "[gate] PASS: gate-1 (manifest捕捉) + gate-2 (台帳sanity) + gate-3 (牙の着弾) 緑"
 exit 0

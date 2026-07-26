@@ -157,6 +157,12 @@ scripts/seo_qc.sh
 # 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
 !scripts/gate_artifact_capture.sh
 !scripts/gate_mutation_replay.py
+# cmd_1387 (2026-07-27): gate-3 = 牙が鈍った其の場で名指す層 (gate_precommit が呼ぶ先)。
+# ★本日 同型の 5 度目 = .gitignore:7 の * に黙って弾かれておった★ (git check-ignore で実測)。
+#   ★之を足さねば「作業ツリーでは緑・HEAD には存在せぬ gate」になる★ =
+#   gate_precommit.sh が呼ぶ先を失い、★他の誰の手元でも走らぬのに、拙者の手元だけ緑★という
+#   cmd_1386 で掘り当てた当の穴に、其れを掘った者が落ちる形になる。
+!scripts/gate_anchor_touched.py
 # cmd_1386 (2026-07-26): 台帳の id を数える物差し (手2 の 178/178 突合で使う)。
 # ★またしても .gitignore:7 の * に黙って弾かれておった★ = 本日 同型の 4 度目ゆえ明示で通す。
 #   ★手2 で台帳を .d へ割る時は【shard も同じ穴に落ちる】= 実測済 (2026-07-26T22:37)★:

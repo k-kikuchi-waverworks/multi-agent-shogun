@@ -375,15 +375,32 @@ def removed_lines(a_root: Path, b_root: Path) -> list:
     return out
 
 
-def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: int):
-    """着弾の一意性を検める。問題が無ければ None、在れば理由の文字列を返す。"""
+def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: int,
+                            spelling_measure: bool = True):
+    """着弾の一意性を検める。問題が無ければ None、在れば理由の文字列を返す。
+
+    spelling_measure=False (cmd_1387 の pre-commit 層のみ) は ★物差しA を走らせぬ★:
+      ★実測 2026-07-27 = 物差しA は 2107 行の file 1 本で 45.0 秒、物差しB は 0.00 秒★
+      (char 単位 SequenceMatcher ゆえ file 長に対し二乗で伸びる)。commit の度に
+      45 秒×選抜件数を払わせる門は ★必ず外される★ ゆえ、其の場で気付く層は物差しBのみで撃つ。
+      ★残余は正直に名乗る = 同一行に複数箇所在る形は物差しBには 1 に見える★
+      (実測: `FLAG = 0; OTHER = 0` へ 0→1 を当てると 物差しA=2 / 物差しB=1)。
+      ⇒ ★其の形は翌朝の全数 replay (物差しA 併走) が捕える = 本層は【早さ】を買い、
+        【網の広さ】は買っておらぬ★。二層の役割が違うのであって、片方は片方の代用ではない。
+    """
     declared = e.get("anchor_sites", ANCHOR_SITES_DEFAULT)
     try:
         declared = int(declared)
     except (TypeError, ValueError):
         return f"anchor_sites が整数でない: {e.get('anchor_sites')!r}"
 
-    by_spelling, detail = anchor_firings(pristine, mut)
+    if spelling_measure:
+        by_spelling, detail = anchor_firings(pristine, mut)
+        spell_note = f"綴り {by_spelling}"
+    else:
+        # ★0 と書けば「測って 0 であった」と読まれる★ = 未測を実測へ化かさぬため別に持つ。
+        by_spelling, detail = -1, []
+        spell_note = "綴り 未測 (pre-commit 層ゆえ省いた)"
     by_hunks, has_insert, has_move = _diff_shape(pristine, mut)
     # ★二つの物差しの多い方を採る★ = 片方が盲でも他方が数える (cmd_1382 差し戻し (i))
     fired = max(by_spelling, by_hunks)
@@ -393,11 +410,12 @@ def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: i
         # ★どちらの物差しが鳴らしたかを必ず名乗る★ = 「綴りとしては 1 箇所に見える」形が
         #   現に在るゆえ、内訳が空でも読む者が惑わぬようにする。
         which = ("綴り+行の塊の双方" if by_spelling == by_hunks else
-                 ("綴り" if by_spelling > by_hunks else "行の塊 (綴りとしては"
-                  f" {by_spelling} 箇所にしか見えぬ)"))
+                 ("綴り" if by_spelling > by_hunks else
+                  ("行の塊 (綴りは測っておらぬ)" if not spelling_measure else
+                   f"行の塊 (綴りとしては {by_spelling} 箇所にしか見えぬ)")))
         return (f"★同一の綴り置換が {fired} 箇所で発火 (申告は {declared} 箇所)★ = 狙い+余所を"
                 f"巻き込んでおる。赤が出ても【どの箇所の赤か】を名指しできぬ。"
-                f" 数えた物差し = {which} (綴り {by_spelling} / 行の塊 {by_hunks})."
+                f" 数えた物差し = {which} ({spell_note} / 行の塊 {by_hunks})."
                 + (f" 内訳: {d}." if d else "")
                 + f" 処方 = anchor を一意な綴りへ絞る (前後の行を含める) か、全置換が意図なら"
                 f" 台帳へ anchor_sites: {fired} と書け (黙って全置換するのを禁じておる)")
@@ -411,7 +429,7 @@ def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: i
         # ★過大申告 = 申告が飾りになる道★ (cmd_1382 差し戻し (ii)・足軽二号の名指し)。
         # 旧版は fired > declared しか見ておらず、anchor_sites: 99 と書けば門は黙った。
         return (f"★anchor_sites の申告 {declared} 箇所に対し、実測は {fired} 箇所★ = 過大申告。"
-                f" (綴り {by_spelling} / 行の塊 {by_hunks})"
+                f" ({spell_note} / 行の塊 {by_hunks})"
                 f" ★申告を大きく書けば門は黙る★ ゆえ、申告と実測の食い違いは両向きに咎める。"
                 f" 処方 = 台帳の anchor_sites を {fired} へ直せ (実測に合わせよ)")
 

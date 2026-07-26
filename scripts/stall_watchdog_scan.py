@@ -129,6 +129,10 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
     if now is None:
         now = datetime.datetime.now()
     hits = []
+    # assigned_count = scan の目に映った assigned task の分母。hit 0 件時に印字する =
+    # 「分母0 (status drift 等で何も見えておらぬ)」と「全員健全 (帳簿漏れなし)」を
+    # log 上で区別可能にする (idle_revive の eligible=N と同処方・家老裁定 09:24)。
+    assigned_count = 0
     for task_path in sorted(tasks_dir.glob("*.yaml")):
         agent = task_path.stem
         if not should_scan_agent(agent):
@@ -139,6 +143,7 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
         task_id, parent_cmd, task_status = parsed
         if task_status != "assigned":
             continue
+        assigned_count += 1
         report_path = reports_dir / f"{agent}_report.yaml"
         if not report_path.is_file():
             continue
@@ -162,7 +167,7 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
             "elapsed_min": elapsed_min,
             "report_status": r_status,
         })
-    return hits
+    return hits, assigned_count
 
 
 def format_alert_message(hit):
@@ -202,11 +207,16 @@ def main(argv=None):
         tasks_dir = DEFAULT_TASKS_DIR
         reports_dir = DEFAULT_REPORTS_DIR
 
-    hits = scan(tasks_dir, reports_dir, args.threshold_min)
+    hits, assigned_count = scan(tasks_dir, reports_dir, args.threshold_min)
 
     if args.json:
         print(json.dumps(hits, ensure_ascii=False))
     else:
+        if not hits:
+            # 無出力を契約にせぬ: assigned 存在下で assigned=0 が常態なら scan は
+            # 盲目である (2026-07-26 注記drift の型)。分母0の検知層は全PASSと
+            # 区別がつかぬ — hit なしでも分母を名指しで残す (家老裁定 09:24)。
+            print(f"[stall_watchdog] 帳簿漏れ hit なし。assigned={assigned_count}")
         for h in hits:
             print(f"AGENT={h['agent']} TASK_ID={h['task_id']} "
                   f"PARENT_CMD={h['parent_cmd']} ELAPSED_MIN={h['elapsed_min']} "

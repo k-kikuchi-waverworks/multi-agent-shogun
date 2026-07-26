@@ -323,6 +323,25 @@ mutations:
     expect: nonzero
     red_needle: "not ok 1 T-SWD-003"  # 実測 2026-07-26: report正規化折りで注記付き completed が読めず名指しで落ちる
 
+  - id: MUT-0552-003
+    origin: cmd_1356
+    suspected_by: ashigaru1
+    desc: |
+      stall_watchdog の hit 0 件時分母印字 (『帳簿漏れ hit なし。assigned=N』・家老裁定
+      09:24 = 無出力を契約にせぬ) を折ると、T-SWD-005 (注記付き assigned 2体で
+      assigned=2 が印字される) が赤くなるべき。折っても緑なら「分母0 (status drift で
+      盲目)」と「全員健全」が log 上区別できぬ無出力契約へ戻る — idle_revive eligible=N
+      (MUT-1154-002) と同処方の stall_watchdog 側の顔。
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh,
+            tests/unit/test_stall_watchdog_status_normalize.bats]
+    mutate: |
+      sed -i 's/print(f"\[stall_watchdog\] 帳簿漏れ hit なし。assigned={assigned_count}")/pass/' scripts/stall_watchdog_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-SWD-005" tests/unit/test_stall_watchdog_status_normalize.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SWD-005"  # 実測 2026-07-26: 印字折りで assigned=2 が消え名指しで落ちる
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

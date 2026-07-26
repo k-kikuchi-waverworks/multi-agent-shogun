@@ -17,9 +17,12 @@
 #   T-SWD-002: 注記付き 'done   # …' は assigned に化けぬ (正規化が偽 HIT を作らぬ)
 #   T-SWD-003: 注記付き 'completed   # …' report も完了と読める + alert へは正規化 token
 #   T-SWD-004: 'assigned:' 型の書き癖 drift でも読める (末尾 :;,. 落とし)
+#   T-SWD-005: hit 0 件時に分母 (assigned=N) が印字される (家老裁定 09:24 = 無出力を
+#              契約にせぬ。分母0の検知層は全PASSと区別がつかぬ — eligible=N と同処方)
 #
 # 変異登録 (config/mutation_registry.yaml): MUT-0552-001 (task側正規化を折る→T-SWD-001 赤) /
-# MUT-0552-002 (report側正規化を折る→T-SWD-003 赤)。
+# MUT-0552-002 (report側正規化を折る→T-SWD-003 赤) /
+# MUT-0552-003 (分母印字を折る→T-SWD-005 赤)。
 # 本番 queue には触れない: --queue-root 隔離 (queue_root 指定時は inbox 通知経路に入らぬ
 # = stall_watchdog_scan.py main() の契約) + fixture roster ashigaru91 (実在しない agent 名)。
 
@@ -87,14 +90,15 @@ _ts_minutes_ago() {
 # ---------------------------------------------------------------------------
 # T-SWD-002: 注記付き 'done   # …' は assigned に化けぬ (正規化が偽 HIT を作らぬ側の契約)。
 # ---------------------------------------------------------------------------
-@test "T-SWD-002: annotated 'done   # note' task does NOT become assigned — no false hit" {
+@test "T-SWD-002: annotated 'done   # note' task does NOT become assigned — no false hit, denominator assigned=0" {
     local ts="$(_ts_minutes_ago 45)"
     _write_task_q ashigaru91 subtask_swd_002 "done   # 2026-07-26 07:45 完遂 = 台帳登録"
     _write_report_q ashigaru91 subtask_swd_002 "completed" "$ts"
 
     run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
     [ "$status" -eq 0 ]
-    [ -z "$output" ]
+    [[ "$output" != *"AGENT="* ]]
+    [[ "$output" == *"hit なし。assigned=0"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -126,4 +130,21 @@ _ts_minutes_ago() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"AGENT=ashigaru91"* ]]
     [[ "$output" == *"TASK_ID=subtask_swd_004"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# T-SWD-005: hit 0 件時に分母 (assigned=N) が印字される。注記付き assigned 2体・
+# 完遂 report なし → hit は無いが assigned=2 が名指しで残る。この行が消えれば
+# 「分母0 (盲目)」と「全員健全」が log 上再び区別できなくなる (無出力=沈黙の契約
+# へ戻る)。正規化との合わせ技も検む = 注記付きが分母に【数えられる】こと。
+# ---------------------------------------------------------------------------
+@test "T-SWD-005: zero-hit run prints denominator assigned=N (annotated tasks counted) (mutation proof: MUT-0552-003)" {
+    _write_task_q ashigaru91 subtask_swd_005a "assigned   # 2026-07-26 09:30 家老dispatch=実装中"
+    _write_task_q ashigaru92 subtask_swd_005b "assigned   # 2026-07-26 09:31 家老dispatch=検証中"
+    # report なし = 帳簿漏れではない (完遂記録がまだ無いだけ) → hit 0 件が正
+
+    run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"AGENT="* ]]
+    [[ "$output" == *"hit なし。assigned=2"* ]]
 }

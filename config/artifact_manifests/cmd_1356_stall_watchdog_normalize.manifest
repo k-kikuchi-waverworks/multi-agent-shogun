@@ -4,5 +4,6 @@
 # 文法: scripts/gate_artifact_capture.sh 冒頭コメント参照 (path / dir/ [min=N] / #コメント)
 scripts/stall_watchdog_scan.py
 tests/unit/test_stall_watchdog_status_normalize.bats
+tests/unit/test_stall_watchdog_scan.bats
 config/mutation_registry.yaml
 docs/content/ops/cmd_1355_upstream_outage_guard.md

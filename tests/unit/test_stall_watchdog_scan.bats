@@ -4,6 +4,14 @@
 # Scope: scripts/stall_watchdog_scan.{sh,py} report↔task YAML 突合 scan.
 # Covers positive detection + four false-positive guards + multi-doc / nested /
 # primary_task variants.
+#
+# 契約変更 (cmd_1356 follow-up・家老裁定 2026-07-26 09:24):
+#   hit 0 件時は【無出力】でなく【分母を名指しする1行】を印字する =
+#   `[stall_watchdog] 帳簿漏れ hit なし。assigned=N`。
+#   無出力の契約は「分母0 (status drift で何も見えておらぬ = 盲目)」と「全員健全」を
+#   log 上区別できぬ (idle_revive eligible=N と同型の観測性欠落)。負例 test は
+#   「hit が無い」+「分母が正しい」の両方を assert する (契約の削除でなく新契約 green)。
+#   分母印字の変異登録 = MUT-0552-003 (test_stall_watchdog_status_normalize.bats T-SWD-005)。
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
@@ -81,53 +89,57 @@ _ts_minutes_ago() {
 # =============================================================================
 # T-002: 負例 — task status=done は scan 対象外
 # =============================================================================
-@test "T-002: negative — task status=done is skipped" {
+@test "T-002: negative — task status=done is skipped (denominator assigned=0)" {
     local ts="$(_ts_minutes_ago 45)"
     _write_task ashigaru3 subtask_demo_done cmd_999 done
     _write_report_flat ashigaru3 subtask_demo_done cmd_999 completed "$ts"
 
     run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
     [ "$status" -eq 0 ]
-    [ -z "$output" ]
+    [[ "$output" != *"AGENT="* ]]
+    [[ "$output" == *"hit なし。assigned=0"* ]]
 }
 
 # =============================================================================
 # T-003: 負例 — report status=in_progress は完遂未達ゆえ skip
 # =============================================================================
-@test "T-003: negative — report status=in_progress is not completion" {
+@test "T-003: negative — report status=in_progress is not completion (assigned=1 visible)" {
     local ts="$(_ts_minutes_ago 45)"
     _write_task ashigaru3 subtask_demo_ip cmd_999 assigned
     _write_report_flat ashigaru3 subtask_demo_ip cmd_999 in_progress "$ts"
 
     run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
     [ "$status" -eq 0 ]
-    [ -z "$output" ]
+    [[ "$output" != *"AGENT="* ]]
+    [[ "$output" == *"hit なし。assigned=1"* ]]
 }
 
 # =============================================================================
 # T-004: 負例 — 経過 15 分は閾値未満ゆえ skip
 # =============================================================================
-@test "T-004: negative — elapsed 15min below threshold 30" {
+@test "T-004: negative — elapsed 15min below threshold 30 (assigned=1 visible)" {
     local ts="$(_ts_minutes_ago 15)"
     _write_task ashigaru3 subtask_demo_fresh cmd_999 assigned
     _write_report_flat ashigaru3 subtask_demo_fresh cmd_999 done "$ts"
 
     run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
     [ "$status" -eq 0 ]
-    [ -z "$output" ]
+    [[ "$output" != *"AGENT="* ]]
+    [[ "$output" == *"hit なし。assigned=1"* ]]
 }
 
 # =============================================================================
 # T-005: 負例 — task_id 不一致 (報告は別 task の記録) は skip
 # =============================================================================
-@test "T-005: negative — task_id mismatch between task YAML and report" {
+@test "T-005: negative — task_id mismatch between task YAML and report (assigned=1 visible)" {
     local ts="$(_ts_minutes_ago 60)"
     _write_task ashigaru3 subtask_current cmd_999 assigned
     _write_report_flat ashigaru3 subtask_previous cmd_998 completed "$ts"
 
     run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
     [ "$status" -eq 0 ]
-    [ -z "$output" ]
+    [[ "$output" != *"AGENT="* ]]
+    [[ "$output" == *"hit なし。assigned=1"* ]]
 }
 
 # =============================================================================
@@ -211,11 +223,12 @@ EOF
 # =============================================================================
 # T-010: report YAML 不存在は 警告なしで skip
 # =============================================================================
-@test "T-010: missing report YAML is gracefully skipped" {
+@test "T-010: missing report YAML is gracefully skipped (assigned=1 visible)" {
     _write_task ashigaru3 subtask_no_report cmd_999 assigned
     # no report file written
 
     run bash "$SCAN_SH" --queue-root "$Q" --threshold-min 30
     [ "$status" -eq 0 ]
-    [ -z "$output" ]
+    [[ "$output" != *"AGENT="* ]]
+    [[ "$output" == *"hit なし。assigned=1"* ]]
 }

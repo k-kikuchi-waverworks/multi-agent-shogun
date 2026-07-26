@@ -141,9 +141,12 @@ ashigaru6 pane (%3) scrollback より 2026-07-26 04:4x 採取。正本 =
   出所1点ずつへ適用し、alert 本文へは正規化 token のみ運ぶ (注記の生文字列 = shell 敵対
   文字を inbox へ流さぬ)。変異登録 = MUT-0552-001/002 (折れば T-SWD-001/T-SWD-003 名指し赤)。
   試験本体 = `tests/unit/test_stall_watchdog_status_normalize.bats`。
-  なお同 scan は hit 0 件時に無出力ゆえ「分母0 (盲目)」と「全員健全」が log 上区別できぬ
-  (idle_revive の `eligible=N` と同型の観測性欠落) — 既存 test (`T-002` 等) が無出力を契約
-  しており他者領分ゆえ、分母印字の是非は家老裁定待ち (2026-07-26 report 具申)。
+  なお同 scan は hit 0 件時に無出力で「分母0 (盲目)」と「全員健全」が log 上区別できな
+  かった (idle_revive の `eligible=N` と同型の観測性欠落) — 家老裁定 (同日 09:24)「直せ。
+  既存 test が無出力を契約しておるなら test ごと契約を書き換えよ」を受け、hit 0 件時に
+  `[stall_watchdog] 帳簿漏れ hit なし。assigned=N` を印字する契約へ変更 (無出力契約の
+  負例 test 5本は「hit が無い」+「分母が正しい」の新契約 green へ書換)。変異登録 =
+  MUT-0552-003 (印字折り→T-SWD-005 名指し赤)。
 
 ## 運用
 

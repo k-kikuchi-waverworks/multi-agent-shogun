@@ -57,6 +57,27 @@ GENERATED_ALLOW_DEFAULT=(
 	"agents/default/agent.yaml|scripts/build_instructions.sh"
 )
 
+# ══ ★この gate の網は狭い。狭いことを毎回 名乗る★ (cmd_1367 N3・軍師一号) ══
+#   ★狭いことが誤りなのではない。狭いと名乗っておらぬことが誤りである★ (家老の言)。
+#   ★実測で確かめた盲点★ =
+#     ・cmd_1367 を起こした当の scripts/gpu_sidecar_stop.sh は、追跡下でその名を含む file が
+#       ★自分自身のみ★ である (HEAD 全 file を走査して確認)。呼ぶ者が追跡外・人手・runbook で
+#       あったゆえ、★仮に whitelist から外れても本 gate は名指しできぬ★。
+#     ・是正前の状態へ当て直すと本 gate が surface するのは 5 件。同じ状態を拙者が手で調べた時は 19 件。
+#   ⇒ ★本 gate は「配られておらぬ道具の全数」を出す物ではない。
+#     【追跡下の .sh/.py/.bats が平文で名指ししておる分】だけを出す物である★。
+#   ★毎 run 印字する理由★ = header の comment は log を読む者の目に入らぬ。
+#     ★数字だけを見せて範囲を黙るのが、本日ずっと潰してきた形である★。
+gate_scope_notice() {
+	echo "  ★本 gate の網 (狭い・名乗っておく — cmd_1367 N3)★"
+	echo "    見る = HEAD の .sh/.py/.bats が ★平文で★ 名指しする scripts|lib|config|instructions|templates|saytask|agents/ 配下の path"
+	echo "    見ぬ ① 呼ぶ者が追跡外なら 呼ばれる者も見えぬ (gpu_sidecar_stop.sh が正にこの形であった)"
+	echo "    見ぬ ② 呼ぶ者が .md / .ps1 / cron / 人手 / GUI なら見えぬ (走査元は .sh/.py/.bats のみ)"
+	echo "    見ぬ ③ path を変数や連結で組む呼び方は見えぬ (平文一致のみ)"
+	echo "    見ぬ ④ 上記 7 dir の外に在る道具は見えぬ"
+	echo "    ⇒ ★本 gate の PASS は【配られておらぬ道具は無い】ではなく【この網に掛かる範囲では無い】である★"
+}
+
 run_gate() {
 	local root="$1"
 	local SRC_MIN="${GATE_SRC_MIN:-$GATE_SRC_MIN_DEFAULT}"
@@ -118,7 +139,11 @@ run_gate() {
 				n_gen=$((n_gen + 1))                    # 生成物ゆえ追跡外で正しい
 			else
 				n_bad=$((n_bad + 1))
-				findings="${findings}  [UNDISTRIBUTED] ${ref}  ← 追跡下の ${s} が名指し"$'\n'
+				# ★file 名と呼ぶ者を対で溜める (cmd_1367 N2 是正)★ =
+				#   初版は 1 参照ごとに 1 行の所見を積んでおった。同じ道具が3箇所から
+				#   呼ばれておれば所見が3行に膨れ、★「1本落ちておる」を「3件」と申告し、
+				#   且つ後段の head で他の道具を押し出す★ (軍師一号 N1/N2)。
+				findings="${findings}${ref}"$'\t'"${s}"$'\n'
 			fi
 		done < <(printf '%s' "$body" | grep -oE '(scripts|lib|config|instructions|templates|saytask|agents)/[A-Za-z0-9_./-]+' || true)
 	done <<<"$src_list"
@@ -128,18 +153,34 @@ run_gate() {
 		return 2
 	fi
 
+	# ★何本 (file) と 何件 (参照出現) を分けて数える★ — cmd_1367 N2 是正。
+	#   ★総和の検算は【参照出現】で行う★ = 内訳は参照を分類した物ゆえ、file 数と足しても合わぬ。
+	local bad_files n_bad_files
+	bad_files="$(printf '%s' "$findings" | cut -f1 | grep -v '^$' | sort -u)"
+	n_bad_files="$(printf '%s' "$bad_files" | grep -c . || true)"
+
 	# ★総和と内訳を同じ出力に並べ、足して合うかを機械で検算する★ (cmd_1358 の全軍規律)
 	echo "[gate_undistributed] 走査元=$n_src 本 / 参照 総和=$n_ref"
-	echo "  内訳 OK=$n_ok  生成物=$n_gen  ★UNDISTRIBUTED=$n_bad★  MISSING(対象外)=$n_missing"
+	echo "  内訳 OK=$n_ok  生成物=$n_gen  ★UNDISTRIBUTED=${n_bad_files}本(参照${n_bad}件)★  MISSING(対象外)=$n_missing"
 	if [ "$n_ref" -ne $((n_ok + n_gen + n_bad + n_missing)) ]; then
 		echo "[UNDETERMINED] 検算 FAIL: 総和 != 内訳の和 = この出力を信じるな"
 		return 2
 	fi
-	echo "  検算 OK (総和 == 内訳の和)"
+	echo "  検算 OK (総和 == 内訳の和・参照出現で照合)"
+	gate_scope_notice
 
 	if [ "$n_bad" -gt 0 ]; then
-		printf '%s' "$findings"
-		echo "[FAIL] 配られておらぬ道具が $n_bad 件 = 呼ぶ者は fresh clone へ配られるが呼ばれる者は配られぬ"
+		# ★1 道具につき 1 行★ = 呼ぶ者は同じ行へ畳む (所見が重複で膨れ、
+		#   後段 (gate_nightly の head) で他の道具を押し出すのを防ぐ — 軍師一号 N1)。
+		local p callers
+		while IFS= read -r p; do
+			[ -n "$p" ] || continue
+			# ★呼ぶ者も重複を畳む★ = 同じ script が同じ道具を3回呼んでおれば
+			#   「f1.sh f1.sh f1.sh」と3度並び、畳んだ文面の枠を無駄に食う (N1 の同族)。
+			callers="$(printf '%s' "$findings" | awk -F'\t' -v r="$p" '$1==r{print $2}' | sort -u | awk '{printf "%s ", $0}')"
+			echo "  [UNDISTRIBUTED] ${p}  ← 追跡下の ${callers}が名指し"
+		done <<<"$bad_files"
+		echo "[FAIL] 配られておらぬ道具が ${n_bad_files} 本 (参照 ${n_bad} 件) = 呼ぶ者は fresh clone へ配られるが呼ばれる者は配られぬ"
 		echo "  処方: .gitignore の whitelist へ否定規則を足すか、真に配るべきでなければ呼ぶ側を直せ"
 		return 1
 	fi
@@ -232,6 +273,49 @@ selftest() {
 	# T8 ★allowlist を黙らせる方向へ育てたら FAIL★
 	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 GATE_ALLOW_MAX=1 GATE_ALLOW_OVERRIDE='a|b c|d e|f' run_gate "$tmp/r1" 2>&1)"; rc=$?
 	chk "T8 allowlist が上限超過 → FAIL" 1 "$rc" "$o"
+
+	# ── cmd_1367 差し戻し (軍師一号 N1/N2/N3) の是正を、実弾で固定する ──
+
+	# T9 ★N2: 同じ道具が複数箇所から呼ばれても【1本】と数える★
+	#   (初版は参照出現を本数として申告し、1本落として「6件」と言うておった)
+	mk_repo "$tmp/r9"; printf '#!/usr/bin/env bash\necho wild\n' >"$tmp/r9/scripts/wild.sh"
+	local k
+	for k in 1 2 3; do printf '#!/usr/bin/env bash\nbash "$D/scripts/wild.sh"\n' >"$tmp/r9/scripts/f$k.sh"; done
+	(cd "$tmp/r9" && git add scripts/f1.sh scripts/f2.sh scripts/f3.sh >/dev/null && git commit -q -m wire3)
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r9" 2>&1)"; rc=$?
+	chk "T9 3箇所から呼ばれる1本 → FAIL" 1 "$rc" "$o"
+	printf '%s' "$o" | grep -q 'UNDISTRIBUTED=1本(参照3件)' \
+		&& { echo "  ok   T9b ★1本(参照3件)と分けて数えておる (N2)★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T9b 本数と参照件数を分けておらぬ"; printf '%s\n' "$o" | sed 's/^/         /'; fail=$((fail + 1)); }
+	[ "$(printf '%s' "$o" | grep -c '\[UNDISTRIBUTED\]')" = "1" ] \
+		&& { echo "  ok   T9c ★所見は1道具1行に畳まれておる (N1)★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T9c 所見が重複で膨れておる"; fail=$((fail + 1)); }
+
+	# T10 ★N1: 複数の道具が落ちたら【全て】名指しできる★
+	#   (重複が枠を食い、3本落として2本しか載らなんだのが差し戻しの元)
+	mk_repo "$tmp/r10"
+	for k in a b c; do printf '#!/usr/bin/env bash\necho %s\n' "$k" >"$tmp/r10/scripts/wild_$k.sh"; done
+	printf '#!/usr/bin/env bash\nbash "$D/scripts/wild_a.sh"\nbash "$D/scripts/wild_a.sh"\nbash "$D/scripts/wild_a.sh"\nbash "$D/scripts/wild_b.sh"\nbash "$D/scripts/wild_c.sh"\n' >"$tmp/r10/scripts/f1.sh"
+	(cd "$tmp/r10" && git add scripts/f1.sh >/dev/null && git commit -q -m wire_abc)
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r10" 2>&1)"; rc=$?
+	chk "T10 3本落ち (うち1本は3重参照) → FAIL" 1 "$rc" "$o"
+	local named=0
+	for k in a b c; do printf '%s' "$o" | grep -q "UNDISTRIBUTED\] scripts/wild_$k.sh" && named=$((named + 1)); done
+	[ "$named" = "3" ] \
+		&& { echo "  ok   T10b ★3本とも名指しできておる (N1)★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T10b 名指しできたのは $named/3 本"; printf '%s\n' "$o" | sed 's/^/         /'; fail=$((fail + 1)); }
+
+	# T11 ★N3: 網の狭さを毎回 名乗る★ = 緑でも赤でも scope を出す。
+	#   ★これを試験に据える理由★ = comment に書くだけでは、次に誰かが出力を整理した時に
+	#     黙って消える。★消えたら赤くなる形にして初めて「名乗り続ける」と言える★。
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r1" 2>&1)"
+	printf '%s' "$o" | grep -q '本 gate の網' && printf '%s' "$o" | grep -q '見ぬ ①' \
+		&& { echo "  ok   T11 ★緑でも網の狭さを名乗っておる (N3)★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T11 緑の時に scope を名乗っておらぬ"; fail=$((fail + 1)); }
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r10" 2>&1)"
+	printf '%s' "$o" | grep -q '本 gate の網' \
+		&& { echo "  ok   T11b ★赤でも網の狭さを名乗っておる (N3)★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T11b 赤の時に scope を名乗っておらぬ"; fail=$((fail + 1)); }
 
 	unset GATE_ALLOW_OVERRIDE
 

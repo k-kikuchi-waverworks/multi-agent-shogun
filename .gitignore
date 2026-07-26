@@ -124,6 +124,19 @@ scripts/seo_qc.sh
 !scripts/ratelimit_check.sh
 !scripts/switch_cli.sh
 !scripts/discord_post.sh
+# ★scripts/discord_channel_inventory.sh と scripts/discord_channel_delete.sh は【永久に追跡せぬ】★
+#   (家老裁定 2026-07-26・cmd_1367 軍師一号検分)。★ここに書く理由 = 次の者が迷うのは docs を
+#   読む時ではなく、この file を編む時ゆえ★ (先例 = 下記 gpu_sidecar_stop.sh の運用記録の注)。
+#   ★配らぬ根拠 (拙者が実測して裏を取った・2026-07-26)★:
+#     ・literal token は無い (両 script とも backend/.env から DISCORD_TOKEN を読む) = 実測 0 件。
+#     ・★但し delete.sh に殿の稼働 guild の実 channel/category ID が 40 個 平文で焼かれておる★
+#       (17〜20桁 ID の一意出現数 = 実測 40)。
+#     ・両 script が殿の個人 tree の絶対 path を hardcode (inventory 3 箇所 / delete 2 箇所)。
+#     ・★追跡下から【呼ぶ者】は 0 件★ ゆえ fresh clone は壊れぬ = 配らぬ側に倒して害が無い。
+#       ★正確に記す★ = 名を含む追跡下 file は 1 本ある (skills/discord-ch-state-verify/SKILL.md)
+#       が、それは "Do NOT use for" 行での ★使うなという名指し★ であって呼び出しではない。
+#   ★将来 配るなら★ = ID 表の外出しと path の env 化が前提。
+#   ★経緯の全文 = docs/content/ops/cmd_1367_undistributed_tooling.md★
 !scripts/stall_watchdog_scan.sh
 !scripts/stall_watchdog_scan.py
 !scripts/retroactive_commit_verify.sh

@@ -115,6 +115,24 @@ printf '%s\n' "$census_out"
 
 verdict() { case "$1" in 0) echo PASS;; 1) echo FAIL;; *) echo UNDETERMINED;; esac; }
 
+# ★切り詰めたなら【切り詰めたと言え】★ (cmd_1367 N1・軍師一号の差し戻し)
+#   本 script は所見を 3 箇所で head により畳んでおるが、いずれも ★入り切らなんだ分を
+#   黙って捨てておった★。軍師の実射 = 実在の道具 3 本を落とすと gate は 3 本とも掴むのに、
+#   家老へ届く文面には 2 本しか載らず ★残数の表示も無かった★ (重複行が枠を食うた)。
+#   ⇒ ★黙って捨てる要約は、読む者に「これが全部だ」と誤読させる★ =
+#     本日ずっと潰してきた【数字だけ見せて範囲を黙る】の同族ゆえ、残数を必ず添える。
+#   (重複そのものは gate_undistributed_tooling.sh 側で 1 道具 1 行へ畳んで断ってある)
+#   ★1行化の作法は従前どおり★ = awk で連結 (tr は多byte を割る)・": " は全角へ (YAML 安全)。
+fold_lines() {
+    local limit="$1" all n
+    all="$(cat)"
+    n="$(printf '%s' "$all" | grep -c . || true)"
+    [ "$n" -eq 0 ] && return 0
+    printf '%s' "$all" | head -n "$limit" | awk '{printf "%s・", $0}' | sed 's/: /：/g'
+    [ "$n" -gt "$limit" ] && printf '★他 %s 行は畳んだ (全 %s 行・log を見よ)★・' "$((n - limit))" "$n"
+    return 0
+}
+
 if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then
     # 警告は1行に畳む (inbox message の YAML 安全のため改行・コロン+空白を避ける)
     # 行連結は awk で行う (tr '\n' '・' は byte 置換ゆえ多byte文字の先頭1byteのみを埋め
@@ -122,7 +140,7 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     # PASS 行は除外する: PASS 行にも red_needle 文字列 (「★NG★ U1b」等) が引用されるため、
     # 除かねば緑の行が所見を埋めて肝心の非 PASS 行を head -8 から押し出す
     # (2026-07-26 cmd_1355b の E2E 実射で発見)
-    detail="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" | grep -E '\[(IGNORED|UNTRACKED|MISSING|COUNT|EMPTY-DIR|UNREGISTERED|WAIVER-EXPIRED)\]|★NG★|UNDETERMINED|陽性対照' | grep -vE '^\s*ok\s' | head -8 | awk '{printf "%s・", $0}' | sed 's/: /：/g')"
+    detail="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" | grep -E '\[(IGNORED|UNTRACKED|MISSING|COUNT|EMPTY-DIR|UNREGISTERED|WAIVER-EXPIRED)\]|★NG★|UNDETERMINED|陽性対照' | grep -vE '^\s*ok\s' | fold_lines 8)"
     hooknote=""
     [ "$hook_rc" -ne 0 ] && hooknote="★pre-commit shim不在=install_gate_hooks.sh で再据付せよ★ "
     wirenote=""
@@ -132,12 +150,12 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     # ★角括弧つきの判定行のみを拾う★ = 内訳行にも "★UNDISTRIBUTED=1★" の語が出るゆえ、
     #   語で拾うと集計行が所見を埋め ★何が配られておらぬのかを名指しできぬ警告★ になる
     #   (2026-07-26 worktree 実射で実測。cmd_1355b で PASS 行が所見を押し出したのと同型)。
-    [ "$undist_rc" -ne 0 ] && undistnote="★配られておらぬ道具あり (cmd_1367)=$(printf '%s' "$undist_out" | grep -E '\[(UNDISTRIBUTED|FAIL|UNDETERMINED)\]' | head -4 | awk '{printf "%s・", $0}' | sed 's/: /：/g')★ "
+    [ "$undist_rc" -ne 0 ] && undistnote="★配られておらぬ道具あり (cmd_1367)=$(printf '%s' "$undist_out" | grep -E '\[(UNDISTRIBUTED|FAIL|UNDETERMINED)\]' | fold_lines 4)★ "
     censusnote=""
     # ★点呼の所見も直に採る★ = detail は gate-1/2 の out しか畳んでおらぬゆえ、
     #   足さねば「点呼が赤いのに、どの木が見られておらぬか名指しできぬ警告」になる
     #   (cmd_1367 の配布 gate で実際に踏んだ轍。角括弧つきの判定行のみを拾う)。
-    [ "$census_rc" -ne 0 ] && censusnote="★どの gate も見ておらぬ木あり (cmd_1374)=$(printf '%s' "$census_out" | grep -E '\[(UNWATCHED|免除期限切れ)\]|木の点呼\] (FAIL|UNDETERMINED)' | head -4 | awk '{printf "%s・", $0}' | sed 's/: /：/g')★ "
+    [ "$census_rc" -ne 0 ] && censusnote="★どの gate も見ておらぬ木あり (cmd_1374)=$(printf '%s' "$census_out" | grep -E '\[(UNWATCHED|免除期限切れ)\]|木の点呼\] (FAIL|UNDETERMINED)' | fold_lines 4)★ "
     msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")。${hooknote}${wirenote}${undistnote}${censusnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2

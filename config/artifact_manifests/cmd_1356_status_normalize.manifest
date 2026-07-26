@@ -1,0 +1,9 @@
+# cmd_1356 follow-up 成果物 manifest — status 注記正規化 (番人の盲目の是正) + eligible 分母印字
+# (2026-07-26 朝の枠切れ実戦検証: 注記付き status が ACTIVE_STATUSES 完全一致照合に落ち
+#  全経路が入口で消灯した実害の根治。家老裁定 08:52 = 具申a/c 採用)
+# 文法: scripts/gate_artifact_capture.sh 冒頭コメント参照 (path / dir/ [min=N] / #コメント)
+scripts/idle_revive_scan.py
+tests/unit/test_idle_revive_status_normalize.bats
+tests/unit/test_idle_revive_cooldown.bats
+config/mutation_registry.yaml
+docs/content/ops/cmd_1355_upstream_outage_guard.md

@@ -243,6 +243,46 @@ mutations:
     expect: nonzero
     red_needle: "★NG★ U6a"  # 実測 2026-07-26: 蓋殺しで U6a (23.8h窓) / U6f (注記) が名指しで落ちる
 
+  - id: MUT-1154-001
+    origin: cmd_1356
+    suspected_by: ashigaru1
+    desc: |
+      idle_revive の status 正規化 (normalize_status = 注記付き 'assigned   # 家老dispatch…'
+      を先頭 token 化して読む) を折る (生の文字列をそのまま返す) と、T-STA-001
+      (注記付き assigned の idle 固着が revive 候補として見える) が赤くなるべき。
+      折っても緑なら番人は再び盲目 — 2026-07-26 朝の枠切れ (07:28-08:31) で assigned 4体
+      存在下に scan の目には active=0 となり、個別stall・quorum停電型・家老degrade・
+      上流障害台帳・R1/R2 の★全経路が入口で消灯★した実害 (誤clearゼロは手柄でなく
+      盲目の副作用・cmd_1352「沈黙」family = data format drift による検知層の静かな無効化)
+      の再来。注記は家老の運用慣行ゆえ書き続けられる — 読める側で吸収する契約 (家老裁定 08:52)。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_status_normalize.bats]
+    mutate: |
+      sed -i 's/^    return tokens\[0\].rstrip(":;,.").lower()$/    return value/' scripts/idle_revive_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-STA-001" tests/unit/test_idle_revive_status_normalize.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-STA-001"  # 実測 2026-07-26: 正規化折りで注記付き assigned が不可視化し名指しで落ちる
+
+  - id: MUT-1154-002
+    origin: cmd_1356
+    suspected_by: ashigaru1
+    desc: |
+      「対象なし」log 行の分母印字 (eligible={eligible_count}) を折ると、T-STA-003
+      (busy の注記付き assigned 2体で eligible=2 が印字される) が赤くなるべき。
+      折っても緑なら「82 scan 連続対象なし」が【盲目 (分母0)】か【全員健全】か再び
+      区別できなくなる — ★分母0の検知層は全PASSと区別がつかぬ★ (2026-07-26 朝、
+      この行が82回出続けたのに誰も盲目に気付けなんだ実害。原理(ii)「操作でなく状態を
+      見よ」の log 側の顔)。
+    paths: [scripts/idle_revive_scan.py, tests/unit/test_idle_revive_status_normalize.bats]
+    mutate: |
+      sed -i 's/f"eligible={eligible_count}")/"eligible-print-neutered")/' scripts/idle_revive_scan.py
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "T-STA-003" tests/unit/test_idle_revive_status_normalize.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-STA-003"  # 実測 2026-07-26: 印字折りで eligible=2 が消え名指しで落ちる
+
 # ─────────────────────────────────────────────────────────────────────────────
 # coverage_waivers — 台帳登録検知 (--coverage) の免除簿。
 #   ・path と reason の両方が必須 (理由なし免除は UNDETERMINED = 曖昧な免除は免除でない)

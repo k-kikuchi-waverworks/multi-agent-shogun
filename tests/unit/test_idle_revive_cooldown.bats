@@ -68,7 +68,9 @@ def iso_ago(minutes):
     return (NOW - datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds")
 NOW_ISO = NOW.isoformat(timespec="seconds")
 def run_scan(pane_state, entry, **kw):
-    results, log = irs.scan(
+    # scan() は 3-tuple (results, clear_log, eligible_count) を返す
+    # (2026-07-26 具申c: 分母の観測性。本 harness は eligible を使わぬゆえ捨てる)。
+    results, log, _eligible = irs.scan(
         Q / "tasks", Q / "reports", Q.parent, {"ashigaru9": pane_state},
         {"ashigaru9": entry} if entry is not None else {},
         stall_min=15, min_interval_min=5, max_consecutive=3, now=NOW, **kw)

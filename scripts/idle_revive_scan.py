@@ -804,6 +804,26 @@ def selftest_upstream():
 # ─────────────────────────────────────────────────────────────
 # YAML helpers (stall_watchdog_scan.py と同型)
 # ─────────────────────────────────────────────────────────────
+def normalize_status(value):
+    """status 文字列を照合可能な正規形へ (先頭 token 化 + lowercase)。
+
+    家老の帳簿慣行 `status: 'assigned   # 2026-07-26 07:23 家老dispatch=…'` は
+    YAML 上【引用符内の一つの文字列】であり、生のまま ACTIVE_STATUSES と完全一致
+    照合すると全 active task が scan に不可視になる — 2026-07-26 朝の枠切れ
+    (07:28-08:31) で番人が盲目のまま走った実害の真因 (個別stall・quorum停電型・
+    家老degrade・上流障害台帳・R1/R2 の全経路が入口で消灯した)。
+    注記は運用上有用ゆえ家老は書き続ける (agent_status.sh で一覧できる) —
+    「注記を書くな」でなく「注記が在っても読める」側で吸収する (家老裁定 08:52)。
+    末尾の :;,. も落とす = 'assigned:' 型の書き癖 drift でも盲目に戻らぬため。
+    """
+    if not isinstance(value, str):
+        return value
+    tokens = value.strip().split(None, 1)
+    if not tokens:
+        return ""
+    return tokens[0].rstrip(":;,.").lower()
+
+
 def parse_task(path: Path):
     try:
         with path.open(encoding="utf-8") as f:
@@ -818,7 +838,9 @@ def parse_task(path: Path):
     return {
         "task_id": t.get("task_id"),
         "parent_cmd": t.get("parent_cmd"),
-        "status": t.get("status"),
+        # 正規化して返す = 全消費点 (scan/quorum分母/_has_active_task/outage_probe)
+        # が注記付き status でも読める。出所は本関数の1点のみ (二重管理禁)。
+        "status": normalize_status(t.get("status")),
         "target_path": t.get("target_path"),
     }
 
@@ -866,7 +888,8 @@ def report_shows_completion(report_path: Path, task_id):
             latest_dt = dt
             latest_status = inner.get("status")
     if isinstance(latest_status, str):
-        return latest_status.lower() in COMPLETION_STATUSES
+        # report 側 status も同じ注記慣行がありうる — task 側と同じ正規形で読む。
+        return normalize_status(latest_status) in COMPLETION_STATUSES
     return False
 
 
@@ -1396,7 +1419,10 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
             "_stalled": stalled,
         })
 
-    return results, clear_log
+    # eligible_count も返す = 「対象なし」が【分母0 (何も見えておらぬ)】なのか
+    # 【分母>0 だが全員健全】なのかを log で区別可能にする (具申c・原理(ii)
+    # 「操作でなく状態を見よ」の log 側の顔。分母0の検知層は全PASSと区別がつかぬ)。
+    return results, clear_log, eligible_count
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1539,7 +1565,7 @@ def main(argv=None):
         pane_states = get_pane_states(REPO_ROOT)
     clear_log = load_clear_log(state_path)
 
-    results, new_clear_log = scan(
+    results, new_clear_log, eligible_count = scan(
         tasks_dir, reports_dir, REPO_ROOT, pane_states, clear_log,
         stall_min=args.stall_min,
         min_interval_min=args.min_interval_min,
@@ -1574,7 +1600,10 @@ def main(argv=None):
         print(json.dumps(printable, ensure_ascii=False))
     else:
         if not results:
-            print("[idle_revive] revive 対象なし(全 agent 稼働 or 完了 or 出力漸進)。")
+            # eligible=0 が assigned 存在下で常態化しておれば番人は盲目である
+            # (2026-07-26 朝: この行が82 scan連続で出たが分母が見えず気付けなんだ)。
+            print("[idle_revive] revive 対象なし(全 agent 稼働 or 完了 or 出力漸進)。"
+                  f"eligible={eligible_count}")
         for r in results:
             print(f"ACTION={r['action']} AGENT={r['agent']} TASK_ID={r['task_id']} "
                   f"IDLE_MIN={r['idle_min']} CONSECUTIVE={r['consecutive']} "

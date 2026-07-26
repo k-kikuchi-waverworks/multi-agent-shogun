@@ -49,6 +49,11 @@ exit: 0 PASS / 1 FAIL あり / 2 UNDETERMINED あり (FAIL 優先)
   python3 scripts/gate_mutation_replay.py --sanity      # 台帳の形だけ検分 (実行なし・pre-commit 用)
   python3 scripts/gate_mutation_replay.py --coverage    # 台帳登録検知 (cmd_1352b): 変異testらしき
                                                         #   file が台帳に無ければ名指しで警告
+  python3 scripts/gate_mutation_replay.py --negative-assertions
+                                                        # 付帯5: ★負の主張に刃が在るか★
+                                                        #   段1 = bats の `!` (刃を持たぬ形) を止める
+                                                        #   段2 = 台帳 red_needle に名指されておらぬ
+                                                        #         負の主張を数える (★分母★)
   python3 scripts/gate_mutation_replay.py --selftest    # 変異試験つき自己検分
   python3 scripts/gate_mutation_replay.py --tree-census --watched-file F
                                                         # ★木の点呼 (cmd_1374)★: 牙を持つのに
@@ -911,20 +916,35 @@ def run_all(registry: Path, repo: Path) -> int:
     return 0
 
 
-def sanity(registry: Path) -> int:
-    """実行なしの軽量検分 (pre-commit 用): 台帳が在り・0件でなく・schema が立っておるか。"""
+def sanity(registry: Path, repo: Path) -> int:
+    """実行なしの軽量検分 (pre-commit 用): 台帳が在り・0件でなく・schema が立っておるか。
+
+    ★付帯5 (負の主張の刃) も此処で撃つ★ = 軍師一号の設計「新しい門を生やすな」に従い、
+    ★既に在る gate-2 の中★ へ段1/段2 を据える (実行なし・数百ms の性質は保つ)。
+    返り = 0 / 1 (段1 FAIL = commit を止める) / 2 (UNDETERMINED)。
+    """
+    worst = 0
     entries, err = load_registry(registry)
     if err:
         print(f"[gate-2 sanity] UNDETERMINED: {err}")
-        return 2
-    bad = [(e.get("id", "?") if isinstance(e, dict) else "?", validate_entry(e))
-           for e in entries if validate_entry(e)]
-    if bad:
-        for eid, why in bad:
-            print(f"[gate-2 sanity] UNDETERMINED: {eid}: {why}")
-        return 2
-    print(f"[gate-2 sanity] OK: 台帳 {len(entries)} 件・schema 健全 (実行は cron 側で行う)")
-    return 0
+        worst = 2
+    else:
+        bad = [(e.get("id", "?") if isinstance(e, dict) else "?", validate_entry(e))
+               for e in entries if validate_entry(e)]
+        if bad:
+            for eid, why in bad:
+                print(f"[gate-2 sanity] UNDETERMINED: {eid}: {why}")
+            worst = 2
+        else:
+            print(f"[gate-2 sanity] OK: 台帳 {len(entries)} 件・schema 健全 (実行は cron 側で行う)")
+    rc_na, lines = negative_assertion_audit(registry, repo, touched_only=True)
+    for ln in lines:
+        print(f"[gate-2 負の主張] {ln}" if ln.startswith("[段") else ln)
+    if rc_na == 1:
+        worst = 1
+    elif rc_na == 2 and worst != 1:
+        worst = 2
+    return worst
 
 
 def scan_mutation_test_candidates(repo: Path):
@@ -1142,6 +1162,258 @@ def coverage(registry: Path, repo: Path) -> int:
           f" — 免除は可視・期限切れ 0 件・ID言及 {len(refs)} 件に幽霊なし"
           f" — ★但し視野は全域でない: {vision}★")
     return 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gate-2 付帯5: ★負の主張に【刃が在ること】を機械に検めさせる★
+#   (軍師一号の設計 plans/negative_assertion_teeth_gate_design.md 段1/段2 の実装・
+#    由来 = 足軽五号 cmd_1401「bats の `!` は set -e から免除ゆえ、当たっても緑」)
+#
+# ★何を塞ぐか★= ★負の主張は「書いた時点では、刃が在るか無いかを誰も見ておらぬ」★。
+#   ★之は「牙が折れた」ではない = 牙が最初から刃を持っておらなんだ★形ゆえ、
+#   既存の replay 層 (登録済の変異を毎朝 撃ち直す) では ★原理的に見えぬ★
+#   — 登録されておらぬ物は replay の分母に居らぬ。
+#
+# ★段1 (静的・実行なし) = 刃を持ちうる形か★
+#   走査の正本は ★scripts/gate_bats_negation.py (五号・cmd_1401)★ を ★呼ぶ★。
+#   ★綴りの規則を二箇所に置かぬ★ = 二重管理は必ず割れる (cmd_1350 の族)。
+#   本層の仕事は【呼び手】である = ★書いた者の画面で落ちる場所 (pre-commit) へ繋ぐ★。
+#   ★実測 2026-07-27 02:5x★= 五号の門は建っておったが ★何処からも呼ばれておらなんだ★
+#   (find|xargs で全木を走査・呼び手 0 件) = ★「据えた」と「効いておる」は別物★。
+#
+# ★段2 (台帳・実行なし) = 刃を持つ【証】が在るか★
+#   負の主張を持つ試験のうち、★台帳の red_needle に一度も名指されておらぬ★ 物を数える。
+#     登録済の負の主張 = ★「壊せば落ちる」を一度は見た物★
+#     未登録の負の主張 = ★「壊せば落ちる」を誰も見ておらぬ物★
+#   ⇒ ★之で【分母】が計算可能になる★ (軍師一号「分母を数えておらぬ」への答)。
+#
+# ★判定の強さ (設計どおり・家老 02:40 の枷)★
+#   段1 で `!` が在る      → ★FAIL (1) = commit を止める★ (刃が無いことの【証明】ゆえ)
+#   段2 で名指し無しが在る  → ★UNDETERMINED (2) = 大声で警告して通す★
+#     = ★「未検証」であって「壊れておる」ではない★。全 agent が commit する repo ゆえ
+#       一過性の未登録で全軍を塞がぬ (cmd_1342 の WARN-through の流儀)。
+#     = ★家老が配った規律の第三項「書けぬなら【未検証】と名乗れ」が、そのまま三値の
+#       UNDETERMINED へ一対一で落ちておる★。
+#
+# ★本層の射程 (必ず名乗る — 設計 §7・名乗らねば後から広げて検められぬ)★
+#   ・見ておるのは ★.bats の @test 本文★ のみ = ★python/TS の木は見ておらぬ★
+#   ・負の主張の見分けは ★下の NEG_SPELLINGS の綴り列挙★ に依る =
+#     ★列挙に無い書き方は素通りする★ (型2 = 射程の穴。出力に綴り名を刷る)
+#   ・名指しの逆引きは ★与えられた台帳 1 冊★ のみ = ★他 repo の台帳は見ておらぬ★
+#   ・★quote / heredoc の中身を判じておらぬ★ (五号の門と同じ限界を継ぐ)
+#
+# ★走査の母集団は【追跡下に限らぬ】★ (設計 NA-4)
+#   ls_files (git 追跡下) を使わぬ = ★本夜 我らは「再帰 grep は追跡下しか見ぬ」を学んだ★。
+#   ★此の門が同じ盲点を持てば「未登録 0 件」という★偽の 0★ を毎 commit 産む★。
+#   ⇒ os.walk で木を歩き、.git / node_modules だけを刈る (刈った物は出力で名乗る)。
+# ─────────────────────────────────────────────────────────────────────────────
+# ★負の主張の綴り★ (name, regex)。★出力に名を刷る = 射程を読む者が検められる形★。
+NEG_SPELLINGS: list[tuple[str, re.Pattern]] = [
+    # 五号の門と同じ形 (段1 が FAIL にする側)。段2 の分母にも入れる =
+    # ★刃を持たぬ負の主張も「負の主張」である★ (数から落とせば直した数が判らぬ)
+    ("bang", re.compile(r"(?:^|;|&&|\|\||\bthen\b)\s*!\s+\S")),
+    # ★倒した後の正しい形★ = if <cmd>; then return 1; fi
+    #   ※ `if ! <cmd>; then return 1` は【正の主張】ゆえ除く (否定の否定を数に入れぬ)
+    ("if-then-return", re.compile(r"^\s*if\s+(?!!)\S.*;\s*then\s+return\s+1\b")),
+    ("refute", re.compile(r"(?<![\w-])refute(?:_\w+)?\b")),
+    ("assert_failure", re.compile(r"(?<![\w-])assert_failure\b")),
+    ("assert-not", re.compile(r"(?<![\w-])assert\s+not\s")),
+]
+# @test 名の頭に置かれた試験 ID (例: T-QRM-001 / E2E-008-C / TC-NFR-008)。
+# ★台帳の red_needle は此の ID で名指す★ (実測: "not ok 1 T-QRM-001" 等)
+BATS_TEST_ID_RE = re.compile(r"^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)")
+BATS_TEST_DECL_RE = re.compile(r"""^@test\s+(?:"([^"]*)"|'([^']*)')\s*\{""")
+# 第三者管理の vendored suite は走査せぬ (五号の門と同じ除外 — 彼らは彼らの規律で書く)
+NEG_EXCLUDE_PARTS = ("test_helper/bats-assert", "test_helper/bats-support")
+NEG_PRUNE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv"}
+NEG_GATE_SCRIPT = "scripts/gate_bats_negation.py"
+
+
+def bats_files(repo: Path) -> list[Path]:
+    """repo の .bats を ★追跡下に限らず★ 数える (設計 NA-4)。
+
+    ★git ls-files を使わぬ★ = 未追跡の bats を見落とせば ★偽の 0 件★ を産む。
+    刈るのは .git / node_modules 等の機械生成の木のみ (NEG_PRUNE_DIRS)。
+    """
+    out: list[Path] = []
+    for dirpath, dirnames, filenames in os.walk(repo):
+        dirnames[:] = [d for d in dirnames if d not in NEG_PRUNE_DIRS]
+        for fn in filenames:
+            if not fn.endswith(".bats"):
+                continue
+            p = Path(dirpath) / fn
+            if any(x in p.as_posix() for x in NEG_EXCLUDE_PARTS):
+                continue
+            out.append(p)
+    return sorted(out)
+
+
+def bats_negative_assertion_tests(repo: Path):
+    """(負の主張を持つ @test の一覧, 走査した .bats file 数) を返す。
+
+    一覧の各要素 = {"file","line","name","id","spellings"}。
+    ★@test 本文のみを見る★ = setup/teardown/helper の中は見ておらぬ (五号の門と同じ線)。
+    """
+    files = bats_files(repo)
+    found: list[dict] = []
+    for p in files:
+        try:
+            lines = p.read_text(encoding="utf-8", errors="replace").split("\n")
+        except OSError:
+            # ★黙って飛ばさぬ★ = 読めなんだ file を 0 件へ畳めば、本層自身が
+            #   本日の族 (沈黙を緑と読む) になる。呼び手が UNDETERMINED へ倒せるよう返す。
+            found.append({"file": str(p), "line": 0, "name": "(読めぬ file)",
+                          "id": None, "spellings": ["unreadable"]})
+            continue
+        cur: dict | None = None
+        for i, line in enumerate(lines, start=1):
+            m = BATS_TEST_DECL_RE.match(line)
+            if m:
+                name = m.group(1) if m.group(1) is not None else m.group(2)
+                idm = BATS_TEST_ID_RE.match(name.strip())
+                cur = {"file": str(p), "line": i, "name": name,
+                       "id": idm.group(1) if idm else None, "spellings": []}
+                continue
+            if line.startswith("}"):
+                if cur and cur["spellings"]:
+                    found.append(cur)
+                cur = None
+                continue
+            if cur is None or line.strip().startswith("#"):
+                continue
+            for sname, rx in NEG_SPELLINGS:
+                if rx.search(line) and sname not in cur["spellings"]:
+                    cur["spellings"].append(sname)
+        if cur and cur["spellings"]:
+            found.append(cur)
+    return found, len(files)
+
+
+def stage1_blade_shape(repo: Path):
+    """段1 = ★刃を持ちうる形か★ (五号の門 gate_bats_negation.py を呼ぶ)。
+
+    返り = (rc, 出力行) — rc は 0=緑 / 1=FAIL / 2=UNDETERMINED。
+    ★走査の正本は五号の門である★ = 綴りの規則を写さぬ (二重管理禁)。
+    """
+    script = REPO_ROOT / NEG_GATE_SCRIPT
+    if not script.is_file():
+        return 2, [f"[段1] UNDETERMINED: 走査の正本が無い: {script}"
+                   " — ★門が消えたことを緑へ倒さぬ★"]
+    try:
+        r = subprocess.run([sys.executable, str(script), str(repo)],
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                           text=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 2, [f"[段1] UNDETERMINED: 走査が走らぬ: {e!r}"]
+    body = [f"  {ln}" for ln in r.stdout.rstrip("\n").split("\n") if ln.strip()]
+    if r.returncode == 0:
+        return 0, ["[段1] OK: ★刃を持たぬ負の主張★ (bats の `!`) は 0 箇所"] + body[:2]
+    if r.returncode == 1:
+        return 1, ["[段1] ★FAIL★: ★刃を持たぬ負の主張★ = 当たっても緑になる書き方が在る"] + body
+    return 2, [f"[段1] UNDETERMINED: 走査が exit {r.returncode} を返した"] + body[:6]
+
+
+def staged_bats(repo: Path):
+    """(此の commit が残そうとしておる .bats の relpath 集合, error) を返す。
+
+    ★出所は gate-3 (gate_anchor_touched.py) と同じ index である★ = 流儀を割らぬ。
+    """
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "diff", "--cached", "--name-only", "-z"],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"git diff --cached が走らぬ: {e}"
+    if r.returncode != 0:
+        return None, f"git diff --cached 失敗 (exit {r.returncode}): {r.stderr.strip()[:200]}"
+    return {p for p in r.stdout.split("\0") if p.endswith(".bats")}, None
+
+
+def stage2_blade_witness(registry: Path, repo: Path, verbose: bool = False,
+                         touched_only: bool = False):
+    """段2 = ★刃を持つ【証】が在るか★ (台帳 red_needle の逆引き)。
+
+    返り = (rc, 出力行)。rc は 0=緑 / 2=UNDETERMINED (★FAIL にはせぬ★ — 家老 02:40 の枷)。
+
+    ★touched_only (pre-commit) の理由を隠さず記す★:
+      全数 (現況 = 未登録 80 本) を毎 commit 鳴らせば ★全 agent の commit が毎回 ⚠ を出す★ =
+      ★常に鳴る門は外される★ (本 file の anchor 層が cmd_1382 で学んだ当のこと) ⇒
+      ★gate-3 と同じ流儀 (触った file の分だけ見る) を採り、【新しく書けば其の場で鳴る】形にする★。
+      ★分母の全数は殺しておらぬ★ = `--negative-assertions` が ★数え直す口★ である
+      (★数を保存せず、数え直す口を保存する★ — 軍師一号 §7d の一般形)。
+    """
+    entries, err = load_registry(registry)
+    if err:
+        return 2, [f"[段2] UNDETERMINED: 台帳が読めぬ: {err}"]
+    needles = "\n".join(str(e.get("red_needle", "")) for e in entries
+                        if isinstance(e, dict))
+    tests, n_files = bats_negative_assertion_tests(repo)
+    spell_names = "/".join(n for n, _ in NEG_SPELLINGS)
+    scope = (f"★射程★= .bats {n_files} file の @test 本文のみ・"
+             f"綴り列挙 [{spell_names}]・台帳 1 冊 ({registry.name}) の red_needle のみ")
+    if touched_only:
+        staged, serr = staged_bats(repo)
+        if serr:
+            return 2, [f"[段2] UNDETERMINED: 触った file を数えられぬ: {serr}", f"  {scope}"]
+        tests = [t for t in tests
+                 if str(Path(t["file"]).relative_to(repo)
+                        if Path(t["file"]).is_relative_to(repo) else t["file"]) in staged]
+        scope = (f"★射程★= ★此の commit が触る .bats {len(staged)} file のみ★"
+                 f" (木の全数 {n_files} file の分母は --negative-assertions で数え直せ)・"
+                 f"綴り列挙 [{spell_names}]・台帳 1 冊 ({registry.name}) の red_needle のみ")
+        if not staged:
+            return 0, ["[段2] OK: ★此の commit は .bats を 1 file も触っておらぬ★ = "
+                       "★本層は何も言うておらぬ (緑ではなく【対象なし】である)★", f"  {scope}"]
+    elif n_files == 0:
+        # ★分母 0 を緑にせぬ★ = 「走査 0 file の緑」と「現に 0 件の緑」を混ぜぬ
+        return 2, [f"[段2] UNDETERMINED: ★測れておらぬ★ = .bats が 0 file "
+                   f"(root={repo}) — ★分母 0 は「全部 検めた」ではない★", f"  {scope}"]
+    unread = [t for t in tests if "unreadable" in t["spellings"]]
+    if unread:
+        return 2, ([f"[段2] UNDETERMINED: 読めぬ .bats が {len(unread)} 件 "
+                    "(★黙って飛ばさぬ★)"]
+                   + [f"  {t['file']}" for t in unread[:5]] + [f"  {scope}"])
+    witnessed, unwitnessed = [], []
+    for t in tests:
+        tid = t["id"]
+        if (tid and tid in needles) or (t["name"] and t["name"] in needles):
+            witnessed.append(t)
+        else:
+            unwitnessed.append(t)
+    head = (f"負の主張を持つ試験 ★{len(tests)} 本★ (分母) 中 "
+            f"★台帳が刃を証しておるのは {len(witnessed)} 本★ / "
+            f"★誰も証しておらぬ {len(unwitnessed)} 本★")
+    if not unwitnessed:
+        return 0, [f"[段2] OK: {head}", f"  {scope}"]
+    lines = [f"[段2] UNDETERMINED: {head}",
+             "  ⇒ ★未登録 = 「壊せば落ちる」を誰も見ておらぬ負の主張★ "
+             "(★壊れておるという意味ではない★)"]
+    shown = unwitnessed if verbose else unwitnessed[:5]
+    for t in shown:
+        try:
+            rel = Path(t["file"]).relative_to(repo)
+        except ValueError:
+            rel = Path(t["file"])
+        lines.append(f"    {rel}:{t['line']}: {t['name'][:70]}"
+                     f"  [{'+'.join(t['spellings'])}]")
+    if len(unwitnessed) > len(shown):
+        lines.append(f"    … 他 {len(unwitnessed) - len(shown)} 本 "
+                     "(全数は python3 scripts/gate_mutation_replay.py"
+                     " --negative-assertions)")
+    lines.append("  処方: 其の主張を ★一度 偽にして赤が出ること★ を見てから、"
+                 "変異を config/mutation_registry.yaml へ登録せよ "
+                 "(red_needle に試験 ID を書けば本層が名指しを読む)")
+    lines.append(f"  {scope}")
+    return 2, lines
+
+
+def negative_assertion_audit(registry: Path, repo: Path, verbose: bool = False,
+                             touched_only: bool = False):
+    """段1+段2 をまとめて撃つ。返り = (worst rc, 出力行)。"""
+    rc1, out1 = stage1_blade_shape(repo)
+    rc2, out2 = stage2_blade_witness(registry, repo, verbose=verbose,
+                                     touched_only=touched_only)
+    worst = 1 if 1 in (rc1, rc2) else (2 if 2 in (rc1, rc2) else 0)
+    return worst, out1 + out2
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1564,9 +1836,19 @@ def selftest() -> int:
         expect("T8 id重複=UNDETERMINED", 2, rc, "重複", out)
 
         # T9: --sanity は 0 件を緑にせぬ
-        rc, out = _invoke(["--sanity", "--registry", str(T / "t3reg.yaml")])
+        #   ★--repo-root を必ず与える★ (付帯5 を足した折の実測 2026-07-27 03:0x):
+        #   既定の REPO_ROOT を使うと ★本 file が置かれた木が git repo か否か★ で
+        #   結果が割れた (写しの木で T9b が exit 2 = ★試験が盤面に依っておった★)。
+        #   ★試験は盤面から独立でなければならぬ★ ゆえ、清浄な fixture repo を固定して撃つ。
+        t9repo = _mk_git_repo(T / "t9", {"README.md": "x\n"})
+        subprocess.run(["git", "-C", str(t9repo), "-c", "user.email=g@x",
+                        "-c", "user.name=gate", "commit", "-q", "-m", "init"],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        rc, out = _invoke(["--sanity", "--registry", str(T / "t3reg.yaml"),
+                           "--repo-root", str(t9repo)])
         expect("T9 sanityも0件=UNDETERMINED", 2, rc)
-        rc, out = _invoke(["--sanity", "--registry", str(T / "t1reg.yaml")])
+        rc, out = _invoke(["--sanity", "--registry", str(T / "t1reg.yaml"),
+                           "--repo-root", str(t9repo)])
         expect("T9b sanity健全台帳=OK", 0, rc)
 
         # ── coverage (--coverage) selftests: cmd_1352b 台帳登録検知 ──
@@ -2084,6 +2366,88 @@ def selftest() -> int:
         rc, out = _invoke(["--registry", str(reg55), "--repo-root", str(board_repo)])
         expect("T55b ★食い違う其の時に名指す★", 0, rc, "HEAD については何も言うておらぬ", out)
 
+        # ── 付帯5: ★負の主張に刃が在るか★ (段1/段2・軍師一号の設計 §4) ──
+        #   ★門を据える者が己の門を検めぬなら、本稿の族をまた踏む★ ゆえ
+        #   設計が挙げた NA-1〜NA-4 を、下の各試験が捕える (対応を行末に記す)。
+        #   ★登録の前に一度 偽にして赤を見た★ = 本 commit の message に実測を刻む。
+        NEG_BANG = ('@test "T-FIX-001: does not emit the banner" {\n'
+                    '  ! grep -q banner out.txt\n}\n')
+        NEG_OK = ('@test "T-FIX-002: does not emit the banner" {\n'
+                  '  if grep -q banner out.txt; then return 1; fi\n}\n')
+        neg_reg_bare = T / "negreg.yaml"
+        _write_reg(neg_reg_bare, [_entry("MUT-NEG-1", "true")])
+        neg_reg_named = T / "negreg2.yaml"
+        _write_reg(neg_reg_named, [dict(_entry("MUT-NEG-2", "true"),
+                                        red_needle="not ok 1 T-FIX-002")])
+
+        # T56 [NA-1/NA-3]: 段1 = 刃を持たぬ `!` を ★FAIL(1)★ で名指す (UNDETERMINED へ倒さぬ)
+        r56 = _mk_git_repo(T / "neg56", {"tests/a.bats": NEG_BANG})
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r56)])
+        expect("T56 段1 `!` を FAIL で名指す", 1, rc, "刃を持たぬ負の主張", out)
+
+        # T57 (負例): 倒した後の形 (if …; then return 1) を 段1 は ★通す★ = 過剰でない
+        r57 = _mk_git_repo(T / "neg57", {"tests/a.bats": NEG_OK})
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r57)])
+        expect("T57 段1 正しい形は通す", 2, rc, "[段1] OK", out)
+
+        # T58 [NA-2]: 段2 = 台帳が名指しておらぬ負の主張を ★UNDETERMINED(2)★ で数える
+        expect("T58 段2 未登録を数える", 2, rc, "誰も証しておらぬ 1 本", out)
+        expect("T58b 段2 は FAIL にせぬ (全軍の commit を塞がぬ)", 2, rc, "分母", out)
+
+        # T59 [NA-2]: red_needle が試験 ID を名指しておれば ★緑★ (逆引きが現に効いておる証)
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_named),
+                           "--repo-root", str(r57)])
+        expect("T59 段2 名指しあり=緑", 0, rc, "台帳が刃を証しておるのは 1 本", out)
+
+        # T60 [NA-4]: ★段2 の走査母集団は追跡下に限らぬ★ = git ls-files へ狭めれば
+        #   分母が 0 へ落ち、★「未登録 0 件」という偽の 0★ が出る (設計 §4 が最も高くつくと
+        #   名指した形)。★NEG_OK を使う★= `!` を持たぬゆえ段1 は緑 ⇒ ★此の試験は段2 だけを縛る★。
+        #   ★初版は NEG_BANG を使うており、段1 (五号の門) の性質しか縛っておらなんだ★ =
+        #   ★母集団を追跡下へ狭める変異を当てても緑であった (2026-07-27 03:1x 実測)★ =
+        #   ★己の牙が己の層を一文字も縛っておらぬ★を、登録前の実射が捕えた。
+        r60 = _mk_git_repo(T / "neg60", {"README.md": "x\n"})
+        (r60 / "tests").mkdir(parents=True, exist_ok=True)
+        (r60 / "tests" / "untracked.bats").write_text(NEG_OK, encoding="utf-8")
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r60)])
+        expect("T60 ★段2 は未追跡の .bats も数える★", 2, rc, "untracked.bats", out)
+
+        # T60b: ★段1 も未追跡を見る★ (五号の門の性質を、繋いだ我らの側からも縛る)
+        (r60 / "tests" / "untracked_bang.bats").write_text(NEG_BANG, encoding="utf-8")
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r60)])
+        expect("T60b ★段1 も未追跡の .bats を名指す★", 1, rc, "untracked_bang.bats", out)
+
+        # T61: .bats が 0 file = ★測れておらぬ★ (分母 0 を緑にせぬ・真空 PASS 禁)
+        r61 = _mk_git_repo(T / "neg61", {"README.md": "x\n"})
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r61)])
+        expect("T61 分母0=測れておらぬ", 2, rc, "測れておらぬ", out)
+
+        # T62: vendored (bats-assert/support) は走査せぬ = 第三者の規律へ手を出さぬ
+        r62 = _mk_git_repo(T / "neg62",
+                           {"tests/test_helper/bats-assert/x.bats": NEG_BANG})
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r62)])
+        expect("T62 vendored は走査せぬ", 2, rc, "測れておらぬ", out)
+
+        # T63: pre-commit (--sanity) は ★触った .bats の分だけ★ 見る (常に鳴る門にせぬ)
+        #   _mk_git_repo は add まで撃つゆえ、index には全 file が載っておる = 触った扱い
+        rc, out = _invoke(["--sanity", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r57)])
+        expect("T63 sanity 触った .bats を見る", 2, rc, "此の commit が触る .bats 1 file", out)
+
+        # T64: 触った .bats が 1 file も無ければ ★【対象なし】と名乗って通す★
+        #   (★緑ではなく対象なしである★ を文言で言わせる = 黙った緑を作らぬ)
+        subprocess.run(["git", "-C", str(r57), "-c", "user.email=g@x",
+                        "-c", "user.name=gate", "commit", "-q", "-m", "init"],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        rc, out = _invoke(["--sanity", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r57)])
+        expect("T64 sanity 触っておらぬ=対象なしで通す", 0, rc, "1 file も触っておらぬ", out)
+
         # T50: ★gate の実出力の語が docs に在ること★ (cmd_1382 差し戻し・軍師二号)
         #   ★書いた場所と読まれる場所を揃える★ = 赤を見た者が docs を grep して辿り着けるか。
         #   ★語が食い違えば此処が赤くなる★ ゆえ、次に出力を整理する者が黙って道を切れぬ。
@@ -2108,7 +2472,9 @@ def selftest() -> int:
             missing = [w for w in ("同一の綴り置換", "過大申告", "撃たなんだ候補",
                                    "着弾を測れなんだ", "行の塊",
                                    "HEAD については何も言うておらぬ",
-                                   "interpreter に届かぬ")
+                                   "interpreter に届かぬ",
+                                   # 付帯5 (負の主張の刃・2026-07-27)
+                                   "誰も証しておらぬ", "対象なし")
                        if w not in doc_txt]
             expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
                    0, len(missing))
@@ -2128,6 +2494,8 @@ def main() -> int:
     ap.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     ap.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     ap.add_argument("--sanity", action="store_true")
+    ap.add_argument("--negative-assertions", action="store_true",
+                    help="付帯5: 負の主張に刃が在るかの段1/段2 を単独で撃つ (未登録を全数 印字)")
     ap.add_argument("--coverage", action="store_true",
                     help="cmd_1352b: 変異testらしき file が台帳に登録されておるかの検知層")
     ap.add_argument("--selftest", action="store_true")
@@ -2145,8 +2513,13 @@ def main() -> int:
         return selftest()
     if a.tree_census:
         return tree_census(a.registry, a.watched_file, a.projects, a.attempted_file)
+    if a.negative_assertions:
+        rc, lines = negative_assertion_audit(a.registry, a.repo_root, verbose=True)
+        for ln in lines:
+            print(ln)
+        return rc
     if a.sanity:
-        return sanity(a.registry)
+        return sanity(a.registry, a.repo_root)
     if a.coverage:
         return coverage(a.registry, a.repo_root)
     return run_all(a.registry, a.repo_root)

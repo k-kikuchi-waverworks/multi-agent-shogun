@@ -15,7 +15,12 @@
 
 setup() {
     REPO="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-    SCAN="$REPO/scripts/stall_watchdog_scan.py"
+    # ★複写へ当てる口は【三 suite で 1 つ】である★ (cmd_1394 同族・2026-07-27):
+    #   ★片方だけに口を開ける形は、次に来た者が必ず踏む★ — 拙者が現に踏んだ =
+    #   ★複写へ当てた変異が此の suite だけ本番を撃ち、緑を返した★。
+    #   ⇒ 名を suite ごとに分けず ★根 (scripts/ を持つ木) を 1 つの変数で指す★。
+    STALL_SCAN_ROOT="${STALL_SCAN_ROOT:-$REPO}"
+    SCAN="$STALL_SCAN_ROOT/scripts/stall_watchdog_scan.py"
     Q="$(mktemp -d)"
     mkdir -p "$Q/tasks" "$Q/reports"
 }

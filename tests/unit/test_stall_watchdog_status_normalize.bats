@@ -33,11 +33,12 @@
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-    # ★番人は cron (15分毎) で現に走っておる★ ⇒ 変異は【複写】へ当てる
-    # (test_stall_watchdog_scan.bats と同じ流儀)。★之が無ければ、複写へ当てた変異が
-    # interpreter へ届かず【本番を撃って緑】= 偽の安心になる (2026-07-27 に現に踏んだ)★。
-    export SCAN_SH="${STALL_SCAN_SH_OVERRIDE:-$PROJECT_ROOT/scripts/stall_watchdog_scan.sh}"
-    export SCAN_PY="$PROJECT_ROOT/scripts/stall_watchdog_scan.py"
+    # ★番人は cron (15分毎) で現に走っておる★ ⇒ 変異は【複写】へ当てる。
+    # ★之が無ければ、複写へ当てた変異が interpreter へ届かず【本番を撃って緑】=
+    # 偽の安心になる (2026-07-27 に現に踏んだ)★。★口は三 suite で 1 つ★。
+    export STALL_SCAN_ROOT="${STALL_SCAN_ROOT:-$PROJECT_ROOT}"
+    export SCAN_SH="$STALL_SCAN_ROOT/scripts/stall_watchdog_scan.sh"
+    export SCAN_PY="$STALL_SCAN_ROOT/scripts/stall_watchdog_scan.py"
     [ -f "$SCAN_SH" ] || return 1
     [ -f "$SCAN_PY" ] || return 1
     "$PROJECT_ROOT/.venv/bin/python3" -c "import yaml" 2>/dev/null || return 1

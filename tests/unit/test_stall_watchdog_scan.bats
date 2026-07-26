@@ -15,11 +15,13 @@
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
-    # ★番人は cron (15分毎) で現に走っておる★ ⇒ 変異は【複写】へ当てる。
-    # STALL_SCAN_SH_OVERRIDE を与えれば其の複写を撃つ (test_idle_revive_proc_age.bats
-    # の SCAN_PY_OVERRIDE と同じ流儀 = ★半端な状態の本番を走らせぬ★)。
-    export SCAN_SH="${STALL_SCAN_SH_OVERRIDE:-$PROJECT_ROOT/scripts/stall_watchdog_scan.sh}"
-    export SCAN_PY="$PROJECT_ROOT/scripts/stall_watchdog_scan.py"
+    # ★番人は cron (15分毎) で現に走っておる★ ⇒ 変異は【複写】へ当てる
+    # (★半端な状態の本番を走らせぬ★)。
+    # ★口は三 suite で 1 つ = STALL_SCAN_ROOT★ — 名を suite ごとに分ければ、
+    # ★片方にだけ口が開いた状態★ が生まれ、次に来た者が必ず踏む (拙者が現に踏んだ)。
+    export STALL_SCAN_ROOT="${STALL_SCAN_ROOT:-$PROJECT_ROOT}"
+    export SCAN_SH="$STALL_SCAN_ROOT/scripts/stall_watchdog_scan.sh"
+    export SCAN_PY="$STALL_SCAN_ROOT/scripts/stall_watchdog_scan.py"
     [ -f "$SCAN_SH" ] || return 1
     [ -f "$SCAN_PY" ] || return 1
     "$PROJECT_ROOT/.venv/bin/python3" -c "import yaml" 2>/dev/null || return 1
@@ -305,4 +307,50 @@ EOF
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "ACTION=report_unreadable AGENT=ashigaru3"
     echo "$output" | grep -q "判じられぬゆえ hits に載らぬ"
+}
+
+# =============================================================================
+# T-014 (家老 04:20 の規の訂正・★契約の値は焼き付けよ★)
+#
+# ★第三の盲がある★ — 家老が並べた表は二つを分けた:
+#   ★他所から導かれる【事実】★ を焼き付ける → 他人が動かせば黙って偽になる (いけぬ)
+#   ★我らが決めた【契約の値】★ を焼き付ける → 誰かが動かせば必ず赤くなる (よい)
+# ★然るに本 suite は【契約の値を引数で上書きして】撃っておった★ (--threshold-min 30) =
+#   ★焼き付けても居らず、実行時に読んでも居らぬ = 契約の値が試験の目の外に在る★。
+# ★実測 (2026-07-27 04:0x)★= production の DEFAULT_THRESHOLD_MIN を 30 → 300 (10倍) へ
+#   動かしても ★3 suite 32/32 が緑のまま★ であった = ★動かす変異に対して完全に盲★。
+#
+# ⇒ ★契約の値を此処に【宣言】し、production と突合する★。
+#   ★意図して動かすなら、下の declared も直せ★ = ★其の一行が【意図の記録】になる★
+#   (「黙って動いた」と「意図して動かした」を分ける唯一の場所)。
+# =============================================================================
+@test "T-014: the contract values are declared here and must match production (a moved default goes red)" {
+    run "$PROJECT_ROOT/.venv/bin/python3" - <<'PY'
+import importlib.util, os
+spec = importlib.util.spec_from_file_location("sw", os.environ["SCAN_PY"])
+sw = importlib.util.module_from_spec(spec); spec.loader.exec_module(sw)
+
+# ★契約 (焼き付ける = 動けば赤くなるのが正しい)★
+DECLARED = {
+    # 「report が完遂を名乗ってから N 分で帳簿漏れと判ずる」= cmd_552 以来の約束。
+    # cron も同じ値を明示で渡しておる (*/15 … --threshold-min 30)。
+    "DEFAULT_THRESHOLD_MIN": 30,
+    # 「同じ漏れを鳴らし直すまで N 分 待つ」= ★常に赤い検知は無視されて死ぬ★ (cmd_1359)。
+    "DEFAULT_COOLDOWN_MIN": 360,
+}
+bad = []
+for name, want in DECLARED.items():
+    got = getattr(sw, name, None)
+    if got != want:
+        bad.append(f"{name}: 宣言 {want} ≠ 実装 {got}")
+if bad:
+    raise SystemExit(
+        "★契約と実装が割れておる★ (どちらへも寄らず、割れを名乗る):\n  "
+        + "\n  ".join(bad)
+        + "\n  ⇒ 意図して動かしたのなら、本試験の DECLARED も直せ"
+          " (其の一行が【意図の記録】になる)")
+print("OK contract values match:", DECLARED)
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OK contract values match"
 }

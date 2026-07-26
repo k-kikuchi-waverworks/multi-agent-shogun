@@ -257,8 +257,55 @@ _HEALTHY = (
     "    - 二つ目\n"
 )
 
+# ══════════════════════════════════════════════════════════════════════════
+# ★前提を焼き付けぬ★ — M2/M2n の stem は【借りた表そのものから立てる】
+#
+# ★何故こう書き直したか (cmd_1404・2026-07-27 03:2x・実害が現に出た)★
+#   初版は M2 の stem に 'gunshi1_report' を ★焼き付けて★おった。当時 其の綴りは
+#   slim_yaml の除外表に ★無かった★ ゆえ、R2 (除外表の外なら safe_load 落ちを咎める)
+#   が現に発火し、緑を採れておった。
+#   ⇒ ★其の 14 分後、同じ拙者が cmd_1397-B (d4c3f89 01:39) で gunshi1/gunshi2 を
+#      除外表へ加えた★ ⇒ ★M2 の前提 (此の stem は表の外に在る) が偽になった★ ⇒
+#      門は無変異のまま rc=1 になり、三号が 03:1x に「建てた其の日に死んでおる門」
+#      として掘り当てた (bbfba81=緑 / d4c3f89=赤 を git archive で二分して確かめた)。
+#   ★門の判定規則 (R1-R4) は一文字も壊れておらなんだ★= 腐ったのは ★試験の前提★ である。
+#   ★而も M2 は M2n と同じ側 (表の中) へ黙って移り、R2 の【表の外】の枝を
+#     誰も撃たぬ形になっておった★= 数は減らず、守りだけが消える型。
+#
+#   ⇒ ★処方 = 前提を保存せず、前提を立て直す口を保存する★ (本夜の一般形)。
+#     表の中/外の stem を ★実行時に表から採る★ ゆえ、表がどう変わっても
+#     M2 は常に【表の外】を、M2n は常に【表の中】を撃つ。★二度と黙って移らぬ★。
+#     採れなんだ時は ★NG として名乗る★ (黙って skip すれば同じ穴が開く)。
+# ══════════════════════════════════════════════════════════════════════════
+def _stem_outside_table() -> tuple[str | None, str]:
+    """★除外表の【外】に在ると機械で確かめた stem★ を返す。(stem, 説明)。"""
+    if CANONICAL_REPORTS is None:
+        return None, "除外表を借りられておらぬ (B1 が既に名乗っておる)"
+    for i in range(1, 1000):
+        cand = f"zz_outside_table_{i}_report"
+        if cand not in CANONICAL_REPORTS:
+            return cand, f"表 {len(CANONICAL_REPORTS)} 件の外から採った ('{cand}')"
+    return None, "表の外の stem を採れなんだ (1000 候補すべて表の中)"
+
+
+def _stem_inside_table() -> tuple[str | None, str]:
+    """★除外表の【中】に現に在る stem★ を返す。(stem, 説明)。"""
+    if CANONICAL_REPORTS is None:
+        return None, "除外表を借りられておらぬ (B1 が既に名乗っておる)"
+    if not CANONICAL_REPORTS:
+        return None, "表が空 = 表の中の stem が採れぬ (★0 件は緑ではない★)"
+    cand = sorted(CANONICAL_REPORTS)[0]
+    return cand, f"表 {len(CANONICAL_REPORTS)} 件の中から採った ('{cand}')"
+
+
+_MULTIDOC = _HEALTHY + "---\ncmd_9002_example:\n  status: done\n"
+
+
 # (名, 本文, stem, 期待する赤の needle。None = 緑であるべき)
-_CASES = [
+def _cases() -> list[tuple[str, str, str | None, str | None]]:
+    out_stem, _ = _stem_outside_table()
+    in_stem, _ = _stem_inside_table()
+    return [
     (
         "M1 孤児 list (軍師一号が本夜 現に踏んだ機序 = list の途中へ mapping を挿す)",
         "cmd_9001_example:\n  items:\n    - 一つ目\n    key: 割り込み\n    - 孤児\n",
@@ -266,15 +313,15 @@ _CASES = [
         "[R1]",
     ),
     (
-        "M2 多 document ＆ slim_yaml の除外表に無い stem",
-        _HEALTHY + "---\ncmd_9002_example:\n  status: done\n",
-        "gunshi1_report",
+        "M2 多 document ＆ slim_yaml の除外表に【無い】stem (stem は表から立てる)",
+        _MULTIDOC,
+        out_stem,
         "[R2]",
     ),
     (
-        "M2n 同じ多 document なれど除外表に在る stem = ★緑★ (読み手が読まぬゆえ)",
-        _HEALTHY + "---\ncmd_9002_example:\n  status: done\n",
-        "ashigaru3_report",
+        "M2n 同じ多 document なれど除外表に【在る】stem = ★緑★ (読み手が読まぬゆえ)",
+        _MULTIDOC,
+        in_stem,
         None,
     ),
     (
@@ -290,7 +337,7 @@ _CASES = [
         "[R4]",
     ),
     ("N1 無改変 = ★緑★", _HEALTHY, "ashigaru1_report", None),
-]
+    ]
 
 
 def selftest() -> int:
@@ -303,7 +350,36 @@ def selftest() -> int:
         print(f"  NG  B1 slim_yaml の除外表を借りられなんだ = ★R2 が黙って消えておる★: {BORROW_ERROR}")
     else:
         print(f"  ok  B1 除外表を借りられた ({len(CANONICAL_REPORTS)} 件)")
-    for name, text, stem, needle in _CASES:
+
+    # ★B2 = 前提そのものを名乗る★ (cmd_1404)。M2/M2n は「表の外/中」を撃つ試験ゆえ、
+    #   其の stem が現に外/中に在ることを ★先に言葉で出す★。焼き付けた綴りが黙って
+    #   反対側へ移った (cmd_1397-B) のが今回の事故の機序である。
+    out_stem, out_why = _stem_outside_table()
+    in_stem, in_why = _stem_inside_table()
+    #   ★立てた口を信ぜず、立った物を表へ当て直す★= 誰かが再び綴りを焼き付けても
+    #   (今回の事故の再演)、此処が【前提が反対側に在る】と名指す。
+    for label, stem, why, want_inside in (
+        ("表の外", out_stem, out_why, False),
+        ("表の中", in_stem, in_why, True),
+    ):
+        if stem is None:
+            ok = False
+            print(f"  NG  B2 {label} の stem を立てられなんだ = ★M2/M2n の前提が崩れておる★: {why}")
+            continue
+        inside = CANONICAL_REPORTS is not None and stem in CANONICAL_REPORTS
+        if inside != want_inside:
+            ok = False
+            print(f"  NG  B2 {label} を撃つ筈の stem '{stem}' が ★実際には表の"
+                  f"{'中' if inside else '外'}に在る★ = ★前提が反対側へ移っておる★"
+                  f" (cmd_1397-B で現に起きた型・{why})")
+        else:
+            print(f"  ok  B2 {label} の stem を表から立て、表へ当て直して確かめた: {why}")
+
+    for name, text, stem, needle in _cases():
+        if stem is None:
+            ok = False
+            print(f"  NG  {name} / ★前提の stem を立てられず撃てなんだ★ (B2 を見よ)")
+            continue
         problems = validate_text(text, stem)
         got_red = bool(problems)
         if needle is None:

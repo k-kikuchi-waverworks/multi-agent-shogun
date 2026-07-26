@@ -39,20 +39,110 @@ _read_body_file() {
     fi
     cat "$1"
 }
+# ★どの口から本文が入ったか★ (cmd_1371) — 道具は【必ず】これを知っておる。
+#   argv  = shell を通った   (食われた痕跡は残らぬ = 道具側では原理的に検知不能)
+#   stdin = shell を通らぬ   (引用符つき heredoc / pipe)
+#   file  = shell を通らぬ
+# ★末尾改行を守る作法★ (cmd_1371 の実射が拙者の実装欠陥を捕えた)
+#   command substitution $(...) は ★末尾の改行を黙って剥がす★。
+#   引用符つき heredoc の本文は必ず改行で終わるゆえ、素直に書くと
+#   ★「shell を通らぬ安全な口」を名乗りながら、末尾の1文字を黙って落としておった★。
+#   = 本 cmd が退けておる「黙って欠ける」の、拙者自身による小型再現である。
+#   sentinel 文字を継いでから剥がすことで、原文を1 byte も動かさぬ。
+#   ※ _read_body_file が exit 1 する時は sentinel へ到達せぬゆえ set -e が正しく効く。
+_slurp_stdin() { cat; printf 'x'; }
+IW_VIA="argv"
 case "$CONTENT" in
     --stdin|--body-stdin|-)
-        CONTENT="$(cat)"
+        CONTENT="$(_slurp_stdin)"; CONTENT="${CONTENT%x}"
+        IW_VIA="stdin"
         ;;
     --content-file=*|--body-file=*)
-        CONTENT="$(_read_body_file "${CONTENT#*=}")"
+        CONTENT="$(_read_body_file "${CONTENT#*=}"; printf 'x')"; CONTENT="${CONTENT%x}"
+        IW_VIA="file"
         ;;
     --content-file|--body-file)
         # 空白区切り形: 本文 file が $3 へ来るゆえ type/from が1つずつ後ろへずれる
-        CONTENT="$(_read_body_file "${3:-}")"
+        CONTENT="$(_read_body_file "${3:-}"; printf 'x')"; CONTENT="${CONTENT%x}"
         TYPE="${4:-}"
         FROM="${5:-}"
+        IW_VIA="file"
         ;;
 esac
+
+# ── cmd_1371: ★関所が【此の pane で】生きておるかを測る★ ───────────────────
+# ★なぜ要るのか (実測)★ 2026-07-26 の一日で、関所が DENY と判ずる命令 38 件のうち
+#   ★36 件がすり抜けた★。四号の原文を関所へ食わせると DENY = ★関所は正しかった。
+#   呼ばれておらなんだだけである★。⇒ 穴は「関所が無いこと」でなく
+#   ★【関所が在るのに効いておるか誰も知らぬこと】★ であった。
+# ★この検査が答える問い / 答えぬ問い (網の狭さを名乗る)★
+#   答える = 「関所は此の pane で走っておるか」
+#   答えぬ = 「此の本文が実際に検められたか」
+#            (script の内側から本 script を呼ぶ経路を、関所は元より見ておらぬ)
+_HB_FRESH_SEC=90
+# ★鍵の順は関所側と【必ず揃えよ】★ (cmd_1371 — 実測が拙者の非対称を捕えた)
+#   関所は TMUX_PANE → payload の session_id の順で鍵を選ぶ。
+#   ★初版の道具は TMUX_PANE しか見ておらなんだ★ ゆえ、tmux pane を持たぬ経路
+#   (将軍がまさにそれであった) は ★関所が現に生きておるのに永久に UNPROTECTED★ を
+#   名乗る形になっておった = ★常に赤い門は信用されず、必ず外される★ =
+#   本日ずっと退けてきた形を、拙者が新しく作りかけておった。
+#   実測: 心拍 dir に将軍の session_id 鍵が 329 秒前の心拍を持っておるのに、
+#         将軍の 15:20:18 の entry は guard=outside-pane / safety=UNPROTECTED であった。
+_guard_key() {
+    if [ -n "${TMUX_PANE:-}" ]; then printf '%s' "$TMUX_PANE"; return 0; fi
+    if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ]; then printf '%s' "$CLAUDE_CODE_SESSION_ID"; return 0; fi
+    return 1
+}
+_guard_state() {
+    local key raw ts age
+    if ! key="$(_guard_key)"; then
+        # tmux pane も session も無い (cron / script / CI) = 関所は元より掛からぬ経路である
+        echo "outside-pane"; return 0
+    fi
+    # ★関所側 (python) の正規化と1文字も違えぬ★ = 綴りが割れれば鍵が割れ、
+    #   「関所は心拍を残しておるのに道具は見つけられぬ」= 逃げ場の無い門になる。
+    key="$(printf '%s' "$key" | tr -c 'A-Za-z0-9_.-' '_' | cut -c1-64)"
+    local hb="$SCRIPT_DIR/queue/.shell_guard_heartbeat/$key"
+    [ -f "$hb" ] || { echo "absent"; return 0; }
+    raw="$(cat "$hb" 2>/dev/null || true)"
+    ts="${raw%% *}"
+    case "$ts" in ''|*[!0-9.]*) echo "unreadable"; return 0 ;; esac
+    # ★date +%s で採る★ = awk の systime() は mawk/gawk で在否が割れるゆえ
+    #   「道具が環境で黙って別の振舞をする」形を作らぬ。
+    age=$(( $(date +%s) - ${ts%%.*} ))
+    if [ "$age" -le "$_HB_FRESH_SEC" ]; then echo "live"; else echo "stale"; fi
+}
+IW_GUARD="$(_guard_state)"
+
+# ★札を三値で決める★ = 未検証を「守られておる」に混ぜぬ (三値化の作法)
+#   by-construction = shell を通っておらぬゆえ本穴が原理的に存在せぬ
+#   by-guard        = shell を通ったが、関所が此の pane で生きておる
+#   UNPROTECTED     = shell を通り、且つ関所が走った証が無い ← 四号が踏んだ形
+# ★言葉の線を跨がぬ (家老 2026-07-26 規律「存在は証せるが不在は証せぬ」)★
+#   心拍が【在る】= 関所が走ったことの証明 (存在の証明ゆえ堅い)。
+#   心拍が【無い】= ★「関所が死んでおる」の証明ではない★ = 走った証を我らが持たぬ、だけである。
+#   ⇒ UNPROTECTED は関所の生死についての断定ではなく
+#     ★「守られておると我らは言えぬ」★ という、我らの側の申告である。
+#     未検証を緑へ混ぜぬため、言えぬ側は赤へ倒す。
+if [ "$IW_VIA" != "argv" ]; then
+    IW_SAFETY="by-construction"
+elif [ "$IW_GUARD" = "live" ]; then
+    IW_SAFETY="by-guard"
+else
+    IW_SAFETY="UNPROTECTED"
+fi
+
+# ★強制したい者のための口★ = 既定は off (在走中の全 agent の呼出を壊さぬため)。
+#   ★禁ずるのは【黙って配ること】ではなく、この口を立てた者に対しては【危うい口そのもの】★。
+if [ "${IW_REQUIRE_SAFE_BODY:-0}" = "1" ] && [ "$IW_VIA" = "argv" ]; then
+    echo "[inbox_write] REJECTED: IW_REQUIRE_SAFE_BODY=1 の下では本文を位置引数で渡せぬ" >&2
+    echo "[inbox_write]   位置引数 = shell が道具へ渡す【前に】本文を評価する経路ゆえ。" >&2
+    echo "[inbox_write]   引用符つき heredoc を使え:" >&2
+    echo "[inbox_write]     bash scripts/inbox_write.sh <target> --body-stdin <type> <from> <<'EOF'" >&2
+    echo "[inbox_write]     本文をここへ (backtick も ドル記号 も原文どおり届く)" >&2
+    echo "[inbox_write]     EOF" >&2
+    exit 1
+fi
 
 # Deprecated gunshi redirect (write-layer): gunshi/gunshi_a/gunshi_b → active gunshi (Round-robin)
 # Ensures ashigaru reports land in active gunshi1/2 inboxes regardless of caller using deprecated name.
@@ -179,7 +269,41 @@ export IW_MSG_ID="$MSG_ID"
 export IW_FROM="$FROM"
 export IW_TIMESTAMP="$TIMESTAMP"
 export IW_TYPE="$TYPE"
-export IW_CONTENT="$CONTENT"
+# ── cmd_1371: ★本文だけは環境変数へ載せぬ★ ──────────────────────────────
+# ★規模の層の実測が捕えた欠陥 (cmd_1363 版から在った・拙者が作った物ではない)★
+#   本文を export すると、以後この shell が呼ぶ ★全ての外部 command★ の
+#   environ に本文が積まれる。本文が 10万字級になると環境が ARG_MAX を越え、
+#   ★sleep すら exec できず (Argument list too long)、lock が取れず配達が落ちる★。
+#   ⇒ ★長文の本命として我らが勧めておる --content-file / --body-stdin が、
+#     まさに長文で壊れる★ = 勧めた逃げ道が新しい穴になっておった。
+#   実測: 60,000 字の本文を HEAD 版へ file 経路で渡すと entry 0 件で配達失敗。
+#   ⇒ 本文は ★file で渡す★ (path だけを環境変数に載せる)。
+#     ★python source へ補間はせぬ★ = cmd_1345 の教訓 (backslash/quote 事故) は不変。
+IW_BODY_TMP="$(mktemp "${TMPDIR:-/tmp}/iw_body.XXXXXX")"
+_cleanup_body_tmp() { rm -f "$IW_BODY_TMP" 2>/dev/null || true; }
+# ★配達に失敗した時だけは本文を残す★ (cmd_1371 — 足軽五号の具申 2026-07-26)
+#   ★agent の context は揮発する = 送信前の本文はどこにも永続しておらぬ★。
+#   実害で判った: 拙者が本 script を編んでおる最中の窓で五号の3通が落ちた時、
+#   ★五号の側にも /clear で原文が残っておらず「そのまま再送」が果たせなんだ★。
+#   ⇒ 道具は本文を既に file へ持っておる。★落ちた時に消さねば、再送できる★。
+#   成功時は残さぬ (本文が /tmp や repo へ散り続ける方が害ゆえ)。
+_preserve_body_on_failure() {
+    local dest="$SCRIPT_DIR/queue/.inbox_write_undelivered"
+    mkdir -p "$dest" 2>/dev/null || return 0
+    local out="$dest/${MSG_ID}.txt"
+    cp "$IW_BODY_TMP" "$out" 2>/dev/null || return 0
+    echo "[inbox_write] ★送信を試みた本文を残した★: $out" >&2
+    echo "[inbox_write]   再送: bash scripts/inbox_write.sh $TARGET --content-file $out $TYPE $FROM" >&2
+}
+trap _cleanup_body_tmp EXIT
+printf '%s' "$CONTENT" > "$IW_BODY_TMP"
+export IW_CONTENT_FILE="$IW_BODY_TMP"
+# cmd_1371: ★経路の札を entry へ焼く★ = 受け手 (家老) が
+#   「此の文は守られた経路で来たのか」を、送り手の申告でなく機械の記録で判別できる。
+#   ★stderr へ出すだけでは足りぬ★ = 出力は流れて消え、次に読む者には残らぬ。
+export IW_VIA
+export IW_GUARD
+export IW_SAFETY
 
 # cmd_1355 (軍師束ねQC具申R2): fresh clone には .venv が無い — ★警報を「鳴らす経路」自体が
 # 復旧シナリオで落ちると、番人 (idle_revive_scan / gate_nightly) の警報が3回retry後に
@@ -197,7 +321,7 @@ fi
 
 while [ $attempt -lt $max_attempts ]; do
     if _acquire_lock; then
-        trap _release_lock EXIT
+        trap '_release_lock; _cleanup_body_tmp' EXIT
         # 書く前の姿を控える (cmd_1363): 本文が変質して届いた時に ★壊れた entry を
         # 残したまま去らぬ★ ため。content 不一致は決定的ゆえ retry しても同じ結果になり、
         # retry すれば同じ id の entry が3つ積まれる = 直す気の穴を新しく開けることになる。
@@ -205,6 +329,12 @@ while [ $attempt -lt $max_attempts ]; do
         cp "$INBOX" "$_IW_BACKUP" 2>/dev/null || true
         if "$IW_PYTHON" -c '
 import os, sys, yaml
+
+def _read_body():
+    # cmd_1371: 本文は file から読む (環境変数へ載せると長文で exec が壊れる)。
+    # errors="surrogateescape" = 旧 os.environ 経由と同じ非UTF8 の扱いを保つ。
+    with open(os.environ["IW_CONTENT_FILE"], encoding="utf-8", errors="surrogateescape") as f:
+        return f.read()
 
 try:
     inbox = os.environ["IW_INBOX"]
@@ -225,8 +355,12 @@ try:
         "from": os.environ["IW_FROM"],
         "timestamp": os.environ["IW_TIMESTAMP"],
         "type": os.environ["IW_TYPE"],
-        "content": os.environ["IW_CONTENT"],
-        "read": False
+        "content": _read_body(),
+        "read": False,
+        # cmd_1371: 本文が入った口と、関所の生死。★UNPROTECTED は黙って消えぬ★
+        "via": os.environ.get("IW_VIA", "argv"),
+        "guard": os.environ.get("IW_GUARD", "unknown"),
+        "safety": os.environ.get("IW_SAFETY", "UNPROTECTED"),
     }
     data["messages"].append(new_msg)
 
@@ -278,7 +412,9 @@ try:
     hit = [m for m in (data.get("messages") or []) if m.get("id") == os.environ["IW_MSG_ID"]]
     if not hit:
         print("entry not found after write", file=sys.stderr); sys.exit(1)
-    got, want = hit[-1].get("content"), os.environ["IW_CONTENT"]
+    with open(os.environ["IW_CONTENT_FILE"], encoding="utf-8", errors="surrogateescape") as _bf:
+        want = _bf.read()
+    got = hit[-1].get("content")
     if got != want:
         print("CONTENT MISMATCH after write (本文が届く途中で変わった)", file=sys.stderr)
         print(f"  wrote(len={len(want)}): {want[:120]!r}", file=sys.stderr)
@@ -295,9 +431,10 @@ except Exception as e:
                     # 壊れた entry を残さぬよう書く前の姿へ戻す (黙って壊れた文を配らぬ)。
                     cp "$_IW_BACKUP" "$INBOX" 2>/dev/null || true
                     rm -f "$_IW_BACKUP"
-                    _release_lock; trap - EXIT
+                    _release_lock; trap _cleanup_body_tmp EXIT
                     echo "[inbox_write] FATAL: 本文が変質して届いた ($MSG_ID) — ★配達を取り消し書込前へ戻した★。" >&2
                     echo "[inbox_write]        送り手は本文を検めて再送せよ (message は配達されておらぬ)。" >&2
+                    _preserve_body_on_failure
                     exit 1
                 fi
                 echo "[inbox_write] VERIFY FAILED: $MSG_ID content mismatch in $INBOX" >&2
@@ -306,9 +443,21 @@ except Exception as e:
         fi
         rm -f "$_IW_BACKUP"
         _release_lock
-        trap - EXIT
+        trap _cleanup_body_tmp EXIT
         if [ $STATUS -eq 0 ]; then
-            echo "[inbox_write] OK: $MSG_ID -> $TARGET" >&2
+            # ★OK の行そのものに経路を焼く★ (cmd_1371) = 四号が踏んだのは
+            #   ★道具が [OK] を返しながら本文が欠けておった★ 形ゆえ、
+            #   ★[OK] を「無条件の安心」として読ませぬ★。
+            echo "[inbox_write] OK: $MSG_ID -> $TARGET (経路=$IW_VIA 関所=$IW_GUARD 守り=$IW_SAFETY)" >&2
+            if [ "$IW_SAFETY" = "UNPROTECTED" ]; then
+                echo "[inbox_write] ★守られておらぬ経路で配った★ — 本文は shell を通り、且つ関所が走った証が無い。" >&2
+                echo "[inbox_write]   ⇒ backtick / ドル記号+丸括弧 / 未定義のドル変数 を書いておれば" >&2
+                echo "[inbox_write]     ★道具に届く前に消えており、道具にも受け手にも判らぬ★ (痕跡が残らぬゆえ)。" >&2
+                echo "[inbox_write]   ⇒ 送った本文を自分の目で読み返せ。以後は引用符つき heredoc を使え:" >&2
+                echo "[inbox_write]     bash scripts/inbox_write.sh <target> --body-stdin <type> <from> <<'EOF'" >&2
+                echo "[inbox_write]     本文をここへ" >&2
+                echo "[inbox_write]     EOF" >&2
+            fi
             exit 0
         fi
         attempt=$((attempt + 1))
@@ -331,4 +480,5 @@ done
 
 # Retry exhausted = message was NOT written. Never fall through silently (cmd_1338).
 echo "[inbox_write] FATAL: message NOT delivered to $TARGET after $max_attempts attempts (from=$FROM, type=$TYPE, msg_id=$MSG_ID). Message is LOST — sender must resend or escalate." >&2
+_preserve_body_on_failure
 exit 1

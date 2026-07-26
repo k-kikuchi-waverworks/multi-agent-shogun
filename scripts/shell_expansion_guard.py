@@ -31,8 +31,11 @@
 from __future__ import annotations
 
 import json
+import os
+import pathlib
 import re
 import sys
+import time
 
 # 本文位置 = その道具の「人が書いた散文」が乗る引数番号 (1-origin)
 GUARDED_TOOLS: dict[str, set[int]] = {
@@ -66,6 +69,62 @@ _UNQUOTED_HEREDOC_RE = re.compile(r"(?<!<)<<-?[ \t]*(?P<delim>[A-Za-z_][A-Za-z0-
 #   食い違えば「guard は逃げ道と認めたのに道具は受け取らぬ」= 逃げ場の無い関所になる。
 #   一致は selftest の contract 検査が機械で見張る (推測で足すな)。
 BODY_SENTINELS = ("--content-file", "--body-file", "--stdin", "--body-stdin")
+
+# ══════════════════════════════════════════════════════════════════════════
+# 心拍 (cmd_1371) — ★関所が【此の pane で】生きておるかを、道具の側から測れる形★
+# ══════════════════════════════════════════════════════════════════════════
+# ★なぜ要るのか (実測から出た)★
+#   cmd_1363 で関所も逃げ道も正しく据えた。にもかかわらず 2026-07-26 の一日で
+#   ★関所が DENY と判ずる命令 38 件のうち 36 件がすり抜けた★ (本日分の全 session
+#   記録を走査して実測・生データ = plans/cmd_1371_guard_leak_census.json)。
+#   四号の原文を採り出して本 guard へ食わせると ★DENY★ = ★関所は正しく判じておった★。
+#   ⇒ ★穴は「関所が無いこと」ではなく【関所が在るのに効いておるか誰も知らぬこと】★。
+#
+# ★Claude Code が hook 宣言をいつ取り込むかは、我らには観測できておらぬ★
+#   (四号の session は関所据付の2時間34分【後】に開始しておるのに、すり抜けた)。
+#   ⇒ ★機序を推測で埋めぬ。機序が判らずとも【判る】形にする★ のが本心拍である。
+#
+# ★この心拍が答える問い / 答えぬ問い (N3 の作法= 網の狭さを名乗る)★
+#   答える  = 「関所は此の pane で走っておるか」
+#   答えぬ  = 「此の本文が実際に検められたか」
+#             (script の内側から inbox_write.sh を呼ぶ経路は、関所は元より見ておらぬ。
+#              関所が見るのは agent が書いた command 文字列 1本だけである)
+HEARTBEAT_DIRNAME = "queue/.shell_guard_heartbeat"
+# 生きておると見なす猶予。PreToolUse は command の直前に走るゆえ通常1秒未満。
+# ★短く採る★ = 長く採れば「守られておらぬ」を「守られておる」と読む側へ倒れる =
+#   本日ずっと退けてきた偽の緑そのものになる。
+HEARTBEAT_FRESH_SEC = 90
+
+
+def heartbeat_key(payload: dict | None = None) -> str:
+    """心拍の鍵。★pane 単位★ = agent 単位で分ける。
+
+    全 agent が同じ repo で走るゆえ、鍵を1つにすると
+    ★関所が死んでおる pane が、隣の pane の心拍を見て「生きておる」と読む★。
+    それは今日 四号に起きたことを、そのまま見逃す形になる。
+    """
+    raw = os.environ.get("TMUX_PANE") or (payload or {}).get("session_id") or "nopane"
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", str(raw))[:64]
+
+
+def heartbeat_dir() -> pathlib.Path:
+    return pathlib.Path(__file__).resolve().parent.parent / HEARTBEAT_DIRNAME
+
+
+def touch_heartbeat(payload: dict | None = None) -> None:
+    """★関所が走った証★ を残す。ALLOW/DENY を問わず必ず残す。
+
+    ★fail-OPEN (loud)★ = 心拍が書けぬことで agent の Bash を止めてはならぬ。
+    """
+    try:
+        d = heartbeat_dir()
+        d.mkdir(parents=True, exist_ok=True)
+        (d / heartbeat_key(payload)).write_text(
+            f"{time.time():.3f} {os.getpid()}\n", encoding="utf-8"
+        )
+    except Exception as exc:
+        print(f"[shell_expansion_guard] WARN: 心拍を残せなんだ — 続行: {exc}",
+              file=sys.stderr)
 
 
 class Segment:
@@ -497,6 +556,7 @@ def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
 
+    payload: dict | None = None
     if "--command" in sys.argv:
         command = sys.argv[sys.argv.index("--command") + 1]
     else:
@@ -506,8 +566,13 @@ def main() -> int:
         except Exception as exc:  # fail-OPEN (loud)
             print(f"[shell_expansion_guard] WARN: stdin JSON 解釈不能 — 通す: {exc}",
                   file=sys.stderr)
+            # ★心拍は残す★ = JSON が読めずとも「関所は呼ばれた」は真ゆえ。
+            touch_heartbeat(None)
             return 0
         command = (payload.get("tool_input") or {}).get("command", "")
+        # ★心拍は hook 経路でのみ残す★ = --command は人が手で撃つ検分用であり、
+        #   それを心拍に数えれば ★検分した者の pane だけが偽って「守られておる」★ になる。
+        touch_heartbeat(payload)
 
     if not command:
         return 0

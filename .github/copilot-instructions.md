@@ -108,23 +108,50 @@ Always include: 1) Agent role (shogun/karo/ashigaru/gunshi) 2) Forbidden actions
 
 ## Mailbox System (inbox_write.sh)
 
-Agent-to-agent communication uses file-based mailbox:
+Agent-to-agent communication uses file-based mailbox.
+
+### 既定の書き方 — ★shell を通さぬ口を使え★ (cmd_1371)
+
+```bash
+# ★これが既定である★ — 引用符つき heredoc。本文に ` も $(…) も $VAR も書けて原文どおり届く
+bash scripts/inbox_write.sh <target_agent> --body-stdin <type> <from> <<'EOF'
+本文をここへ。★記号を避ける必要は無い★
+EOF
+
+# 長文・引用符が入り組む本文は file 渡し (Write tool で本文を書いてから)
+bash scripts/inbox_write.sh <target_agent> --content-file /path/to/body.txt <type> <from>
+```
+
+★`<<'EOF'` と単引用符で囲め★ — 裸の `<<EOF` は本文全体が展開に晒される (関所が止める)。
+
+### 位置引数の形 (後方互換・★危うい★)
 
 ```bash
 bash scripts/inbox_write.sh <target_agent> "<message>" <type> <from>
 ```
 
-Examples:
-```bash
-# Shogun → Karo
-bash scripts/inbox_write.sh karo "cmd_048を書いた。実行せよ。" cmd_new shogun
+★この形は今も動くが、本文は shell を通る★:
+- ` (backtick) は **command として実行され、その位置が出力へ置換される**
+- `$(…)` も同じ / **未定義の `$VAR` は黙って空文字へ落ちる (最も危うい)**
+- ★食われた証拠は道具に届く前に消える★ = 道具も受け手も気付けぬ
 
-# Ashigaru → Gunshi
-bash scripts/inbox_write.sh gunshi "足軽5号、任務完了。品質チェックを仰ぎたし。" report_received ashigaru5
+平文だけを短く書く時に限り使え。**記号を含むなら上の既定の形を使え。**
 
-# Karo → Ashigaru
-bash scripts/inbox_write.sh ashigaru3 "タスクYAMLを読んで作業開始せよ。" task_assigned karo
-```
+### 道具が毎回名乗る (信じてよい経路か)
+
+配達のたび `[inbox_write] OK: … (経路=… 関所=… 守り=…)` が出る。
+`守り` は三値で、**entry (queue/inbox/*.yaml) にも `via` / `guard` / `safety` として焼かれる**:
+
+| 守り | 意味 |
+|------|------|
+| `by-construction` | shell を通っておらぬ = ★この穴が原理的に存在せぬ★ |
+| `by-guard` | shell は通ったが、関所が此の経路で走っておることを確認した |
+| `UNPROTECTED` | shell を通り、且つ**関所が走った証が無い** ← ★送った本文を自分の目で読み返せ★ |
+
+★`UNPROTECTED` は「関所が死んでおる」の断定ではない★ — 走った証を我らが持たぬ、という我らの側の申告である
+(存在は証せるが不在は証せぬ)。未検証を緑に混ぜぬため、言えぬ側は赤へ倒しておる。
+
+厳格に運用したい呼び手は `IW_REQUIRE_SAFE_BODY=1` を立てよ (位置引数の本文を拒む)。
 
 Delivery is handled by `inbox_watcher.sh` (infrastructure layer).
 **Agents NEVER call tmux send-keys directly.**
@@ -229,6 +256,7 @@ System manages ALL white-collar work, not just self-improvement. Project folders
 6. **Skill candidates**: Ashigaru reports include `skill_candidate:`. Karo collects → dashboard. Shogun approves → creates design doc.
 7. **Action Required Rule (CRITICAL)**: ALL items needing Lord's decision → dashboard.md 🚨要対応 section. ALWAYS. Even if also written elsewhere. Forgetting = Lord gets angry.
 8. **Ledger free-text escape (cmd_1255)**: When editing `queue/shogun_to_karo.yaml` (also a write path for Shogun), any free-text field (progress/evidence/note/command) containing `: ` (colon+space) or a leading YAML syntax char MUST use a block scalar `|` (preferred), full quoting, or a full-width colon `：`. A bare `: ` breaks YAML parse and kills the Lord's engine backlog view. `scripts/ledger_guard.sh` watcher auto-recovers (rollback+quarantine+karo warning) as backstop.
+9. **cmd採番は機械gate経由 (cmd_1333)**: 新規cmd番号は `bash scripts/cmd_id_alloc.sh --title "短名" --origin shogun --project <repo> --priority <p> --evidence "1行根拠"` で採番+台帳予約を同時に行う (flock排他・追記のみ・validate込み。長文は `--evidence-file`)。家老も同じ払い出し口を通る — ★台帳を目視して番号を決める手動採番は禁★ (2026-07-25 に1日6件衝突した実害の根絶策)。緊急で entry 本文を手書きする時も★番号だけは `bash scripts/cmd_id_alloc.sh --claim --origin shogun` で払い出せ★ (台帳へ書かず番号のみ予約=手書きより速い)。gate非経由の手動追記は ledger_guard が検知して家老へ是正警告が飛ぶ (cmd_1336)。★焼却番号 (cmd_1341)=一度払い出された番号は台帳に載らなくても再利用されない (journal+耐久mirror `queue/archive/alloc_journal_mirror.yaml` に焼却記録が残る)。欠番を手で埋めるな★。★entry への追記keyは一意名で (`progress_2:` 等)=同名keyはYAML後勝ちで先の記録が黙って消え、ledger_validate が FAIL にする★。
 
 # Test Rules (all agents)
 

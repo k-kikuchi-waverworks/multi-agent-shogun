@@ -249,7 +249,15 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     #   足さねば「通知路が赤いのに、何が起きたか名指しできぬ警告」になる
     #   (cmd_1367 の配布 gate・cmd_1374 の点呼で二度踏んだ轍。三度目は踏まぬ)。
     #   ★角括弧つきの判定行のみを拾う★ = 本文にも語が出るゆえ、語で拾えば集計行が所見を埋める。
-    [ "$ntfy_rc" -ne 0 ] && ntfynote="★殿への通知路が緑でない (cmd_1381)=$(printf '%s' "$ntfy_out" | grep -E '\[NTFY-(DEAD|UNSEATED|STALE|SHAPE|CALENDAR)\]' | fold_lines 3)★ "
+    #   ★NTFY-CRASH を札に加えた (cmd_1381 差し戻し F-2)★= 番人自身が例外で落ちた時、
+    #   旧版は札を1つも持たぬ traceback だけが $ntfy_out に入り ★所見が空の赤★ になった (実測)。
+    if [ "$ntfy_rc" -ne 0 ]; then
+        ntfydetail="$(printf '%s' "$ntfy_out" | grep -E '\[NTFY-(DEAD|UNSEATED|STALE|SHAPE|CALENDAR|CRASH)\]' | fold_lines 3)"
+        # ★【赤いが中身が空】を、空であることを名指しして塞ぐ★ = 拾えなんだ時は黙らず、
+        #   拾えなんだと言うて生の末尾を渡す (家老が log を掘らずに次の手を決められる形)。
+        [ -z "$ntfydetail" ] && ntfydetail="★札つきの所見を1行も拾えなんだ = 番人の出力が想定の形でない★ (生の末尾=$(printf '%s' "$ntfy_out" | tail -3 | fold_lines 3))"
+        ntfynote="★殿への通知路が緑でない (cmd_1381)=${ntfydetail}★ "
+    fi
     msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/engine台帳(cmd_1376)=$(verdict "$rc9")/engine登録検知=$(verdict "$rc10")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")/殿への通知路(cmd_1381)=$(verdict "$ntfy_rc")。${hooknote}${wirenote}${undistnote}${censusnote}${ntfynote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2

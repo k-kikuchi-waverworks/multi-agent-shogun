@@ -1111,21 +1111,13 @@ mutations:
       python3 - <<'PY'
       p = "scripts/gate_ntfy_alive.py"
       s = open(p, encoding="utf-8").read()
-      old = '''    except ValueError as e:
-        # ★cmd_1381 差し戻し F-2 (軍師一号)★= ★UnicodeDecodeError は ValueError の子であって
-        #   OSError の子ではない★ ⇒ 旧版は素通り → traceback → rc=1 → gate_nightly が
-        #   ★「殿への通知路=FAIL」= 通知路に無い罪を着せた★ (実測: 先頭 byte 0xff で再現)。
-        #   ★我らの側の落ち度 (読めぬ byte 列) を、通知路の罪にせぬ★ ゆえ未検分へ倒す。
-        out.append(
-            f"[NTFY-SHAPE] UNDETERMINED: {STATE_REL} の byte 列が UTF-8 として読めぬ "
-            f"({type(e).__name__}: {e}) = ★読めぬは「届かなんだ」ではない★ "
-            "(書き手の encoding 違い / 書込中の断片 / file 破損の疑い)"
-        )
-        return UNDET, out
-'''
+      # ★受ける範囲を「狭め過ぎる」形で殺す = 元の欠陥そのものの形である★
+      #   (JSONDecodeError は ValueError の子ゆえ構文は通るが、UnicodeDecodeError は其の子ではない)
+      old = "    except ValueError as e:"
       # ★規律(8)★ 撃つ前に数える = 一意でなければ狙いは別の場所へ着弾する
       assert s.count(old) == 1, f"MUT-1381-105: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(s.replace(old, "", 1))
+      open(p, "w", encoding="utf-8").write(
+          s.replace(old, "    except json.JSONDecodeError as e:", 1))
       PY
     test: |
       python3 scripts/gate_ntfy_alive.py --selftest

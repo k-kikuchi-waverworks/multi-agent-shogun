@@ -31,11 +31,14 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as _dt
+import io
 import json
 import os
 import sys
 import tempfile
+import traceback
 from pathlib import Path
 
 DEFAULT_ENGINE_ROOT = "/mnt/c/Users/k-kikuchi/development/ai-automate-engine"
@@ -122,6 +125,17 @@ def judge(state_path: Path, engine_root: Path, now: _dt.datetime) -> tuple[int, 
         raw = state_path.read_text(encoding="utf-8")
     except OSError as e:
         out.append(f"[NTFY-SHAPE] UNDETERMINED: {STATE_REL} が読めぬ ({e}) = 記録の不能は「届かなんだ」ではない")
+        return UNDET, out
+    except ValueError as e:
+        # ★cmd_1381 差し戻し F-2 (軍師一号)★= ★UnicodeDecodeError は ValueError の子であって
+        #   OSError の子ではない★ ⇒ 旧版は素通り → traceback → rc=1 → gate_nightly が
+        #   ★「殿への通知路=FAIL」= 通知路に無い罪を着せた★ (実測: 先頭 byte 0xff で再現)。
+        #   ★我らの側の落ち度 (読めぬ byte 列) を、通知路の罪にせぬ★ ゆえ未検分へ倒す。
+        out.append(
+            f"[NTFY-SHAPE] UNDETERMINED: {STATE_REL} の byte 列が UTF-8 として読めぬ "
+            f"({type(e).__name__}: {e}) = ★読めぬは「届かなんだ」ではない★ "
+            "(書き手の encoding 違い / 書込中の断片 / file 破損の疑い)"
+        )
         return UNDET, out
 
     try:
@@ -246,7 +260,21 @@ def run(argv: list[str] | None = None) -> int:
 
     engine_root = Path(a.engine_root)
     state_path = Path(a.state_file) if a.state_file else engine_root / STATE_REL
-    rc, out = judge(state_path, engine_root, now)
+    # ★F-2 の族を構造で塞ぐ★= 個々の例外を潰すだけでは、次の未知の例外で同じ嘘が出る。
+    #   ★本 gate 自身の crash は、通知路について何一つ語っておらぬ★ ⇒ rc=1 (届かなんだ) にせず未検分へ。
+    #   ★併せて【赤いが中身が空】も塞ぐ★= 札つきの1行を stdout へ出す
+    #   (gate_nightly の所見 grep は札で拾う造りゆえ、traceback だけでは家老に何も届かなんだ)。
+    #   ★但し黙って飲み込まぬ★= traceback は stderr へ丸ごと残す。
+    try:
+        rc, out = judge(state_path, engine_root, now)
+    except Exception as e:  # noqa: BLE001 — 受け皿ゆえ広く捕るのが狙いである
+        traceback.print_exc()
+        rc = UNDET
+        out = [
+            f"[NTFY-CRASH] UNDETERMINED: ★本 gate 自身が例外で落ちた★ ({type(e).__name__}: {e}) "
+            "= ★之は通知路の生死について何も語っておらぬゆえ「届かなんだ」と呼ばぬ★ "
+            "(番人の不具合であり、殿への通知が壊れた証ではない)。traceback は stderr に在る"
+        ]
     for line in out:
         print(line)
     print(f"── [gate-3 ntfy] {_VERDICT[rc]} (見た物={state_path}) ──")
@@ -295,17 +323,27 @@ def selftest() -> int:
     seen: set[int] = set()
 
     def check(tid: str, want_rc: int, *, state=None, write=True, needle=None,
-              now=NOW, root_exists=True, raw=None, forbid=None):
+              now=NOW, root_exists=True, raw=None, raw_bytes=None, forbid=None):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "engine"
             if root_exists:
                 (root / "logs").mkdir(parents=True)
             sp = root / STATE_REL
-            if write and raw is not None:
+            if write and raw_bytes is not None:
+                sp.write_bytes(raw_bytes)
+            elif write and raw is not None:
                 sp.write_text(raw, encoding="utf-8")
             elif write and state is not None:
                 sp.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
-            rc, out = judge(sp, root, now)
+            # ★1本の crash で残りの検を殺さぬ★= 素で呼べば例外が selftest 丸ごとを畳み、
+            #   ★続く検が一本も走っておらぬのに「走って落ちた」ように見える★
+            #   (拙者は MUT-1381-105 を撃って現に此れを踏んだ = 台帳の牙が試験の穴を暴いた形)。
+            #   ⇒ ★例外は【其の検の NG】として名指し、他の検は走らせる★。
+            try:
+                rc, out = judge(sp, root, now)
+            except Exception as e:  # noqa: BLE001 — 検の隔離が狙いである
+                fails.append(f"★NG★ {tid}: judge が例外で落ちた ({type(e).__name__}: {e})")
+                return
         body = "\n".join(out)
         seen.add(rc)
         if rc != want_rc:
@@ -386,14 +424,106 @@ def selftest() -> int:
     else:
         print("ok T20 三値 (PASS/FAIL/UNDETERMINED) が現に3通り出た")
 
-    # ── ★暦を思い出さず撃っておるか★ = 既定 now が実時刻であることの検分 ──
+    # ── ★盤面の暦が健全か★ ────────────────────────────────────────────────
+    # ★★名を正した (cmd_1381 差し戻し F-1・軍師一号)★★=
+    #   旧名は「既定の now が実時刻であることの検」と名乗っておったが ★偽であった★:
+    #   此処は selftest 自身が datetime.now() を呼んでおるだけゆえ ★検めておるのは
+    #   CPython と system clock (=盤面) であり、production の run() ではない★。
+    #   ★軍師の変異 GX-A1 (run() の now を固定日時へ) は本検を素通りした = 真空 PASS★
+    #   (拙者も再現した: 2020 固定でも 0 NG、しかも本行は実時刻を印字し続けた)。
+    #   ⇒ ★production の側は T23/T24 が run() を実際に通して縛る★。本検は盤面の検として残す。
     real = _dt.datetime.now().astimezone()
     if real.tzinfo is None or real.year < 2026:
-        fails.append(f"★NG★ T21: 既定の now が実時刻でない ({real})")
+        fails.append(f"★NG★ T21: 盤面の時計が壊れておる (tz 無し か 2026 未満: {real})")
     else:
-        print(f"ok T21 既定の now は撃って写した実時刻 ({real.strftime('%Y-%m-%d %H:%M:%S %z')})")
+        print(f"ok T21 盤面の時計は健全 ({real.strftime('%Y-%m-%d %H:%M:%S %z')}) "
+              "— ★之は盤面の検であり run() の検ではない (production は T23/T24)★")
 
-    print(f"── [gate-3 ntfy selftest] {len(fails)} 件の NG / 検 21 本 ──")
+    # ── ★読めぬ byte 列は【未検分】★ (差し戻し F-2・軍師一号の変異 GX-A2 相当) ──
+    #   ★UnicodeDecodeError は ValueError の子 = except OSError を素通りしておった★。
+    check("T22 不正 UTF-8 の state→未検分 (我らの落ち度を通知路の罪にせぬ)", UNDET,
+          raw_bytes=b'\xff\xfe{"schema":"ntfy-state/1"}',
+          needle="[NTFY-SHAPE]", forbid="[NTFY-DEAD]")
+
+    # ── ★run() を selftest の射程へ入れる★ (差し戻し F-1 の処方) ────────────────
+    #   ★旧 selftest は judge() のみを呼び run() を一度も通らなんだ★ =
+    #   run() の中身 (既定 now・受け皿・state path の既定) は 21 本 いずれの射程にも無かった。
+    def run_capture(argv: list[str]) -> tuple[int, str]:
+        buf, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
+            rc = run(argv)
+        return rc, buf.getvalue()
+
+    def run_check(tid: str, want_rc: int, *, hours_ago: float, needle=None, forbid=None):
+        """★state の刻を【実時刻から逆算して】置き、run() を --now 無しで通す★。
+        ⇒ run() の既定 now が実時刻を撃って写しておらねば齢が狂い、此の検が落ちる。
+        """
+        base = _dt.datetime.now().astimezone()
+        stamp = (base - _dt.timedelta(hours=hours_ago)).strftime("%Y-%m-%d %H:%M:%S")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "engine"
+            (root / "logs").mkdir(parents=True)
+            (root / STATE_REL).write_text(
+                json.dumps(_state(probe={"ok": True, "lastAt": stamp}), ensure_ascii=False),
+                encoding="utf-8")
+            rc, body = run_capture(["--engine-root", str(root)])
+        seen.add(rc)
+        if rc != want_rc:
+            fails.append(
+                f"★NG★ {tid}: rc={_VERDICT[rc]} を得たが {_VERDICT[want_rc]} を期待 / out={body.strip()}")
+            return
+        if needle and needle not in body:
+            fails.append(f"★NG★ {tid}: 札 {needle} が出ておらぬ / out={body.strip()}")
+            return
+        if forbid and forbid in body:
+            fails.append(f"★NG★ {tid}: 出てはならぬ札 {forbid} が出ておる / out={body.strip()}")
+            return
+        print(f"ok {tid} ({_VERDICT[rc]})")
+
+    # ★牙の効き方★= run() の既定 now が固定日時へ差し替わると、齢が此の二本の【逆側】へ倒れる。
+    #   ★境界 (FRESH_HOURS=24h) の両側 0.02h (=72秒) に挟んである★ ⇒
+    #   固定値 C が生き残れるのは ★|C - 実時刻| < 72秒★ の時のみ =
+    #   ★書いた瞬間だけ当たる literal しか通らぬ = 翌日には必ず落ちる★。
+    #   ★答えぬ問い (名乗っておく)★= 「実時刻を撃つ別の実装」に差し替えられた時は通る
+    #   (之は狙いどおり = 求めておるのは【撃って写す】ことであり datetime.now() という綴りではない)。
+    #   ★盤面依存★= local が JST でない機械では T24 が [NTFY-CALENDAR] で UNDETERMINED になり
+    #   ★黙って緑にならず NG として鳴る★ (本 gate は JST 前提を自ら宣言しておる = T19)。
+    run_check("T23 run() 既定 now: 境界の内 (23.98h 前)→PASS", PASS,
+              hours_ago=23.98, needle="[NTFY-OK]")
+    run_check("T24 run() 既定 now: 境界の外 (24.02h 前)→未検分", UNDET,
+              hours_ago=24.02, needle="[NTFY-STALE]")
+
+    # ── ★受け皿の検★= 番人自身の crash を「届かなんだ」と出さぬこと (差し戻し F-2 の構造側) ──
+    def check_crash_backstop() -> None:
+        def boom(*_a, **_k):
+            raise RuntimeError("試験が故意に起こした予期せぬ例外")
+
+        g = globals()
+        orig = g["judge"]
+        g["judge"] = boom
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td) / "engine"
+                (root / "logs").mkdir(parents=True)
+                rc, body = run_capture(["--engine-root", str(root)])
+        finally:
+            g["judge"] = orig
+        seen.add(rc)
+        if rc != UNDET:
+            fails.append(
+                f"★NG★ T25: 番人が例外で落ちた時 rc={_VERDICT[rc]} を返した = "
+                "★己の crash を通知路の罪として出しておる★ (期待=UNDETERMINED)")
+            return
+        if "[NTFY-CRASH]" not in body:
+            fails.append(
+                f"★NG★ T25: 例外時に札 [NTFY-CRASH] が stdout へ出ておらぬ = "
+                f"★赤いが中身が空★ (gate_nightly の所見に何も載らぬ) / out={body.strip()}")
+            return
+        print("ok T25 番人自身の crash は未検分 + 札つきで出る (UNDETERMINED)")
+
+    check_crash_backstop()
+
+    print(f"── [gate-3 ntfy selftest] {len(fails)} 件の NG / 検 25 本 ──")
     for f in fails:
         print(f)
     return 1 if fails else 0

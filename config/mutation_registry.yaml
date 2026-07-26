@@ -34,11 +34,16 @@ mutations:
       折っても緑なら gate-1 は「弾かれた理由を名指しできぬ飾り」に堕ちておる。
     paths: [scripts/gate_artifact_capture.sh]
     mutate: |
-      sed -i 's/check-ignore -q/check-ignore-neutered -q/g' scripts/gate_artifact_capture.sh
+      sed -i 's/check-ignore -q --/check-ignore-neutered -q --/' scripts/gate_artifact_capture.sh
     test: |
       bash scripts/gate_artifact_capture.sh --selftest
     expect: nonzero
     red_needle: "NG S2b"  # 実測 2026-07-26: 牙折り時は S2b (弾いた.gitignore行の名指し検査) が落ちる
+    # anchor 絞り (cmd_1382 六号の監査 → 2026-07-26 是正): 旧 anchor 'check-ignore -q' + /g は
+    # ★2 箇所★ で発火しておった = 69行目の呼出 (牙の実体) と 63行目の【コメント】。
+    # anchor_sites: 2 と申告する道は採らぬ = コメントの書換は挙動に何も関わらず、
+    # 「それも意図である」と台帳へ書けば ★嘘を申告する★ ことになるゆえ。
+    # '-- ' まで含めて 1 箇所へ絞った (実測 grep -c = 1)。牙は無傷 = 再走で PASS + 名指し「NG S2b」を確認。
 
   - id: MUT-1352-002
     origin: cmd_1352

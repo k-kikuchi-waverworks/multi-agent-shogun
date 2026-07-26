@@ -862,6 +862,55 @@ mutations:
     expect: nonzero
     red_needle: "not ok 12 T-304"  # 実測 2026-07-26: 赤5件 (T-202/T-303/T-304/T-306/T-308)
 
+  - id: MUT-1382-001
+    origin: cmd_1382
+    suspected_by: ashigaru6
+    desc: |
+      ★着弾の一意性★ の層 (cmd_1382・家老 規律(8)) を丸ごと素通りさせると、T38 (巻き込み型)
+      T39 (移動型) T42 (過小申告) が赤くなるべき。
+      素通りしても緑なら ★anchor が非一意でも黙って通る★ = 狙いが別の場所へ着弾しておっても
+      我らは「確かめた」と言うてしまう。★これは空振り検知 (byte 一致で UNDETERMINED) では
+      原理的に捕えられぬ層である★ = 撃ってはおる。撃つ場所が違うだけゆえ byte も赤も出る。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_mutation_replay.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    why_anchor = check_anchor_uniqueness(e, pristine, mut, work, timeout)"
+      # ★規律(8) を己の牙へ当てる★: 一意でなければ狙いが別所へ移るゆえ、数を先に検める
+      assert s.count(old) == 1, f"MUT-1382-001: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "    why_anchor = None", 1))
+      PY
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T38"  # 実測 2026-07-26: 層を殺すと T38/T39/T42 の3本が落ちる
+
+  - id: MUT-1382-002
+    origin: cmd_1382
+    suspected_by: ashigaru6
+    desc: |
+      ★偽陽性を抑える側★ の牙。空白のみの編集片を数から外す一行を殺すと、T43 (字下げ直しを
+      多発火と誤らぬ) が赤くなるべき。
+      ★なぜ「鳴らぬこと」を守るのか★ = 多行 block を字下げし直す変異は行ごとに同じ
+      「無→空白」の組を産み、★1 箇所の編集が n 発火に見える★ (実測: ★backend 台帳★
+      cmd_1369 の B2a/B2b が 5 発火に見えたが literal 数え上げでは block 1 箇所であった。
+      ★他 repo の台帳の ID は綴らぬ = 此処へ書けば幽霊 ID として鳴るゆえ★)。
+      ★常に鳴る門は必ず外される★ ゆえ、鳴らぬ側もまた牙で縛る。
+    paths: [scripts/gate_mutation_replay.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/gate_mutation_replay.py"
+      s = open(p, encoding="utf-8").read()
+      old = '            if old.strip() == "" and new.strip() == "":'
+      assert s.count(old) == 1, f"MUT-1382-002: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "            if False:", 1))
+      PY
+    test: |
+      python3 scripts/gate_mutation_replay.py --selftest
+    expect: nonzero
+    red_needle: "NG T43"  # 実測 2026-07-26: 抑制を殺すと T43 (負例) が偽の多発火で落ちる
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

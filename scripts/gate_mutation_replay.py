@@ -150,6 +150,149 @@ _SKIP_EVIDENCE = re.compile(
 )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# gate-2 付帯3: ★着弾の一意性★ (cmd_1382 — 家老 規律(8) 2026-07-26 の機械化)
+#
+# 何を塞ぐか: ★anchor が非一意なら、狙いは黙って別の場所へ着弾する★。
+#   ★これは空振りではない = 撃ってはおる。撃つ場所が違う★ ⇒ byte 変化も赤も出るゆえ
+#   既存の「mutate 空振り (byte 一致で UNDETERMINED)」の層では ★原理的に捕えられぬ★
+#   (あの層は【当たったか】を見ておるが【狙った場所に当たったか】は見ておらぬ)。
+#   実害 = 五号の変異が、旧い同名の関数を先に撃っておった (replace(old,new,1) が先頭を取る)。
+#
+# 症状は二種 (六号の census 2026-07-26 で両方 実在を確認):
+#   (a) ★巻き込み型★ = sed に count 指定が無い形 → 狙い + 余所も同時に撃つ
+#   (b) ★移動型★     = python replace(old,new,1) 形 → 着弾は 1 箇所だが、それが狙いとは限らぬ
+#
+# 測り方 (静的な anchor 解析はせぬ — 台帳の mutate は 113 通りの綴りで書かれており、
+#          綴りを読む道は必ず取りこぼす。★実際に撃って数える★):
+#   ・第1射 = pristine へ mutate → 文字単位の編集片を採り、★同一の (消えた綴り→現れた綴り) が
+#     何度現れたか★ を数える。n>=2 なら (a)。
+#     ※ 空白のみの組は数から外す = 多行 block の字下げ直しが n 発火に見える偽陽性を実測で潰した。
+#   ・第2射 = 第1射の結果へ ★同じ mutate をもう一度★ 当てる。第1射が触れておらぬ行を
+#     撃ったなら ★別の候補が残っておった★ = (b)。
+#     第2射が己の守り (assert old in s 等) で落ちるのは ★候補が尽きた証★ = 一意。
+#
+# ★この網が答えぬ問い (名乗っておく — 消えたら赤くなる形で下の selftest が縛る)★:
+#   ① ★一意であることは、其の1箇所が【狙った場所】である事を意味せぬ★。
+#      「一意か」と「狙った場所か」は別の問いである (狙いは red_needle が別に縛る)。
+#   ② 第1射が自らの産物を食う形 (置換後の綴りが自分に当たる) では、第2射が同じ場所へ
+#      戻るゆえ ★その先に第2候補が在っても見えぬ★。この型は mutate 側で
+#      `assert s.count(old) == 1` を書くのが唯一の確かな道である。
+#   ③ ★一意でも波及が広ければ同じ穴★ (規律(8) 第三の型・軍師二号)。共有 helper を撃てば
+#      anchor は一意でも赤の出所が絞れぬ。本層は ★波及の広さを測っておらぬ★。
+#
+# 宣言: entry に `anchor_sites: N` を書けば「N 箇所で発火するのが意図である」と申告できる
+#       (既定 1)。★意図的な全置換を禁じてはおらぬ。黙って全置換することを禁じておる★。
+# ─────────────────────────────────────────────────────────────────────────────
+ANCHOR_SITES_DEFAULT = 1
+
+
+def _read_lines_safe(p: Path):
+    try:
+        return p.read_text(encoding="utf-8", errors="surrogateescape").split("\n")
+    except Exception:
+        return None
+
+
+def _tree_text_files(root: Path) -> dict[str, Path]:
+    return {str(p.relative_to(root)): p for p in sorted(root.rglob("*"))
+            if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"}
+
+
+def anchor_firings(a_root: Path, b_root: Path) -> tuple[int, list]:
+    """a→b で【同一の綴り置換】が最大何箇所で発火したかと、その内訳を返す。"""
+    import difflib
+    af, bf = _tree_text_files(a_root), _tree_text_files(b_root)
+    rep: dict[tuple, int] = {}
+    for rel in sorted(set(af) & set(bf)):
+        al, bl = _read_lines_safe(af[rel]), _read_lines_safe(bf[rel])
+        if al is None or bl is None or al == bl:
+            continue
+        a, b = "\n".join(al), "\n".join(bl)
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+            if tag == "equal":
+                continue
+            old, new = a[i1:i2], b[j1:j2]
+            if old.strip() == "" and new.strip() == "":
+                continue  # 字下げ直し等 = 1 箇所の編集が n 発火に見える偽陽性を除く
+            rep[(rel, old, new)] = rep.get((rel, old, new), 0) + 1
+    if not rep:
+        return 0, []
+    worst = max(rep.values())
+    detail = [{"file": k[0], "old": k[1][:60], "new": k[2][:60], "count": v}
+              for k, v in sorted(rep.items(), key=lambda kv: -kv[1]) if v >= 2][:3]
+    return worst, detail
+
+
+def untouched_line_set(pristine: Path, shot1: Path) -> set:
+    """第1射が【触れなかった】行の集合。第2射がここを撃てば別候補が在った証。"""
+    import difflib
+    af, bf = _tree_text_files(pristine), _tree_text_files(shot1)
+    keep = set()
+    for rel in sorted(set(af) & set(bf)):
+        al, bl = _read_lines_safe(af[rel]), _read_lines_safe(bf[rel])
+        if al is None or bl is None:
+            continue
+        for tag, i1, i2, _j1, _j2 in difflib.SequenceMatcher(
+                None, al, bl, autojunk=False).get_opcodes():
+            if tag == "equal":
+                keep.update((rel, l) for l in al[i1:i2])
+    return keep
+
+
+def removed_lines(a_root: Path, b_root: Path) -> list:
+    import difflib
+    af, bf = _tree_text_files(a_root), _tree_text_files(b_root)
+    out = []
+    for rel in sorted(set(af) & set(bf)):
+        al, bl = _read_lines_safe(af[rel]), _read_lines_safe(bf[rel])
+        if al is None or bl is None or al == bl:
+            continue
+        for tag, i1, i2, _j1, _j2 in difflib.SequenceMatcher(
+                None, al, bl, autojunk=False).get_opcodes():
+            if tag != "equal":
+                out += [(rel, l) for l in al[i1:i2]]
+    return out
+
+
+def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: int):
+    """着弾の一意性を検める。問題が無ければ None、在れば理由の文字列を返す。"""
+    declared = e.get("anchor_sites", ANCHOR_SITES_DEFAULT)
+    try:
+        declared = int(declared)
+    except (TypeError, ValueError):
+        return f"anchor_sites が整数でない: {e.get('anchor_sites')!r}"
+
+    fired, detail = anchor_firings(pristine, mut)
+    if fired > declared:
+        d = "; ".join(f"{x['file']}「{x['old']}」→「{x['new']}」×{x['count']}" for x in detail)
+        return (f"★同一の綴り置換が {fired} 箇所で発火 (申告は {declared} 箇所)★ = 狙い+余所を"
+                f"巻き込んでおる。赤が出ても【どの箇所の赤か】を名指しできぬ。"
+                f" 内訳: {d}."
+                f" 処方 = anchor を一意な綴りへ絞る (前後の行を含める) か、全置換が意図なら"
+                f" 台帳へ anchor_sites: {fired} と書け (黙って全置換するのを禁じておる)")
+
+    # 第2射: 別の候補が残っておらぬか (移動型の検分)
+    mut2 = work / "mut2"
+    try:
+        shutil.copytree(mut, mut2)
+    except Exception as ex:
+        # ★黙って見送らぬ★ (規律(3b)): 測れなんだ時は「測れなんだ」と名乗る。
+        # 黙って None を返せば ★検分しておらぬ物が「一意」の顔をして通る★。
+        return f"着弾の検分ができなんだ (第2射用の複製に失敗: {ex!r}) = 未検分。一意とは言えぬ"
+    rc2, _out2 = run_sh(e["mutate"], mut2, timeout)
+    if rc2 is None or rc2 != 0:
+        return None  # 己の守りで落ちた = 候補は尽きておった (一意の証)
+    again = [r for r in removed_lines(mut, mut2) if r in untouched_line_set(pristine, mut)]
+    if again:
+        sample = again[0][1].strip()[:90]
+        return (f"★第2射が【第1射の触れておらぬ行】を {len(again)} 行 撃った = anchor に別の候補が"
+                f"在る★ (replace(old,new,1) 型は先頭を取るゆえ、狙いが黙って別所へ移りうる)。"
+                f" 例:「{sample}」."
+                f" 処方 = anchor を一意な綴りへ絞るか、mutate の中で assert s.count(old) == 1 を書け")
+    return None
+
+
 def skip_evidence(out: str):
     """test 出力中の skip 痕跡を返す (無ければ None)。"""
     m = _SKIP_EVIDENCE.search(out or "")
@@ -261,6 +404,14 @@ def validate_entry(e) -> str | None:
             return f"必須 field 欠落: {k}"
     if not isinstance(e["paths"], list) or not e["paths"]:
         return "paths が空"
+    # cmd_1382: 着弾数の申告は整数のみ (綴り間違いを黙って既定 1 へ倒さぬ)
+    if "anchor_sites" in e:
+        try:
+            n = int(e["anchor_sites"])
+        except (TypeError, ValueError):
+            return f"anchor_sites が整数でない: {e['anchor_sites']!r}"
+        if n < 1:
+            return f"anchor_sites は 1 以上であるべき: {n}"
     return None
 
 
@@ -337,6 +488,14 @@ def evaluate_entry(e, repo: Path, work: Path):
     #    (sed の当たり損ねは沈黙する — これ自体が本 gate が塞ぐ「沈黙する落とし穴」の一種)
     if tree_digest(pristine) == tree_digest(mut):
         return UNDET, "mutate 空振り (何も変えておらぬ) = pattern の当たり損ね。mutate を直せ"
+
+    # ③b ★着弾の一意性★ (cmd_1382・規律(8)): 上の空振り検知は【当たったか】しか見ておらぬ。
+    #     ★非一意なら撃ってはおる = byte も変わり赤も出る。だが撃つ場所が違う★ ゆえ
+    #     ここで測らねば ★「確かめた」と「運が良かった」が区別できぬ★。
+    #     判定は UNDETERMINED = ★未検分は緑ではない (が、牙が折れた FAIL とも違う)★。
+    why_anchor = check_anchor_uniqueness(e, pristine, mut, work, timeout)
+    if why_anchor:
+        return UNDET, why_anchor
 
     # ④ 変異後に test は赤くなるべき
     rc, out = run_sh(e["test"], mut, timeout)
@@ -1369,6 +1528,75 @@ def selftest() -> int:
         rc, out = _invoke(["--tree-census", "--registry", str(creg), "--projects", str(cproj),
                            "--watched-file", str(watched_f)], today="2026-09-01")
         expect("T34b ★点呼の免除も期限切れで返る★", 1, rc, "[免除期限切れ]", out)
+
+        # ── ★T38〜T43: 着弾の一意性 (cmd_1382・規律(8))★ ──────────────────────
+        #   ★空振り検知 (byte 一致) では原理的に捕えられぬ層★ = 撃ってはおるが場所が違う形。
+        #   ゆえに ★負例 (捕えてはならぬ形) も同数据える★ = 常に鳴る門は必ず外されるゆえ。
+        def _anchor_repo(tag: str, body: str, guard: str) -> Path:
+            r = T / f"anchor_{tag}"
+            r.mkdir(parents=True)
+            (r / "tool.sh").write_text(body, encoding="utf-8")
+            # ★負例が意味を持つには test が現に赤くなる必要が在る★ = 変異で消える綴りを見張る。
+            # (初版は MARKER_LINE を見ており変異後も緑 → 負例が「変異後も緑=FAIL」で落ちた。
+            #  ★門でなく fixture が誤っておった★ ゆえ fixture を直した)
+            (r / "check.sh").write_text(f"#!/bin/bash\ngrep -q {guard} tool.sh\n", encoding="utf-8")
+            return r
+
+        def _anchor_run(tag: str, body: str, mutate: str, extra: dict | None = None,
+                        guard: str = "'guard() {'"):
+            r = _anchor_repo(tag, body, guard)
+            e = {"id": f"MUT-ANCHOR-{tag}", "desc": "d", "paths": ["tool.sh", "check.sh"],
+                 "mutate": mutate, "test": "bash check.sh", "expect": "nonzero"}
+            e.update(extra or {})
+            reg = T / f"anchor_{tag}.yaml"
+            _write_reg(reg, [e])
+            return _invoke(["--registry", str(reg), "--repo-root", str(r)])
+
+        # 同じ綴りが2箇所に在る victim (五号が現に踏んだ形 = 旧い同名が先に居る)
+        TWO = "#!/bin/bash\n# MARKER_LINE\nguard() { echo old; }\nx=1\nguard() { echo new; }\n"
+        ONE = "#!/bin/bash\n# MARKER_LINE\nguard() { echo only; }\nx=1\n"
+
+        # T38: ★巻き込み型★ = sed に count 指定が無く 2 箇所を撃つ → UNDETERMINED + 名指し
+        rc, out = _anchor_run("multi", TWO, "sed -i 's/guard/guard_X/' tool.sh\n")
+        expect("T38 ★巻き込み型 (2箇所発火) = UNDETERMINED★", 2, rc, "箇所で発火", out)
+
+        # T39: ★移動型★ = replace(old,new,1) で候補が2つ → 第2射が別の行を撃つ
+        MOVE = ("python3 - <<'PY2'\np='tool.sh'\ns=open(p,encoding='utf-8').read()\n"
+                "open(p,'w',encoding='utf-8').write(s.replace('guard() {','guardX() {',1))\nPY2\n")
+        rc, out = _anchor_run("move", TWO, MOVE)
+        expect("T39 ★移動型 (別候補が残る) = UNDETERMINED★", 2, rc, "別の候補", out)
+
+        # T40 (負例): anchor が一意なら同じ mutate でも通る = ★常に鳴る門ではない★
+        rc, out = _anchor_run("uniq", ONE, MOVE)
+        expect("T40 一意な anchor は通る (負例)", 0, rc, "PASS", out)
+
+        # T41: ★申告すれば全置換は許す★ = 禁じておるのは【黙って】全置換すること
+        rc, out = _anchor_run("declared", TWO, "sed -i 's/guard/guard_X/' tool.sh\n",
+                              {"anchor_sites": 2})
+        expect("T41 anchor_sites 申告つき全置換は通る", 0, rc, "PASS", out)
+
+        # T42: ★申告が実測より少なければ鳴る★ (申告が飾りにならぬ形)
+        rc, out = _anchor_run("underdeclared", TWO, "sed -i 's/guard/guard_X/g' tool.sh\n",
+                              {"anchor_sites": 1})
+        expect("T42 ★過小申告は鳴る★", 2, rc, "申告は 1 箇所", out)
+
+        # T43 (負例): ★字下げ直し = 1 箇所の編集が n 発火に見える偽陽性を出さぬ★
+        #   (実測で踏んだ形: ★backend 台帳★ cmd_1369 の B2a/B2b = block は 1 箇所しか無いのに
+        #    行ごとの字下げ挿入で 5 発火に見えた。literal 数え上げで裏を取って偽陽性と判じた。
+        #    ★ID を綴らぬのは、他 repo の台帳の ID を此処へ書くと幽霊 ID として鳴るゆえ★)
+        BLOCK = "#!/bin/bash\n# MARKER_LINE\nif A:\n  p\n  q\n  r\n"
+        REINDENT = ("python3 - <<'PY2'\np='tool.sh'\ns=open(p,encoding='utf-8').read()\n"
+                    "open(p,'w',encoding='utf-8').write(s.replace('if A:\\n  p\\n  q\\n  r',"
+                    "'def f():\\n    if A:\\n      p\\n      q\\n      r',1))\nPY2\n")
+        rc, out = _anchor_run("reindent", BLOCK, REINDENT, guard="'^if A:'")
+        expect("T43 字下げ直しを多発火と誤らぬ (負例)", 0, rc, "PASS", out)
+
+        # T44: schema — anchor_sites が整数でなければ sanity が止める (黙って既定へ倒さぬ)
+        bad = T / "anchor_badschema.yaml"
+        _write_reg(bad, [{"id": "MUT-ANCHOR-BAD", "desc": "d", "paths": ["tool.sh"],
+                          "mutate": "true", "test": "true", "anchor_sites": "いち"}])
+        rc, out = _invoke(["--sanity", "--registry", str(bad)])
+        expect("T44 anchor_sites 非整数=sanity が止める", 2, rc, "anchor_sites", out)
 
     print("----")
     if ng == 0:

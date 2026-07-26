@@ -92,6 +92,9 @@ plans/README.md
 !config/opencode-permissions.yaml
 # cmd_1352 (2026-07-26): 変異の台帳 + 成果物manifest置き場 (沈黙落とし穴gateの正本)
 !config/mutation_registry.yaml
+# cmd_1374 A-1 (2026-07-26): ★跨ぎ台帳★ (対象 repo が /mnt/c/Users 配下ゆえ台帳を shogun 側に置く形)。
+#   ★名指しを忘れると「手元では動くが clone には無い」で静かに落ちる★ = cmd_1367 の族ゆえ必ず書く。
+!config/mutation_registry.web.yaml
 !config/artifact_manifests/
 !config/artifact_manifests/*.manifest
 

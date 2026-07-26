@@ -25,8 +25,25 @@ echo "── [gate_nightly] $STAMP 開始 ──"
 # ★宣言でなく実績を記す★ = gate の呼び出し行を消せばその木は記録されず、点呼が
 # 「見ておらぬ牙持ちの木」として名指す。「配線を消したのに watched のまま」が起こり得ぬ形。
 WATCHED_LIST="$(mktemp -t gate_watched.XXXXXX)"
-trap 'rm -f "$WATCHED_LIST"' EXIT
-watched() { printf '%s\n' "$1" >> "$WATCHED_LIST"; }
+# ★撃とうとした木 (cmd_1374b ③・軍師一号の差し戻し)★:
+#   watched は ★成功の枝の中でしか書かれぬ★ ゆえ、台帳不在などで黙って飛ばした木は
+#   点呼から ★「未監視」ですらなく【存在せぬ】として消えておった★
+#   (軍師一号の実測 = fresh clone の素の姿で点呼が PASS rc0 を返し、app牙12/backend牙14 が
+#    分母に一度も現れなんだ)。★呼び出し行が在った事実★も実績ゆえ、撃つ前に必ず書き留める。
+ATTEMPTED_LIST="$(mktemp -t gate_attempted.XXXXXX)"
+trap 'rm -f "$WATCHED_LIST" "$ATTEMPTED_LIST"' EXIT
+watched()   { printf '%s\n' "$1" >> "$WATCHED_LIST"; }
+attempted() { printf '%s\n' "$1" >> "$ATTEMPTED_LIST"; }
+# 台帳に実体のある変異が 1 件でも在るか (0 件なら replay は「台帳0件=永久UNDETERMINED」になる)
+has_mutations() { python3 - "$1" <<'PY'
+import sys, yaml
+try:
+    d = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
+except Exception:
+    sys.exit(1)
+sys.exit(0 if (d.get("mutations") or []) else 1)
+PY
+}
 
 # --committed = HEAD blob を正とする (fresh clone が受け取る中身の検分。作業ツリーを信ぜぬ
 #  = 軍師二号が cmd_1349 QC で示した流儀。index 視点は pre-commit hook 側が受け持つ)
@@ -48,6 +65,7 @@ BACKEND_REG="$BACKEND_ROOT/config/mutation_registry.yaml"
 echo "[gate_nightly] backend 台帳 = $BACKEND_REG"
 export AITUBER_BACKEND_ROOT="$BACKEND_ROOT"
 export AITUBER_BACKEND_VENV_PY="${AITUBER_BACKEND_VENV_PY:-$BACKEND_ROOT/.venv/bin/python}"
+attempted "$BACKEND_ROOT"   # ★撃とうとした事実を先に記す (下で黙って飛ばしても点呼から消えぬ)★
 if [ -f "$BACKEND_REG" ]; then
     out4="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --registry "$BACKEND_REG" --repo-root "$BACKEND_ROOT" 2>&1)"; rc4=$?
     out5="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --coverage --registry "$BACKEND_REG" --repo-root "$BACKEND_ROOT" 2>&1)"; rc5=$?
@@ -67,13 +85,44 @@ APP_ROOT="${GATE_APP_ROOT:-$HOME/aituber-project}"
 APP_ROOT="$(readlink -f "$APP_ROOT" 2>/dev/null || echo "$APP_ROOT")"
 APP_REG="$APP_ROOT/config/mutation_registry.yaml"
 echo "[gate_nightly] app 本体 台帳 = $APP_REG"
+attempted "$APP_ROOT"
 if [ -f "$APP_REG" ]; then
     out6="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --coverage --registry "$APP_REG" --repo-root "$APP_ROOT" 2>&1)"; rc6=$?
+    # ★cmd_1374b ⑤ (軍師一号の差し戻し)★: app は登録検知のみゆえ、★何もせぬ entry を1枚置けば
+    #   coverage は「ok REGISTERED」と読み、その紙を捕まえる者が居らぬ★ =
+    #   ★11行の紙で 08-31 の返済が作れてしまう★。
+    #   ⇒ 台帳に entry が入った瞬間から replay も撃つ (紙なら baseline/mutate が UNDETERMINED か
+    #     FAIL で名指される)。0 件の間は撃たぬ = 「台帳0件=永久UNDETERMINED」(免除より悪い形) を避ける。
+    if has_mutations "$APP_REG"; then
+        out6b="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --registry "$APP_REG" --repo-root "$APP_ROOT" 2>&1)"; rc6b=$?
+    else
+        rc6b=0; out6b="[gate-2 app replay] 台帳に変異 entry が 0 件ゆえ replay は撃たぬ (★entry が 1 件でも入れば翌朝から自動で撃つ★ = 何もせぬ紙で免除を返せぬ形)"
+    fi
     watched "$APP_ROOT"
 else
     rc6=2; out6="[gate-2 app coverage] UNDETERMINED: app 本体の台帳が見えぬ ($APP_REG) = path 違い / disk 喪失の疑い。検分できておらぬは緑ではない"
+    rc6b=2; out6b="[gate-2 app replay] UNDETERMINED: 同上 (台帳が見えぬゆえ replay も撃てておらぬ)"
 fi
-printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6"
+
+# ── ★waverworks web repo 台帳延長 (cmd_1374 A-1)★ ─────────────────────────────
+# 木の点呼が掘り出した2本目の未監視木 (牙 1 件 = scripts/check-shippable-theme.py)。
+# ★台帳は shogun 側 (config/mutation_registry.web.yaml) に置く★ =
+#   web repo は /mnt/c/Users 配下 (殿 CLAUDE.md の変更禁止領域) ゆえ、そこへ新しい機構を
+#   置く道を採らず、runner を --repo-root で跨がせる (台帳 file と repo-root は 1 対 1)。
+WEB_ROOT="${GATE_WEB_ROOT:-/mnt/c/Users/k-kikuchi/development/waverworks/common/wp-content/themes/waverworks-base-for-wp}"
+WEB_ROOT="$(readlink -f "$WEB_ROOT" 2>/dev/null || echo "$WEB_ROOT")"
+WEB_REG="$SCRIPT_DIR/config/mutation_registry.web.yaml"
+echo "[gate_nightly] web 台帳 = $WEB_REG (repo-root=$WEB_ROOT)"
+attempted "$WEB_ROOT"
+if [ -f "$WEB_REG" ] && [ -d "$WEB_ROOT" ]; then
+    out7="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --registry "$WEB_REG" --repo-root "$WEB_ROOT" 2>&1)"; rc7=$?
+    out8="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --coverage --registry "$WEB_REG" --repo-root "$WEB_ROOT" 2>&1)"; rc8=$?
+    watched "$WEB_ROOT"
+else
+    rc7=2; out7="[gate-2 web] UNDETERMINED: web 台帳 ($WEB_REG) か repo ($WEB_ROOT) が見えぬ = 検分できておらぬは緑ではない"
+    rc8=2; out8="[gate-2 web coverage] UNDETERMINED: 同上"
+fi
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out6b" "$out7" "$out8"
 
 # hook 消失検知: pre-commit shim は .git/hooks 住まいゆえ環境再構築で黙って消える
 # (cmd_1342 で六号が指摘した弱点)。消えておれば commit 時の関所が不在 = 緑ではない。
@@ -110,7 +159,7 @@ printf '%s\n' "$undist_out"
 # ★見ておらぬ場所には、盲であることすら分からぬ★ — ゆえに「見ておらぬ木の数」を毎朝出す。
 # 分母は system 自身の登録 (config/projects.yaml) + 実際に撃った木 + その submodule。
 census_out="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --tree-census \
-    --watched-file "$WATCHED_LIST" 2>&1)"; census_rc=$?
+    --watched-file "$WATCHED_LIST" --attempted-file "$ATTEMPTED_LIST" 2>&1)"; census_rc=$?
 printf '%s\n' "$census_out"
 
 verdict() { case "$1" in 0) echo PASS;; 1) echo FAIL;; *) echo UNDETERMINED;; esac; }
@@ -133,7 +182,7 @@ fold_lines() {
     return 0
 }
 
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then
     # 警告は1行に畳む (inbox message の YAML 安全のため改行・コロン+空白を避ける)
     # 行連結は awk で行う (tr '\n' '・' は byte 置換ゆえ多byte文字の先頭1byteのみを埋め
     # 不正 UTF-8 を inbox へ混入させる — 2026-07-26 実測で発見した既存バグの是正)
@@ -156,12 +205,12 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     #   足さねば「点呼が赤いのに、どの木が見られておらぬか名指しできぬ警告」になる
     #   (cmd_1367 の配布 gate で実際に踏んだ轍。角括弧つきの判定行のみを拾う)。
     [ "$census_rc" -ne 0 ] && censusnote="★どの gate も見ておらぬ木あり (cmd_1374)=$(printf '%s' "$census_out" | grep -E '\[(UNWATCHED|免除期限切れ)\]|木の点呼\] (FAIL|UNDETERMINED)' | fold_lines 4)★ "
-    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")。${hooknote}${wirenote}${undistnote}${censusnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
+    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")。${hooknote}${wirenote}${undistnote}${censusnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2
 fi
 
-echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") ──"
-if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ]; then exit 1; fi
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then exit 2; fi
+echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") ──"
+if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ]; then exit 1; fi
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ]; then exit 2; fi
 exit 0

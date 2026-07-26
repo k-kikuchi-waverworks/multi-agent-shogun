@@ -730,6 +730,134 @@ mutations:
 #   ・他 agent 所有の変異test を見つけた時は、勝手に登録せずここへ理由つきで置き、
 #     所有者へ登録を申し送るのが筋 (他人の test に mutate を書くのは所有者の手番)
 # ─────────────────────────────────────────────────────────────────────────────
+  # ═══ cmd_1371: 本文の【口】と、関所の生死の名乗り ═══════════════════════
+  # ★本 cmd が生まれた実測★= cmd_1363 は口(A)(B)(C)(D)を正しく塞ぎ、逃げ道も道具側に
+  # 実装済であった。にもかかわらず 2026-07-26 の一日で ★関所が DENY と判ずる命令 38 件の
+  # うち 36 件がすり抜けた★ (本日分の全 session 記録を走査して実測)。四号の原文を採り出して
+  # 関所へ食わせると ★DENY★ = ★関所は正しく判じておった。呼ばれておらなんだだけである★。
+  # ⇒ ★穴は「関所が無いこと」でなく【関所が在るのに効いておるか誰も知らぬこと】★。
+  # 生データ = plans/cmd_1371_guard_leak_census.json / 走査script = plans/cmd_1371_scan_leaks.py
+  #
+  # ★7件すべて、登録前に実射して名指しの赤を確認した (空振り 0)★。
+  # ★「赤くなった」でなく「どれが捕えたか」まで分けた★ = 別の理由で赤い時に騙されぬため。
+  # 唯一の受け皿が分かれた牙 = 004→T-502 のみ / 005→T-105,T-106 のみ / 006→T-307 のみ。
+
+  - id: MUT-1371-001
+    origin: cmd_1371
+    suspected_by: ashigaru6
+    desc: |
+      安全な口 (--body-stdin / --content-file) が ★本文末尾の改行を守る★ sentinel を外すと
+      赤くなるべき。command substitution は末尾改行を黙って剥がすゆえ、素直に書くと
+      ★「shell を通らぬ安全な口」を名乗りながら末尾の1文字を黙って落とす★ =
+      本 cmd が退けておる「黙って欠ける」の小型再現である。
+      由来 = ★実射 harness が拙者自身の実装欠陥を捕えた★ (期待 136 byte に対し 135 byte)。
+    paths: [scripts/inbox_write.sh, scripts/shell_expansion_guard.py, tests/test_cmd1371_body_transport.bats]
+    mutate: |
+      sed -i 's/_slurp_stdin() { cat; printf .x.; }/_slurp_stdin() { cat; }/' scripts/inbox_write.sh
+    test: |
+      bats tests/test_cmd1371_body_transport.bats
+    expect: nonzero
+    red_needle: "not ok 4 T-104"  # 実測 2026-07-26: 赤4件 (T-101/T-104/T-305/T-402)
+
+  - id: MUT-1371-002
+    origin: cmd_1371
+    suspected_by: ashigaru6
+    desc: |
+      本文がどの口から入ったかの札 (via) を argv のまま据え置くと赤くなるべき。
+      ★道具は自分がどちらの口で本文を受けたかを【必ず知っておる】★ = ゆえにこれは
+      推測でなく事実の記録である。札が壊れれば受け手 (家老) は
+      ★「此の文は守られた経路で来たのか」を機械の記録で判別できなくなる★。
+    paths: [scripts/inbox_write.sh, scripts/shell_expansion_guard.py, tests/test_cmd1371_body_transport.bats]
+    mutate: |
+      sed -i 's/IW_VIA="stdin"/IW_VIA="argv"/' scripts/inbox_write.sh
+    test: |
+      bats tests/test_cmd1371_body_transport.bats
+    expect: nonzero
+    red_needle: "not ok 9 T-301"  # 実測 2026-07-26: 赤3件 (T-301/T-305/T-402)
+
+  - id: MUT-1371-003
+    origin: cmd_1371
+    suspected_by: ashigaru6
+    desc: |
+      心拍の【新しさ】を見ず、file が在れば常に live と言う形に戻すと赤くなるべき。
+      ★古い心拍を生きておると読めば、関所が既に効いておらぬ pane に対して
+      「守られておる」と偽の緑を出す★ = 本日ずっと退けてきた形そのもの。
+    paths: [scripts/inbox_write.sh, scripts/shell_expansion_guard.py, tests/test_cmd1371_body_transport.bats]
+    mutate: |
+      sed -i 's|if \[ "$age" -le "$_HB_FRESH_SEC" \]; then echo "live"; else echo "stale"; fi|echo "live"|' scripts/inbox_write.sh
+    test: |
+      bats tests/test_cmd1371_body_transport.bats
+    expect: nonzero
+    red_needle: "not ok 11 T-303"  # 実測 2026-07-26: 赤2件 (T-303/T-305)
+
+  - id: MUT-1371-004
+    origin: cmd_1371
+    suspected_by: ashigaru6
+    desc: |
+      関所が心拍を残すのをやめると赤くなるべき。★心拍が無ければ、道具の側からは
+      関所の生死が【永久に】見えぬ★ = 2026-07-26 に 36 件がすり抜けた状態へそのまま戻る。
+      ★T-502 が唯一の受け皿である★ (実測で分離した)。
+    paths: [scripts/shell_expansion_guard.py, scripts/inbox_write.sh, tests/test_cmd1371_body_transport.bats]
+    mutate: |
+      sed -i 's/^        touch_heartbeat(payload)$/        pass/' scripts/shell_expansion_guard.py
+    test: |
+      bats tests/test_cmd1371_body_transport.bats --filter T-502
+    expect: nonzero
+    red_needle: "not ok 1 T-502"  # 実測 2026-07-26: 全走行では赤1件 = T-502 のみ
+
+  - id: MUT-1371-005
+    origin: cmd_1371
+    suspected_by: ashigaru6
+    desc: |
+      ★規模の層★ — 本文を再び環境変数へ載せると赤くなるべき。
+      本文を export すると以後の ★全ての外部 command★ の environ に本文が積まれ、
+      10万字級で ARG_MAX を越えて ★sleep すら exec できず配達が丸ごと落ちる★。
+      ★これは cmd_1363 の版に元から在った欠陥であり、規模の層を標本に入れて初めて出た★
+      (HEAD の script で再現し entry 0 件を実測)。
+      ⇒ ★我らが「長文の本命」と勧めておった経路が、まさに長文で壊れておった★。
+      家老が採った規律「そのgateが黙る規模の軸を選べ」= 本 gate の軸は ★本文の大きさ★ である。
+      ★T-105/T-106 が唯一の受け皿★ (短い標本しか無ければ永久に見つからぬ)。
+    paths: [scripts/inbox_write.sh, scripts/shell_expansion_guard.py, tests/test_cmd1371_body_transport.bats]
+    mutate: |
+      sed -i 's|export IW_CONTENT_FILE="$IW_BODY_TMP"|export IW_CONTENT_FILE="$IW_BODY_TMP"; export IW_HUGE="$CONTENT$CONTENT$CONTENT"|' scripts/inbox_write.sh
+    test: |
+      bats tests/test_cmd1371_body_transport.bats
+    expect: nonzero
+    red_needle: "not ok 5 T-105"  # 実測 2026-07-26: 赤2件 = T-105/T-106 のみ
+
+  - id: MUT-1371-006
+    origin: cmd_1371
+    suspected_by: ashigaru6
+    desc: |
+      心拍の鍵の落ち先 (TMUX_PANE が無い時の session_id) を外すと赤くなるべき。
+      ★実測が拙者の非対称を捕えた★= 関所は pane → session の順で鍵を選ぶのに、
+      道具は pane しか見ておらなんだ ⇒ ★pane を持たぬ経路 (将軍がまさにそれ) は
+      関所が現に生きておるのに永久に UNPROTECTED を名乗る★ =
+      ★常に赤い門は信用されず必ず外される★ = 本日ずっと退けてきた形を新しく作りかけておった。
+      ★T-307 が唯一の受け皿★。
+    paths: [scripts/inbox_write.sh, scripts/shell_expansion_guard.py, tests/test_cmd1371_body_transport.bats]
+    mutate: |
+      sed -i 's|if \[ -n "${CLAUDE_CODE_SESSION_ID:-}" \]; then printf .%s. "$CLAUDE_CODE_SESSION_ID"; return 0; fi|true|' scripts/inbox_write.sh
+    test: |
+      bats tests/test_cmd1371_body_transport.bats --filter T-307
+    expect: nonzero
+    red_needle: "not ok 1 T-307"  # 実測 2026-07-26: 全走行では赤1件 = T-307 のみ
+
+  - id: MUT-1371-007
+    origin: cmd_1371
+    suspected_by: ashigaru6
+    desc: |
+      三値の札のうち UNPROTECTED を by-guard へ倒すと赤くなるべき。
+      ★守れておらぬ物を「守れた」と言う形★ = 未検証を緑へ混ぜる、本日の主題そのもの。
+      ★最も広く捕まる (赤5件)★ = 札が全経路の判定に効いておることの裏返しでもある。
+    paths: [scripts/inbox_write.sh, scripts/shell_expansion_guard.py, tests/test_cmd1371_body_transport.bats]
+    mutate: |
+      sed -i 's/^    IW_SAFETY="UNPROTECTED"$/    IW_SAFETY="by-guard"/' scripts/inbox_write.sh
+    test: |
+      bats tests/test_cmd1371_body_transport.bats
+    expect: nonzero
+    red_needle: "not ok 12 T-304"  # 実測 2026-07-26: 赤5件 (T-202/T-303/T-304/T-306/T-308)
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -740,20 +868,14 @@ coverage_waivers: []
 #     間違う向きが安全側 (黙って免除され続ける道が無い)
 # ─────────────────────────────────────────────────────────────────────────────
 tree_census_waivers:
-  # ── ★cmd_1374 で新たに見つかった2本目の穴★ ────────────────────────────────
-  #  本任は app 本体 (1本目) を塞ぐ任であったが、点呼を全数で回した結果
-  #  ★waverworks WP theme にも牙 1 件 (scripts/check-shippable-theme.py) が在り、
-  #  どの gate も見ておらぬ★ ことが判った (2026-07-26 実測)。
-  #  ★1つ見つけて満足せぬ★ ための全数走査が、実際に2本目を出した形である。
-  #
-  #  ★拙者が今これを塞がぬ理由 (2つ・どちらも「出来ぬ」ではなく「拙者の手番でない」)★:
-  #    (1) ★別 project の repo である★ = 台帳を置く先が web repo 配下ゆえ、
-  #        cmd_1374 (app 本体の穴) の scope を跨ぐ。家老の起票を待つのが筋。
-  #    (2) ★殿の CLAUDE.md 禁止事項に /mnt/c/Users/ 配下の変更が挙がっておる★ =
-  #        web repo は其処に在る。commit 経路も殿手番 (web-git-commit skill) ゆえ
-  #        足軽が独断で台帳を置いてよい木ではない。★裁可を仰ぐべき事柄である★。
-  #  ⇒ ゆえに ★消すのでなく、期限つきで見逃し、期限が来たら機械が取り立てる★ 形にした。
-  #     until は 2026-08-09 = ★裁可を仰ぐだけなら5週間は要らぬ★ (登録作業でなく判断ゆえ)。
-  - path: /mnt/c/Users/k-kikuchi/development/waverworks/common/wp-content/themes/waverworks-base-for-wp
-    reason: "cmd_1374 の点呼で発見した2本目の未監視木 (牙1件=scripts/check-shippable-theme.py・cmd_1358 N4 系)。別 project かつ /mnt/c/Users 配下 (殿 CLAUDE.md 禁止事項) ゆえ足軽の独断で台帳を置かず、家老へ cmd 化の起票を具申した。期限までに裁可が無ければ機械が毎朝取り立てる"
-    until: '2026-08-09'
+  # ── ★cmd_1374 で見つかった2本目の穴 → cmd_1374 A-1 で【返済済】★ ──────────
+  #  2026-07-26 の点呼で waverworks WP theme に牙 1 件 (scripts/check-shippable-theme.py) が
+  #  在り、どの gate も見ておらぬと判った。当初は「別 project かつ /mnt/c/Users 配下
+  #  (殿 CLAUDE.md 禁止事項) ゆえ足軽の独断で台帳を置かぬ」として until 2026-08-09 の
+  #  期限つき免除に置いた。
+  #  ⇒ ★A-1 の実測で、web repo へ何も置かずに監視下へ入れられると判ったゆえ免除を返した★:
+  #     台帳を ★shogun 側★ (config/mutation_registry.web.yaml) に置き、runner を
+  #     --repo-root で跨がせる (runner は --registry と --repo-root を独立に取る)。
+  #     ★web repo へは 1 file も足しておらぬ = 禁止領域に触れておらぬ★。
+  #  ★免除は【いつ返すか】が決まって初めて免除である★ — 期限より先に返した形にござる。
+  #  (本体台帳へ相乗りさせぬ理由は config/mutation_registry.web.yaml 冒頭に実測つきで記した)

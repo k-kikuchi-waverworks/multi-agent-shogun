@@ -687,7 +687,8 @@ def _submodule_paths(top: str) -> list[str]:
     return out
 
 
-def tree_census(registry: Path, watched_file: Path | None, projects: Path) -> int:
+def tree_census(registry: Path, watched_file: Path | None, projects: Path,
+                attempted_file: Path | None = None) -> int:
     """牙を持つのに どの gate も見ておらぬ repo を名指す。0 PASS / 1 FAIL / 2 UNDETERMINED。"""
     import yaml
     # ── 見ておる木 (実際に走った物) ──
@@ -711,6 +712,28 @@ def tree_census(registry: Path, watched_file: Path | None, projects: Path) -> in
               " (--watched-file が空/不在 = gate が1つも走っておらぬか配線が切れた疑い)。"
               " ★0 件は PASS ではない★")
         return 2
+
+    # ── ★撃とうとした木 (cmd_1374b ③・軍師一号の差し戻し)★ ──────────────────
+    # ★穴★: watched は各 gate の【成功の枝の中】でしか記録されぬ (gate_nightly の
+    #   `if [ -f "$REG" ]; then … watched "$ROOT"; else rc=2; fi`)。
+    #   ⇒ ★gate が黙って撃てなんだ木は「未監視」ではなく【存在せぬ】として点呼から消える★。
+    #   軍師一号の実測 (fresh clone の素の姿 = projects.yaml が first_setup 既定・backend 台帳不在):
+    #   ★点呼は PASS rc0 を返し、app 牙12 と backend 牙14 は分母に一度も現れなんだ★。
+    #   ★鳴らぬのではない = 点呼の行だけが PASS と名乗る★ =
+    #   これは本 gate の初版が踏んだ【分母にすら入らぬ】の、一段外の再演である。
+    # ★塞ぎ方★: 「撃とうとした」も実績である (宣言ではない — 呼び出し行が在った事実)。
+    #   撃とうとして撃てなんだ木は ★UNDETERMINED として名指す★ = 決して緑にせぬ。
+    unfired: list[tuple[str, str]] = []   # (path, なぜ撃てなんだか)
+    if attempted_file and attempted_file.is_file():
+        for line in attempted_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            t = _git_toplevel(line)
+            if t is None:
+                unfired.append((line, "実体が git repo として見えぬ (未 init / path 違い / disk 喪失)"))
+            elif t not in watched:
+                unfired.append((t, "実体は在るのに gate が撃っておらぬ (台帳不在 等で黙って飛ばされた疑い)"))
 
     # ── 免除簿 (期限つき・登録検知の免除と同じ掟) ──
     wmap: dict[str, str] = {}
@@ -818,6 +841,11 @@ def tree_census(registry: Path, watched_file: Path | None, projects: Path) -> in
                   f" ← {labels}")
             for rel in sorted(cands):
                 print(f"          - {rel}")
+    # ★撃とうとして撃てなんだ木 (cmd_1374b ③)★ = 点呼から消させぬ。
+    for path, why in unfired:
+        print(f"  ★未検分★ [撃てておらぬ] {path}: {why}"
+              " = ★この木は【未監視】ですらなく点呼から消えかけておった★"
+              " (牙を数えられておらぬゆえ「牙なし」とも言えぬ)")
     for label, path in missing:
         print(f"  注   [登録が古い]    {path} ← {label}"
               " = 登録されておるのに repo として実在せぬ。★登録が実体を指さぬ間、"
@@ -842,8 +870,16 @@ def tree_census(registry: Path, watched_file: Path | None, projects: Path) -> in
         print("  処方: その木を gate_nightly の監視下へ入れる (台帳を置き coverage を撃つ) か、")
         print("        tree_census_waivers へ ★理由と until (いつ返すか) をつけて★ 免除せよ。")
         return 1
+    if unfired:
+        print(f"[木の点呼] UNDETERMINED: ★撃とうとして撃てておらぬ木 {len(unfired)} 本★"
+              " = その木の牙は一度も数えられておらぬ。★数えておらぬ物を「牙なし」とも"
+              "「監視下」とも名乗れぬゆえ緑にはせぬ★")
+        print("  処方: その木を実在させる (submodule init / path 是正) か、gate 側の"
+              " 呼び出しを外して ★撃とうとしておらぬ★ ことを明示せよ (黙って飛ばすな)。")
+        return 2
     print(f"[木の点呼] PASS: 牙を持つ木はすべて監視下 (免除 {n_waived} 本は可視・"
-          f"★牙なし未監視 {n_fangless} 本は牙が生えれば赤へ変わる★)")
+          f"★牙なし未監視 {n_fangless} 本は牙が生えれば赤へ変わる — "
+          f"★但し牙の勘定は sh/bash/py/bats に限る = TS/JS の木では成り立たぬ (cmd_1376)★)")
     return 0
 
 
@@ -1346,13 +1382,16 @@ def main() -> int:
                     help="cmd_1374: 牙を持つのに どの gate も見ておらぬ repo を名指す")
     ap.add_argument("--watched-file", type=Path, default=None,
                     help="gate が実際に撃った repo-root の一覧 (--tree-census 用)")
+    ap.add_argument("--attempted-file", type=Path, default=None,
+                    help="cmd_1374b: gate が★撃とうとした★ repo-root の一覧。watched に居らぬ物は"
+                         " ★撃てておらぬ★ として UNDETERMINED で名指す (黙って点呼から消させぬ)")
     ap.add_argument("--projects", type=Path, default=REPO_ROOT / "config" / "projects.yaml",
                     help="木の登録簿 (点呼の分母)")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
     if a.tree_census:
-        return tree_census(a.registry, a.watched_file, a.projects)
+        return tree_census(a.registry, a.watched_file, a.projects, a.attempted_file)
     if a.sanity:
         return sanity(a.registry)
     if a.coverage:

@@ -1,0 +1,60 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# mutation_registry.web.yaml — ★waverworks web repo 用の【跨ぎ台帳】★ (cmd_1374 A-1)
+#
+# ■ なぜ web repo の中でなく shogun 側に置くか
+#   web repo は /mnt/c/Users 配下 = ★殿 CLAUDE.md の変更禁止領域★ ゆえ、
+#   backend / app と同じ「台帳を対象 repo の中へ置く」形が足軽の手では採れぬ。
+#   ⇒ 台帳だけ shogun 側に置き、runner を --repo-root で跨がせる
+#     (runner は --registry と --repo-root を独立に取るゆえ、台帳の住まいは対象 repo でなくてよい)。
+#   ★牙 1 件のために web repo へ新しい機構を置く方向を避けた★ = 家老の裁定どおり。
+#
+# ■ ★なぜ本体台帳 (mutation_registry.yaml) へ相乗りさせぬのか (実測で決めた)★
+#   run_all は ★1 registry の全 entry を単一の --repo-root に対して評価する★。
+#   本体台帳へ本 entry を足して --repo-root を web にした実測 (2026-07-26):
+#     ★shogun 自身の 37 entry が全て「paths の実体が無い」で UNDETERMINED★ になった。
+#   ⇒ ★台帳 file と repo-root は 1 対 1★。跨ぎ先ごとに台帳 file を分けるのが正しい形である。
+#
+# 掟・書式は config/mutation_registry.yaml および
+# scripts/gate_mutation_replay.py 冒頭 docstring を正とする (二重管理せぬ)。
+# 実行: python3 scripts/gate_mutation_replay.py \
+#         --registry config/mutation_registry.web.yaml --repo-root "$GATE_WEB_ROOT"
+# ═══════════════════════════════════════════════════════════════════════════
+
+# --coverage の陽性対照。既定は runner 自身 (gate_mutation_replay.py) だが web repo には
+# 居らぬゆえ、当 repo に実在する牙を対照に据える (cmd_1355 backend 延長と同じ理由)。
+coverage_positive_control: scripts/check-shippable-theme.py
+
+mutations:
+  - id: MUT-1358-001
+    origin: cmd_1358
+    suspected_by: ashigaru3
+    desc: |
+      check-shippable-theme.py の比較器から「大きい file の中身の食い違い」を捕える牙を折ると、
+      入口 KAT の ⑥ 規模の層 (KAT_LARGE_SIZE = 1 MiB + 7 B の末尾 1 byte 変異) が赤くなるべき。
+      折っても緑なら、★軍師一号 GY-B が実証した「10 万 byte 超は黙って MATCH」型の壊れが素通りし、
+      240KB の実 file を 1 byte 改竄しても配布 gate は緑を出す★ (当時 旧 KAT は実際に素通りした)。
+      ⇒ 本 entry は「規模の層を持つ KAT」そのものが黙って痩せておらぬかを毎朝検める。
+    paths: [scripts/check-shippable-theme.py]
+    # ★KAT は自己完結 (標本を tmp に作って比較器へ当てる) ゆえ、
+    #   theme 実体も git も要らぬ = 牙 1 本を copy するだけで測れる★。
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/check-shippable-theme.py"
+      s = open(p, encoding="utf-8").read()
+      old = "            if head_map[rel] == sha:"
+      assert old in s, "mutate の当たり先が見つからぬ (compare() の形が変わった疑い)"
+      s = s.replace(old, "            if head_map[rel] == sha or len(data) > 100000:", 1)
+      open(p, "w", encoding="utf-8").write(s)
+      PY
+    test: |
+      python3 - <<'PY'
+      import importlib.util, sys
+      spec = importlib.util.spec_from_file_location("cst", "scripts/check-shippable-theme.py")
+      m = importlib.util.module_from_spec(spec)
+      spec.loader.exec_module(m)
+      sys.exit(0 if m.kat(True) else 1)
+      PY
+    expect: nonzero
+    # 実測 2026-07-26: 牙折り時は KAT ⑥ (規模の層) が落ち、この語で名指しされる。
+    # ★「別の理由で偶然赤い」を「変異が効いた」と誤認せぬための名指し検分★。
+    red_needle: "★規模の層★"

@@ -33,12 +33,24 @@ Usage:
   exit 0 = 0 箇所 / exit 1 = 1 箇所以上 (file:line で名指す)
 """
 
+import os
 import re
 import sys
 from pathlib import Path
 
 # ★第三者管理の vendored suite は走査せぬ★ (彼らは彼らの規律で書いておる)。
 EXCLUDE_PARTS = ("test_helper/bats-assert", "test_helper/bats-support")
+
+# ★歩かぬ木★ (2026-07-27 刈込み): .bats が原理的に在り得ぬのに舐めておった枝。
+#   ★之は【見なくする】刈込みではない★= 実測で ★此の下に .bats は 0 本★ を確かめた上で
+#   歩くのを止めておる (.git 60MB / .venv 18MB を毎回 舐めて 2 秒 掛かっておった)。
+#   ★危うさを先に名乗る★= 名で刈るゆえ、将来 此の名の下へ .bats を置けば黙って見落とす。
+#   ⇒ ★守りは T-NEG-001 の canary (走査 file 数の下限) が持つ★ =
+#     ★数が減れば、其れは【速くなった】のでなく【見なくなった】である★。
+PRUNE_DIRS = frozenset({
+    ".git", ".venv", "venv", "node_modules",
+    "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+})
 
 # 行頭の否定: `! cmd`
 LEAD = re.compile(r"^\s*!\s+\S")
@@ -47,9 +59,18 @@ LEAD = re.compile(r"^\s*!\s+\S")
 INLINE = re.compile(r"(?:&&|\|\||;|\bthen\b)\s+!\s+\S")
 
 
+def _walk_bats(root: Path):
+    """★歩く枝を刈った rglob★ = PRUNE_DIRS を root から辿らぬ (中身も見ぬ)."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS]
+        for fn in filenames:
+            if fn.endswith(".bats"):
+                yield Path(dirpath) / fn
+
+
 def scan(root: Path):
     hits = []
-    files = [p for p in root.rglob("*.bats")
+    files = [p for p in _walk_bats(root)
              if not any(x in p.as_posix() for x in EXCLUDE_PARTS)]
     for p in sorted(files):
         try:

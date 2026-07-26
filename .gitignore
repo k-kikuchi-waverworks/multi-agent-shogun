@@ -159,6 +159,23 @@ scripts/seo_qc.sh
 # cmd_1339 (2026-07-25): cron wrapper も追跡 (watcher_supervisor 生存監視④を担う。
 # 従来 whitelist 漏れで未追跡だった)
 !scripts/idle_revive_scan.sh
+# cmd_1367 (2026-07-26): staged crontab 行。★追跡下の instructions/karo.md:695 と
+# docs/.../cmd_1154_idle_revive_scan_adr.md が「これを登録せよ」と名指ししておるのに、
+# 指される側だけ配られておらなんだ★ = 本体 .py/.sh は上2件で個別に是正済みなのに
+# 同じ族の3本目がまた漏れた = ★1件ずつ拾う直し方では同じ穴が繰り返し開く★の実物。
+!scripts/idle_revive_scan.cron
+
+# cmd_1367 (2026-07-26): ★追跡下の scripts/setup_cron.sh:33 が crontab へ仕込む先★。
+# fresh clone では 20 分毎に「そんな file は無い」cron が回り続ける (誰も赤を出さぬ)。
+# memory feedback_idle_backlog_autopull = idle backlog 自動消化は運用則ゆえ道具本体。
+!scripts/idle_backlog_sweep.sh
+!scripts/idle_backlog_sweep.py
+
+# cmd_1367 (2026-07-26): 夜間停電中の誤 /clear 封じ + 復帰 nudge (cmd_1346)。
+# ★gpu_sidecar_stop.sh と同族 = 「守る道具が守られておらぬ」★。
+# crontab の閾値を退避し復旧を二重 (cron + detached bash) に仕込む可逆設計ゆえ、
+# 配られねば「殿の token 切れで全 agent が誤 clear される」事故に丸腰で戻る。
+!scripts/night_blackout_guard.sh
 
 # cmd_652 (2026-05-16): scripts/lib/ helper (settings.yaml 動的読込)
 !scripts/lib/

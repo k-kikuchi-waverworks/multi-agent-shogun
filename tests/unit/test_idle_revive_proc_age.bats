@@ -136,13 +136,22 @@ spec.loader.exec_module(irs)
 irs.probe_agent_state = lambda agent: os.environ.get("FAKE_PROBE_STATE", "idle")
 irs.pane_upstream_text = lambda agent: os.environ.get("FAKE_PANE_TEXT", "")
 
-def fake_age(agent):
+# ★now_ts を受ける (cmd_1392 是正 2026-07-27)★= 本体が
+#   `agent_proc_age_sec(agent, now_ts=now_ts)` で呼ぶ様になったゆえ。
+# ★之を怠れば TypeError で main が落ち、本 suite 15 本中 13 本が【production の
+#   非でなく stub の非で】赤くなる★ — 実際に 10:1x に其の形で赤くなった。
+def fake_age(agent, now_ts=None):
     v = os.environ.get("FAKE_PROC_AGE_" + agent, os.environ.get("FAKE_PROC_AGE", ""))
     v = v.strip()
     if v in ("", "none", "None"):
         return None
     return int(v)
 
+# ★★此処が本 suite の【最大の盲点】である (2026-07-27 10:2x に名乗る)★★
+#   ★齢の口そのものを丸ごと差し替えておる★ ⇒ ★本 suite は【齢を如何に測るか】を
+#   一度も検めておらぬ★ = cmd_1392 の是正 (ps 一族 → mtime 一族) は、
+#   ★本 suite が全部緑でも壊れうる★。
+#   ⇒ ★ゆえに T-AGE-002 / T-AGE-016 / T-AGE-017 は stub を通さず実物を撃つ★。
 irs.agent_proc_age_sec = fake_age
 argv = ["--queue-root", os.environ["Q"],
         "--pane-state-file", os.environ["TEST_TMPDIR"] + "/pane_state.yaml",
@@ -187,16 +196,44 @@ PY
 # ---------------------------------------------------------------------------
 @test "T-AGE-002: the age is the OLDEST child, and zero children is None (never age 0)" {
     run "$VENV_PY" - <<'PY'
-import importlib.util, os
+import datetime, importlib.util, os, subprocess, time
 spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
 irs = importlib.util.module_from_spec(spec); spec.loader.exec_module(irs)
-f = irs._oldest_child_age
-assert f("100\n5000\n30\n") == 5000, f("100\n5000\n30\n")   # ★min ならば 30★
-assert f("42\n") == 42
-assert f("") is None, "子 0 件は None でなければならぬ (齢 0 は全面抑止を招く)"
-assert f("\n  \n") is None
-assert f("not-a-number\n77\n") == 77                        # ps の雑音は捨てる
-print("OK oldest-child + none-when-childless")
+f = irs._oldest_child_age_from_pids
+now = datetime.datetime.now().timestamp()
+
+# ★★入力は【pid の並び】であって【齢の並び】ではない (cmd_1392 是正)★★
+#   ★之が本牙の芯である★= 以前は `ps -o etimes=` の【秒】を受けており、
+#   ★族の混線 (ps 一族 vs mtime 一族) の入口が此処であった★。
+#   ⇒ ★秒として読む実装へ戻れば、pid の数がそのまま齢になる★ = 下の 2 本が捕える。
+kid = subprocess.Popen(["sleep", "30"])
+try:
+    time.sleep(0.3)
+    a = f(str(kid.pid), datetime.datetime.now().timestamp())
+    assert a is not None, "生きた pid を渡して None は誤り"
+    # 生まれたての子ゆえ齢は数秒。★pid を秒と読めば数万秒になる★。
+    assert 0 <= a < 60, f"齢が生年から測られておらぬ (a={a}, pid={kid.pid})"
+    assert abs(a - kid.pid) > 60, f"★pid の値が齢として返っておる★ (a={a}, pid={kid.pid})"
+
+    # ★最も古い子を取る★= pid 1 (init) と生まれたての子を並べれば、init の齢が返る。
+    #   ★若い方を取れば抑止が広がる = 真の固着を見逃す★ゆえ ★抑止は狭い側へ倒す★。
+    now2 = datetime.datetime.now().timestamp()
+    both = f(f"1 {kid.pid}", now2)
+    want = now2 - os.stat("/proc/1").st_mtime
+    assert abs(both - want) < 2.0, f"最も古い子 (init) の齢でない: {both} vs {want}"
+    assert both > a, "init より生まれたての子が古いと判じておる (min/max が逆)"
+finally:
+    kid.kill(); kid.wait()
+
+# ★子 0 件は None★ = 齢 0 に化ければ ★何もかもを抑止する門★ になる。
+assert f("", now) is None, "子 0 件は None でなければならぬ (齢 0 は全面抑止を招く)"
+assert f("\n  \n", now) is None
+# ★死んだ pid / 雑音は捨てる★ (読めた物が 1 つも無ければ None)
+assert f("not-a-number\n", now) is None
+assert f("2147483646\n", now) is None, "在らぬ pid は読めた事にせぬ"
+# ★負の齢は None★ = 生年が now より後 = 計器が壊れておる ⇒ 黙って 0 へ丸めぬ。
+assert f("1", 0.0) is None, "負の齢は None へ倒さねばならぬ (0 に丸めるな)"
+print("OK oldest-child + none-when-childless + pid-not-seconds")
 PY
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "OK oldest-child"
@@ -554,4 +591,162 @@ PY
     _refute_output "^ACTION=revive AGENT=ashigaru91"
     # ★判定へ入っておらぬのだから、抑止の総量も 0 と名乗る★ (0 を canary の後に読む)
     echo "$output" | grep -q "IMPOSSIBLE_CLAIM 抑止 = 0 体"
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-016 (cmd_1392 是正・2026-07-27 = 軍師二号が code の内側で見つけた汚れ)★★
+# ★★齢は【mtime 一族】から採る = ps 一族を二度と混ぜぬ★★
+#
+# ★病★= `age_sec < claimed_silence_sec` は
+#   ・齢   … `ps -o etimes=` = ★/proc/uptime 起点の単調時計★
+#   ・沈黙 … file の st_mtime = ★CLOCK_REALTIME★
+#   の ★別々の物差しを直に引き算しておった★。
+# ★実測 (2026-07-27 10:2x・母数 10 agent / 齢を判じられたのは両者とも 9)★=
+#   ★差 (mtime齢 − etimes齢) 中央 1,937.8 秒 = 32.3 分・★負は 0 本★★
+#   ⇒ ★ps は齢を【必ず短く】申す★ ⇒ ★`age < claimed` が成立しやすい★ =
+#     ★★抑止が過剰 = 真に固着した agent が revive を受けられぬ側★★。
+#
+# ★本牙は【源】を縛る (源が戻れば数も戻るゆえ)★:
+#   ★限界を先に名乗る = 之は【source 面の門】であって挙動の門ではない★。
+#   挙動の側は T-AGE-002 (pid を秒と読めば赤) と T-AGE-018 (実害の形) が持つ。
+#   ★二つで挟んでおる★ = 源を直しても挙動が戻れば 002/018 が鳴る。
+# ---------------------------------------------------------------------------
+@test "T-AGE-016: the age is read from the mtime family — the ps clock must never come back" {
+    run "$VENV_PY" - <<'PY'
+import importlib.util, inspect, os
+spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
+irs = importlib.util.module_from_spec(spec); spec.loader.exec_module(irs)
+
+# (1) ★齢を採る bash から ps 一族が消えておる★
+bash = irs._PANE_PROC_AGE_BASH
+for needle in ("etimes", "etime", "lstart"):
+    assert needle not in bash, (
+        f"★齢の口へ ps 一族 ({needle}) が戻っておる★ — 沈黙は st_mtime ゆえ "
+        "★族の違う時計を引き算する形★に戻る (中央 32.3 分・片側にずれる)")
+
+# (2) ★生年は stat = 沈黙と同じ syscall★ であることを源で縛る
+src = inspect.getsource(irs._proc_start_mtime)
+assert "os.stat" in src and "st_mtime" in src, (
+    "★生年が stat 由来でない★ = 沈黙 (newest_output_mtime) と同じ族でなくなる")
+
+# (3) ★沈黙の側も同じ族のままか★ (片側だけ直しても混線は消えぬ)
+src2 = inspect.getsource(irs.newest_output_mtime)
+assert "st_mtime" in src2, "★沈黙の側が mtime 一族から外れた★ = 対の前提が崩れる"
+
+# (4) ★補正値を焼いておらぬ★ (軍師一号 10:02 の枷 =
+#     「ずれは一定でない = boot から離れるほど汚れる」ゆえ定数で引く道は必ず腐る)
+age_src = inspect.getsource(irs._oldest_child_age_from_pids)
+for bad in ("1937", "1938", "1900", "31 * 60", "1913"):
+    assert bad not in age_src, f"★補正値 {bad} を焼いておる★ = ずれは一定でない"
+print("OK age is mtime-family, no ps clock, no baked offset")
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OK age is mtime-family"
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-017 (2026-07-27 10:09 の実害・拙者自身が埋めた地雷)★★
+# ★齢の口は【引数なしでも】例外を投げてはならぬ★
+#
+# ★何が起きたか★= 拙者は是正の折 `now_ts is None` の既定に `time.time()` と書いた。
+#   ★本 module は `time` を import しておらぬ★ ⇒ ★NameError★。
+# ★而して cron は緑を返し続けておった★= 其の枝は
+#   ★「stall_min を越えた agent が現れた時」にしか通らぬ★ゆえ =
+#   ★★番人が真に働かねばならぬ其の一瞬にだけ落ちる地雷★★であった。
+#   (log には 10:06 の scan まで一行の異常も無い = ★沈黙は健全の証にならぬ★)
+# ⇒ ★本牙は既定の口を直に踏む★= 呼ばれぬ枝を呼ぶ者を、試験の側に置く。
+# ---------------------------------------------------------------------------
+@test "T-AGE-017: the age port must not explode when called without now_ts (the NameError landmine)" {
+    run "$VENV_PY" - <<'PY'
+import importlib.util, os
+spec = importlib.util.spec_from_file_location("irs", os.environ["SCAN_PY"])
+irs = importlib.util.module_from_spec(spec); spec.loader.exec_module(irs)
+# ★在らぬ agent で良い★= now_ts の既定は subprocess より前に評価されるゆえ、
+#   ★実 pane を持たずとも地雷は踏める★ (= 本牙は本番の盤面に依らぬ)。
+v = irs.agent_proc_age_sec("no_such_agent_zzz")
+assert v is None, f"在らぬ agent の齢が None でない: {v!r}"
+# ★既定と明示で同じ道を通る★
+import datetime
+v2 = irs.agent_proc_age_sec("no_such_agent_zzz", now_ts=datetime.datetime.now().timestamp())
+assert v2 is None
+print("OK default now_ts does not raise")
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OK default now_ts does not raise"
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-018 (軍師一号 10:02 が数で組んだ【実害の形】をそのまま盤面にする)★★
+# ★沈黙 60 分・真の齢 85 分★ の pane:
+#   ・★汚れた計器 (ps)★ は齢を 53.7 分 と申す ⇒ 53.7 < 60 ⇒ ★抑止★
+#     = ★★齢は現に足りておるのに、真に固着した agent が revive を受けられぬ★★
+#   ・★是正後 (mtime)★ は齢を 85 分 と申す ⇒ 85 > 60 ⇒ ★従前どおり撃つ★
+# ★本番の閾 45 で撃つ★ (沈黙 60 > 45 ゆえ現に判定へ入る = 盤面が本番に在る)。
+# ★両向きを 1 本に収めてある★= 是正が【守りを減らしておらぬ】側 (撃つ) と、
+#   【過剰抑止を解いた】側 (撃たれる様になった) が同じ盤面で並ぶ。
+# ---------------------------------------------------------------------------
+@test "T-AGE-018: the harm shape — a real stall (silence 60min, true age 85min) must fire, though the ps clock would have suppressed it" {
+    _write_stuck_task ashigaru91 '60 minutes ago'
+    _write_pane_states ashigaru91:idle
+
+    # (1) ★汚れた計器が申す齢 (53.7 分 = 3222 秒)★ → 抑止される = 実害の再現
+    FAKE_PROC_AGE=3222 STALL_MIN_UNDER_TEST=45 run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "^ACTION=impossible_claim_suppressed AGENT=ashigaru91"
+    _refute_file "$INBOX_STUB_RECORD" "clear_command"
+
+    # (2) ★是正後の齢 (85 分 = 5100 秒)★ → 従前どおり撃つ
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/clear_log.yaml"
+    FAKE_PROC_AGE=5100 STALL_MIN_UNDER_TEST=45 run _run_main_py
+    [ "$status" -eq 0 ]
+    _refute_output "ACTION=impossible_claim_suppressed"
+    echo "$output" | grep -q "^ACTION=revive AGENT=ashigaru91"
+    echo "$output" | grep -q "OUTCOME=revive_fired AGENT=ashigaru91"
+    grep -q "^ashigaru91|clear_command|" "$INBOX_STUB_RECORD"
+}
+
+# ---------------------------------------------------------------------------
+# ★★T-AGE-019 (家老 09:58 の任(2) = 【0 の二義を割る】)★★
+#
+# ★軍師二号は log の ACTION 1,912 件から `impossible_claim_suppressed` = 0 を示し、
+#   「(甲) 条件が成らなんだ / (乙) 成る盤面が来ておらぬ」は ★拙者には割れぬ★ と申した★。
+# ★割れなんだ理由は【分母が一度も印字されておらなんだ】ゆえである★ =
+#   ★0 だけを見せて母数を見せぬ数は、原理的に読めぬ★。
+# ⇒ ★JUDGED / AGE_KNOWN / AGE_UNKNOWN を名乗らせ、0 の三通りを log 単独で割る★:
+#     JUDGED=0            … 判定へ入った者が居らぬ            (= 乙)
+#     JUDGED>0, KNOWN=0   … 齢を一度も判じられなんだ = 門が盲  (= 丙・軍師が挙げておらぬ third)
+#     JUDGED>0, KNOWN>0   … 現に問うて、成らなんだ            (= 甲)
+# ★丙を足したのは拙者である★= ★0/N の門は「成らなんだ」と同じ 0 を出す★ゆえ、
+#   ★二義でなく【三義】であった★ (之が本牙の産物じゃ)。
+# ---------------------------------------------------------------------------
+@test "T-AGE-019: a zero suppression count declares its denominator — the three readings of 0 are separable" {
+    # (乙) 誰も判定へ入らぬ盤面 = 出力が漸進しておる (沈黙 1 分 < 閾 15)
+    _write_stuck_task ashigaru91 '1 minute ago'
+    _write_pane_states ashigaru91:idle
+    FAKE_PROC_AGE=390 run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "IMPOSSIBLE_CLAIM 抑止 = 0 体 .*JUDGED=0 AGE_KNOWN=0 AGE_UNKNOWN=0"
+    echo "$output" | grep -q "★0 の意味 = 判定へ入った者が居らぬ"
+
+    # (丙) 判定へは入るが齢を判じられぬ = ★門が盲★ (0 が「成らなんだ」と同じ顔で出る)
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/clear_log.yaml"
+    _write_stuck_task ashigaru91 '95 minutes ago'
+    FAKE_PROC_AGE=none run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "JUDGED=1 AGE_KNOWN=0 AGE_UNKNOWN=1"
+    echo "$output" | grep -q "★0 の意味 = 齢を一度も判じられなんだ (門が盲である)★"
+
+    # (甲) 現に問うて、成らなんだ = 齢が主張を上回る
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/clear_log.yaml"
+    FAKE_PROC_AGE=7200 run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "JUDGED=1 AGE_KNOWN=1 AGE_UNKNOWN=0"
+    echo "$output" | grep -q "★0 の意味 = 現に問うて、成らなんだ★"
+
+    # ★抑止が現に在る時は註を出さぬ★ (0 でない数に「0 の意味」を添えれば嘘になる)
+    rm -f "$INBOX_STUB_RECORD" "$Q/state/clear_log.yaml"
+    FAKE_PROC_AGE=390 run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "IMPOSSIBLE_CLAIM 抑止 = 1 体 .*JUDGED=1 AGE_KNOWN=1 AGE_UNKNOWN=0"
+    _refute_output "★0 の意味"
 }

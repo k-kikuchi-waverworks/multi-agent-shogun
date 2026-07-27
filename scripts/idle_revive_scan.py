@@ -127,6 +127,12 @@ BLACKOUT_STATE_FILE = "blackout_suppress"  # queue/state/ 配下の throttle 専
 #   stall_min に達する前に鳴る★ = 「撃たぬ側へ倒すだけ」の永久免除の罠を塞ぐ。
 DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD = 3
 
+# ★cmd_1392 是正 (2026-07-27)★: 抑止の【分母】。scan() の入口で毎回 0 へ戻し、
+#   判定へ入った体数 (judged) と、其のうち齢を判じられた/判じられなんだ体数を数える。
+# ★scan() の戻り値を 3 組から動かさぬ★= 他の 2 つの牙 (test_idle_revive_cooldown /
+#   test_idle_revive_log_selfproof) が 3 組で受けておるゆえ ★最小 churn へ倒す★。
+IMPOSSIBLE_JUDGE_STATS = {"judged": 0, "age_known": 0, "age_unknown": 0}
+
 # ══════════════════════════════════════════════════════════════════════════
 # ★cmd_1394: 番人が【己の振舞い】を証す★ (2026-07-27 未明・家老が二度誤った)
 # ──────────────────────────────────────────────────────────────────────────
@@ -393,6 +399,43 @@ def agent_context_note(agent, reports_dir):
 #
 # ★齢の取得と矛盾の判定を別の口に分けてある★ — 混ぜると試験が実 process を
 #   起こさねば書けなくなる (設計 §6・軍師二号)。判定は scan() の側に在る。
+# ─────────────────────────────────────────────────────────────
+# ★★cmd_1392 是正 (2026-07-27 10:xx・軍師二号が code の内側で見つけた汚れ)★★
+#
+# ★病★= ★★二つの【族の違う時計】を直に較べておった★★:
+#   ・齢     … `ps -o etimes=`      = ★boot 起点の単調時計 (/proc/uptime) 一族★
+#   ・沈黙   … file の st_mtime 差   = ★CLOCK_REALTIME (stat) 一族★
+#   ⇒ `age_sec < claimed_silence_sec` は ★別々の物差しの目盛りを引き算しておった★。
+#
+# ★実害の向き (拙者が 303 process 全数で実測・2026-07-27 10:03)★:
+#   ★差 (mtime齢 − etimes齢) は ★片側★ = min 0.8s / 中央 1,899.2s / max 1,900.8s・
+#     ★負は 0 本★ ⇒ ★etimes は齢を【必ず短く】申す★ (WSL2 の suspend を uptime が数えぬゆえ)。
+#   ⇒ ★`age < claimed` が成立しやすくなる★= ★★抑止が過剰に掛かる★★ =
+#     ★味方を斬る側ではなく【真の固着を見逃す】側★。
+#   ★且つ我らが己で書いた界が破れておった★= 註「抑止は【遅延】であって【免除】ではない・
+#     最大 stall_min」は、汚れの下では ★最大 stall_min + 31.6 分★ になっておった。
+#
+# ★★処方 = 【正しい刻を当てる】ではない。【較べられる物同士で較べる】である★★
+#   (家老 09:58 の枷 = 「どちらが真の刻かを断ずるな = 外部の基準を我らは持たぬ」)。
+#   ⇒ ★齢も mtime 一族から採る★= ★`/proc/<pid>` の inode mtime = process の【生年】★。
+#     ★沈黙が `Path.stat().st_mtime` を読むのと ★同じ syscall・同じ時計★ である★。
+#   ⇒ ★★補正値は一切 焼かぬ★★ (軍師一号 10:02 の枷 = 「ずれは一定でない = boot から
+#     離れるほど汚れる」ゆえ、定数で引く道は必ず腐る)。
+#
+# ★実測で確かめた性質 (2026-07-27 10:01〜10:03・母数つき)★:
+#   (a) 生まれたての process = /proc mtime と spawn 時刻の差 ★+0.20 秒★
+#   (b) 同じ inode を 5 回 (2秒毎) stat = ★値は不動 (集合の大きさ 1)★・/proc 掃き後も不動
+#   (c) 303 process 全数で ★mtime 由来の齢が負 = 0 本★
+#   (d) pid 1 の生年 = ★00:13:11★ ⇒ ★log 由来 00:13:45 / `uptime -s` 00:33採取 00:13:52 と整合★
+#       (★之は【真の刻を当てた】主張ではない = 独立な三者が近い、という以上を申さぬ★)
+#
+# ★言えぬ側を名乗る★= ★kernel が此の inode を作り直す事が万に一つも無いか、拙者は証せぬ★
+#   (b で不動は見たが【不在の証明】は出せぬ)。⇒ ★作り直されれば齢は【若く】出る = 抑止側★
+#   ゆえ ★従前と同じ向きの誤り★であり、守りを新たに減らしはせぬ。
+#   ★負の齢は None (判じられぬ) へ倒す★= 計器が壊れた時に抑止も revive も断ぜぬため。
+#
+# ★齢の取得と矛盾の判定を別の口に分けてある★ — 混ぜると試験が実 process を
+#   起こさねば書けなくなる (設計 §6・軍師二号)。判定は scan() の側に在る。
 _PANE_PROC_AGE_BASH = r'''
 set -uo pipefail
 cd "$1"
@@ -403,27 +446,58 @@ pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "
 [ -n "$pane" ] || exit 0
 ppid=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null || echo "")
 [ -n "$ppid" ] || exit 0
-children=$(pgrep -P "$ppid" 2>/dev/null || true)
-[ -n "$children" ] || exit 0
-for c in $children; do
-    ps -o etimes= -p "$c" 2>/dev/null || true
-done
+# ★齢は此処で測らぬ★= ★pid だけを返し、齢は python が mtime 一族で測る★
+# (★以前は此処で ps へ経過秒を問うており、其れが族の混線の入口であった★
+#  = ★其の綴りを此の文へ書けば T-AGE-016 が鳴る★ゆえ、綴らずに記す)。
+pgrep -P "$ppid" 2>/dev/null || true
 '''
 
 
-def _oldest_child_age(stdout_text):
-    """`ps -o etimes=` の並びから ★最も古い子★ の齢を返す。1 件も無ければ None。
+def _proc_start_mtime(pid):
+    """`/proc/<pid>` の inode mtime = ★process の生年を mtime 一族で読む★。読めねば None。
 
-    ★別の口にしてある理由★= 実 process を起こさずに【最大を取っておるか】
-    【子 0 件を齢 0 に化けさせておらぬか】を直に撃てるようにするため
-    (MUT-1392-002 / 005 の的)。
+    ★`newest_output_mtime` が file へ撃つのと ★同じ stat★ である★ =
+      之が「較べられる物同士で較べる」の実体じゃ。
     """
-    ages = [int(s.strip()) for s in stdout_text.splitlines() if s.strip().isdigit()]
-    return max(ages) if ages else None
+    try:
+        return os.stat(f"/proc/{int(pid)}").st_mtime
+    except (OSError, ValueError, TypeError):
+        return None
 
 
-def agent_proc_age_sec(agent):
+def _oldest_child_age_from_pids(stdout_text, now_ts):
+    """子 pid の並びから ★最も古い子★ の齢 (秒) を返す。判じられぬ時は None。
+
+    ★名を替えた理由 (cmd_1392 是正)★= 以前は `_oldest_child_age(ps の etimes 並び)` で
+      あった。★入力の意味が【齢の並び】から【pid の並び】へ変わる★ゆえ、名を据え置けば
+      ★古い試験が新しい実装を素通りで緑にする★ (pid の最大値は最も古い子ではない = 逆)。
+      ★★意味が変われば名も変える★★ = 読み手と試験に気付かせる唯一の口である。
+
+    ★別の口にしてある理由★= 実 process を起こさずに【最も古い子を取っておるか】
+      【子 0 件を齢 0 に化けさせておらぬか】を直に撃てるようにするため。
+
+    ★最も古い子を取る理由★: 子が複数在る過渡 (旧 CLI が終いきらぬ等) で若い方を取れば
+      抑止が広がる。★抑止は狭い側へ倒す★ — 誤って抑止すれば真の固着を見逃すゆえ。
+
+    ★子 0 件は None (= 齢 0 ではない)★: CLI 不在は【固着】でも【矛盾】でもない
+      別の状態であり、齢 0 として扱えば ★何もかもを抑止する門★ になる。
+
+    ★負の齢も None★: 生年が now より後 = 計器が壊れておる ⇒ ★黙って 0 へ丸めぬ★。
+    """
+    starts = [m for m in (_proc_start_mtime(tok) for tok in stdout_text.split())
+              if m is not None]
+    if not starts:
+        return None
+    age = now_ts - min(starts)          # ★最も古い子 = 生年が最も小さい子★
+    return age if age >= 0 else None
+
+
+def agent_proc_age_sec(agent, now_ts=None):
     """agent の CLI process の齢 (秒)。判じられぬ時は None。
+
+    ★now_ts を渡させる理由 (cmd_1392 是正)★= 沈黙は scan 開始の一点 (`now_ts`) から
+      測っておる。齢だけを【後の刻】から測れば、scan が長引いた分だけ齢が水増しされ
+      ★同じ族に揃えた筈が、また別の起点で較べる形★になる。★同じ一点から測る★。
 
     ★pane_pid そのものを見ぬ理由 (2026-07-27 02:03:45 実測)★:
       全 pane の pane_pid の etime が ★一律 6,386 秒★ = tmux session の齢しか映さぬ =
@@ -432,13 +506,12 @@ def agent_proc_age_sec(agent):
 
     ★`claude` と名を焼かぬ理由★: config/settings.yaml の CLI は可変ゆえ
       (codex / opencode / kimi へ切替えた pane で ★黙って盲になる★)。
-
-    ★最大を取る理由★: 子が複数在る過渡 (旧 CLI が終いきらぬ等) で若い方を取れば
-      抑止が広がる。★抑止は狭い側へ倒す★ — 誤って抑止すれば真の固着を見逃すゆえ。
-
-    ★子 0 件は None (= 齢 0 ではない)★: CLI 不在は【固着】でも【矛盾】でもない
-      別の状態であり、齢 0 として扱えば ★何もかもを抑止する門★ になる。
     """
+    # ★`time.time()` を使わぬ★= ★本 module は `time` を import しておらぬ★ =
+    #   拙者は 10:0x に其の一行を書き、★NameError の地雷を live な番人へ埋めておった★
+    #   (10:09 実射で露見・機序は下の註)。★scan と同じ `datetime` 一族から採る★。
+    if now_ts is None:
+        now_ts = datetime.datetime.now().timestamp()
     try:
         proc = subprocess.run(
             ["bash", "-c", _PANE_PROC_AGE_BASH, "_", str(REPO_ROOT), agent],
@@ -446,7 +519,7 @@ def agent_proc_age_sec(agent):
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return _oldest_child_age(proc.stdout)
+    return _oldest_child_age_from_pids(proc.stdout, now_ts)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -1848,6 +1921,13 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
     now_ts = now.timestamp()
     results = []
     clear_log = dict(clear_log)
+    # ★cmd_1392 是正 = 「抑止 0 体」の二義を割る母数★ (家老 09:58 の任(2))。
+    # ★軍師二号は log 1,912 件の ACTION から `impossible_claim_suppressed` = 0 を示し、
+    #   「(甲) 条件が成らなんだ / (乙) 成る盤面が来ておらぬ の何れかは拙者には割れぬ」と申した★。
+    # ★割れなんだ理由は【分母が一度も印字されておらなんだ】ゆえである★ =
+    #   ★0 だけを見せて母数を見せぬ数は、原理的に読めぬ★ (本朝 全軍へ配った規の、我が門の側)。
+    # ⇒ ★判定へ入った体数と、其のうち齢を判じられた体数を数え、名乗りへ載せる★。
+    IMPOSSIBLE_JUDGE_STATS.update(judged=0, age_known=0, age_unknown=0)
 
     # quorum 集計: eligible = active task を持つ scan 対象 (busy 含む)。
     # stalled = うち「沈黙」(idle+出力停止 / absent+出力停止) の agent。
@@ -1959,7 +2039,16 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         #   を暗に名乗って撃つゆえ、其の最小の主張 (stall_min) を claimed とする。
         #   ★None を「主張が無い」と読んで素通りさせれば、最も強い主張が最も無検査になる★。
         claimed_silence_sec = (idle_min * 60.0) if idle_min is not None else stall_min * 60.0
-        age_sec = agent_proc_age_sec(agent)
+        # ★now_ts を渡す★= ★沈黙 (idle_min) が測られた其の一点から齢も測る★ =
+        #   渡さねば「同じ族へ揃えた」筈が ★scan の所要時間だけ別の起点になる★。
+        age_sec = agent_proc_age_sec(agent, now_ts=now_ts)
+        # ★母数を数える★= ★此処へ来た = 【判定へ現に入った】である★。
+        #   ★judged=0 の 0 と、judged>0 で抑止 0 の 0 は、全く別の物である★。
+        IMPOSSIBLE_JUDGE_STATS["judged"] += 1
+        if age_sec is None:
+            IMPOSSIBLE_JUDGE_STATS["age_unknown"] += 1
+        else:
+            IMPOSSIBLE_JUDGE_STATS["age_known"] += 1
         if age_sec is not None and age_sec < claimed_silence_sec:
             age_min = age_sec / 60.0
             ratio = (f"{idle_min / age_min:.1f}" if (idle_min is not None and age_min > 0)
@@ -2470,8 +2559,25 @@ def main(argv=None):
     _imp = [r for r in results if r["action"] == "impossible_claim_suppressed"]
     _imp_loop = [r for r in _imp
                  if int(r.get("impossible_streak", 0) or 0) >= args.impossible_loop_threshold]
+    # ★母数を同じ行へ載せる (cmd_1392 是正・家老 09:58 の任(2))★:
+    #   ★JUDGED=0 の 0★ = 【判定へ入った者が居らぬ】= 条件は成否を問われてすら居らぬ
+    #   ★JUDGED>0 で 0★ = 【現に問うて、成らなんだ】
+    #   ★AGE_UNKNOWN が JUDGED に等しい★ = 【齢を一度も判じられておらぬ = 門は盲】
+    # ⇒ ★之で「0」の三通りが log 単独で割れる★ (従前は 0 だけが出ており、
+    #    軍師二号は 1,912 件の ACTION を数えてなお割れなんだ = 分母が無かったゆえ)。
+    _st = IMPOSSIBLE_JUDGE_STATS
+    _zero_note = ""
+    if len(_imp) == 0:
+        if _st["judged"] == 0:
+            _zero_note = " ★0 の意味 = 判定へ入った者が居らぬ (条件は問われておらぬ)★"
+        elif _st["age_known"] == 0:
+            _zero_note = " ★0 の意味 = 齢を一度も判じられなんだ (門が盲である)★"
+        else:
+            _zero_note = " ★0 の意味 = 現に問うて、成らなんだ★"
     print(f"[idle_revive] IMPOSSIBLE_CLAIM 抑止 = {len(_imp)} 体 "
-          f"(うち連続 {args.impossible_loop_threshold} 回以上 = {len(_imp_loop)} 体)",
+          f"(うち連続 {args.impossible_loop_threshold} 回以上 = {len(_imp_loop)} 体) "
+          f"JUDGED={_st['judged']} AGE_KNOWN={_st['age_known']} "
+          f"AGE_UNKNOWN={_st['age_unknown']}{_zero_note}",
           file=sys.stderr)
 
     # ── Task B: 家老 degrade 検知(同居)。scan() の clear_log を引き継ぐ。 ──

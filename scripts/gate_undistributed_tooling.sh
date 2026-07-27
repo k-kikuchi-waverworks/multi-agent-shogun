@@ -76,6 +76,70 @@ gate_scope_notice() {
 	echo "    見ぬ ③ path を変数や連結で組む呼び方は見えぬ (平文一致のみ)"
 	echo "    見ぬ ④ 上記 7 dir の外に在る道具は見えぬ"
 	echo "    ⇒ ★本 gate の PASS は【配られておらぬ道具は無い】ではなく【この網に掛かる範囲では無い】である★"
+	echo "  ★宛先違い (MISDIRECTED) の網は更に狭い — cmd_1441★"
+	echo "    見る = MISSING のうち ★同じ名の file が HEAD の別の path に現に在る★ 物のみ"
+	echo "    見ぬ ⑤ ★実体がどこにも無い宛先違いは永久に見えぬ★ (直し先が無い物は在り得ぬ path と区別が付かぬ)"
+	echo "    見ぬ ⑥ 除外 3 つに当たる物は見ぬ (retired からの呼び / shellcheck source= 行 / 直前が スラッシュ の断片)"
+	echo "    見ぬ ⑦ ★名は合うが別物である場合を見分けられぬ★ (名だけで照合しており中身を見ておらぬ) = 誤検知の側の穴"
+}
+
+# ══ 参照の抽出 (cmd_1441 で【文脈つき】へ替えた) ══
+#   旧 = `grep -oE` で綴りだけを取っておった。新 = awk で 3 つを同時に出す:
+#     ① 綴り  ② 直前の1文字が `/` か  ③ その行が shellcheck の source= 指示か
+#   ★何故 文脈が要るか★ = 「宛先違い」の判定 (is_misdirected) の除外 E2/E3 が、
+#     綴りだけでは決まらぬゆえ。E3 は ★抽出器が path の頭を切り落とした断片★ を見分ける
+#     唯一の手掛かりであり、直前の文字を失えば断片と本物が同じ顔になる。
+#   ★綴りの取り方 (正規表現・貪欲・左から重ならず) は旧と 1 文字も違えておらぬ★
+#     = 入れ替えで参照の総和が動けば、以後の全ての数が旧と比べられなくなる。
+#     ゆえに selftest T12 で ★旧 grep と新 awk が同じ列を返すこと★ を実弾で固定する。
+extract_refs() {
+	awk '
+	{
+		line = $0
+		sc = (line ~ /shellcheck[^A-Za-z]*source=/) ? 1 : 0
+		pos = 1
+		while (1) {
+			rest = substr(line, pos)
+			if (!match(rest, /(scripts|lib|config|instructions|templates|saytask|agents)\/[A-Za-z0-9_.\/-]+/)) break
+			abs = pos + RSTART - 1
+			ref = substr(line, abs, RLENGTH)
+			prev = (abs > 1) ? substr(line, abs - 1, 1) : ""
+			printf "%s\t%d\t%d\n", ref, (prev == "/" ? 1 : 0), sc
+			pos = abs + RLENGTH
+		}
+	}'
+}
+
+# ══ 「宛先違い」の判定 — MISSING 98 件のうち直せる物だけを赤へ (cmd_1441) ══
+#   ★MISSING は本 gate の対象外のまま数え続ける★。此処で分けるのはその ★部分集合★ である。
+#
+#   ★何故 MISSING を丸ごと赤にせぬか (足軽六号 cmd_1438 の実測)★
+#     素で倒すと 38 本が一斉に赤くなり、うち 34 本は ★元より在り得ぬ path★ である
+#     (門/試験の作り物・散文の例示・退役品の旧 usage 等)。
+#     ★全部で鳴る警告は読む者が無視する★ = cmd_1420 で直した病と同じ形になる。
+#
+#   ★物差し R★ = 「同じ basename の file が HEAD の別の path に現に在る」物だけを赤へ。
+#     考え方は一本である ＝ ★案内が宛先を書き違えておる (＝直し先が在る) 物だけを名指す★。
+#   ★除外 3 つ★ (いずれも機械で決まる。人の判断を要さぬ):
+#     E1 呼ぶ者が scripts/retired/ 配下   … 退役品が己の旧 usage を記す形
+#     E2 参照が shellcheck の source= 行  … その path は ★呼ぶ script の dir 基準★ ゆえ
+#                                            repo root から解けぬのが正しい
+#     E3 抽出位置の直前が `/`             … 別 dir の suffix を切り取った断片
+#                                            (例: .opencode/agents/x.md から agents/x.md)
+#
+#   ★退けた案を書き残す (同じ案を作り直させぬため — 六号 cmd_1438 §5 の実測)★
+#     「実行子 (bash/python3/source/exec) の直後の参照だけを赤へ」は ★向きが逆に働く★:
+#     真の宛先違いを 0/4 しか掴まず、掴んだ 9 件は 9/9 とも在り得ぬ path であった。
+#     理由 = ★宛先違いは悉く「註」の側に居り、実行子は例示文の側にこそ多い★。
+is_misdirected() {
+	local ref="$1" caller="$2" prevslash="$3" scline="$4" hbase="$5"
+	case "$caller" in scripts/retired/*) return 1 ;; esac   # E1
+	[ "$scline" = "1" ] && return 1                          # E2
+	[ "$prevslash" = "1" ] && return 1                       # E3
+	local base="${ref##*/}"
+	# R = 同じ basename が HEAD の【別の】path に在るか
+	printf '%s\n' "$hbase" | awk -F'\t' -v b="$base" -v r="$ref" '
+		$1 == b && $2 != r { found = 1 } END { exit found ? 0 : 1 }'
 }
 
 run_gate() {
@@ -120,19 +184,36 @@ run_gate() {
 		fi
 	done
 
-	# ── 参照抽出 → 三分別 ──
-	local n_ref=0 n_ok=0 n_bad=0 n_missing=0 n_gen=0
-	local findings=""
-	local s body ref
+	# ── 参照抽出 → 四分別 ──
+	# ★MISSING の中から「宛先違い」を分ける (cmd_1441)★ = 詳細は extract_refs / is_misdirected の頭書。
+	local head_base
+	head_base="$(printf '%s\n' "$head_list" | awk -F/ '{print $NF"\t"$0}')"
+
+	local n_ref=0 n_ok=0 n_bad=0 n_missing=0 n_gen=0 n_mis=0
+	local findings="" mis_findings=""
+	local s body ref prevslash scline
 	while IFS= read -r s; do
 		[ -n "$s" ] || continue
 		body="$(git show "HEAD:$s" 2>/dev/null)" || continue
-		while IFS= read -r ref; do
+		while IFS=$'\t' read -r ref prevslash scline; do
 			[ -n "$ref" ] || continue
 			case "$ref" in *.sh|*.py|*.yaml|*.yml|*.md|*.cron|*.json|*.bats|*.bash) ;; *) continue ;; esac
 			n_ref=$((n_ref + 1))
 			if [ ! -f "$ref" ]; then
-				n_missing=$((n_missing + 1))            # 実在せぬ = 別種の問題 (本 gate の対象外)
+				n_missing=$((n_missing + 1))            # 実在せぬ = 別種の問題
+				if is_misdirected "$ref" "$s" "$prevslash" "$scline" "$head_base"; then
+					n_mis=$((n_mis + 1))
+					mis_findings="${mis_findings}${ref}"$'\t'"${s}"$'\n'
+					# ★GATE_CENSUS=1 で 1 件ずつ標準エラーへ吐く (cmd_1441)★
+					#   ★何故 門の【中】に置くか★ = 数え直す度に写しを起こせば、写しと本体が
+					#   いつか食い違う。六号が cmd_1438 で「写しの上でしか測っておらぬ」と
+					#   自ら名乗った所である。★同じ抽出器で数えられる口を本体へ据える★。
+					if [ -n "${GATE_CENSUS:-}" ]; then
+						printf 'MISDIRECTED\t%s\t%s\n' "$ref" "$s" >&2
+					fi
+				elif [ -n "${GATE_CENSUS:-}" ]; then
+					printf 'MISSING\t%s\t%s\tprevslash=%s\tshellcheck=%s\n' "$ref" "$s" "$prevslash" "$scline" >&2
+				fi
 			elif printf '%s\n' "$head_list" | grep -qxF "$ref"; then
 				n_ok=$((n_ok + 1))
 			elif printf '%s\n' ${GENERATED_ALLOW[@]+"${GENERATED_ALLOW[@]}"} | grep -qE "^${ref}\|"; then
@@ -145,7 +226,7 @@ run_gate() {
 				#   且つ後段の head で他の道具を押し出す★ (軍師一号 N1/N2)。
 				findings="${findings}${ref}"$'\t'"${s}"$'\n'
 			fi
-		done < <(printf '%s' "$body" | grep -oE '(scripts|lib|config|instructions|templates|saytask|agents)/[A-Za-z0-9_./-]+' || true)
+		done < <(printf '%s' "$body" | extract_refs)
 	done <<<"$src_list"
 
 	if [ "$n_ref" -lt "$REF_MIN" ]; then
@@ -155,24 +236,31 @@ run_gate() {
 
 	# ★何本 (file) と 何件 (参照出現) を分けて数える★ — cmd_1367 N2 是正。
 	#   ★総和の検算は【参照出現】で行う★ = 内訳は参照を分類した物ゆえ、file 数と足しても合わぬ。
-	local bad_files n_bad_files
+	local bad_files n_bad_files mis_files n_mis_files
 	bad_files="$(printf '%s' "$findings" | cut -f1 | grep -v '^$' | sort -u)"
 	n_bad_files="$(printf '%s' "$bad_files" | grep -c . || true)"
+	mis_files="$(printf '%s' "$mis_findings" | cut -f1 | grep -v '^$' | sort -u)"
+	n_mis_files="$(printf '%s' "$mis_files" | grep -c . || true)"
 
 	# ★総和と内訳を同じ出力に並べ、足して合うかを機械で検算する★ (cmd_1358 の全軍規律)
 	echo "[gate_undistributed] 走査元=$n_src 本 / 参照 総和=$n_ref"
-	echo "  内訳 OK=$n_ok  生成物=$n_gen  ★UNDISTRIBUTED=${n_bad_files}本(参照${n_bad}件)★  MISSING(対象外)=$n_missing"
+	echo "  内訳 OK=$n_ok  生成物=$n_gen  ★UNDISTRIBUTED=${n_bad_files}本(参照${n_bad}件)★  MISSING=$n_missing"
+	echo "  MISSING の内訳 ★宛先違い=${n_mis_files}本(参照${n_mis}件)★  在り得ぬ path(対象外)=$((n_missing - n_mis))"
 	if [ "$n_ref" -ne $((n_ok + n_gen + n_bad + n_missing)) ]; then
 		echo "[UNDETERMINED] 検算 FAIL: 総和 != 内訳の和 = この出力を信じるな"
 		return 2
 	fi
-	echo "  検算 OK (総和 == 内訳の和・参照出現で照合)"
+	if [ "$n_mis" -gt "$n_missing" ]; then
+		echo "[UNDETERMINED] 検算 FAIL: 宛先違いが MISSING を超えておる = この出力を信じるな"
+		return 2
+	fi
+	echo "  検算 OK (総和 == 内訳の和・参照出現で照合。宛先違いは MISSING の部分集合)"
 	gate_scope_notice
 
+	# ★1 道具につき 1 行★ = 呼ぶ者は同じ行へ畳む (所見が重複で膨れ、
+	#   後段 (gate_nightly の head) で他の道具を押し出すのを防ぐ — 軍師一号 N1)。
+	local p callers
 	if [ "$n_bad" -gt 0 ]; then
-		# ★1 道具につき 1 行★ = 呼ぶ者は同じ行へ畳む (所見が重複で膨れ、
-		#   後段 (gate_nightly の head) で他の道具を押し出すのを防ぐ — 軍師一号 N1)。
-		local p callers
 		while IFS= read -r p; do
 			[ -n "$p" ] || continue
 			# ★呼ぶ者も重複を畳む★ = 同じ script が同じ道具を3回呼んでおれば
@@ -180,12 +268,30 @@ run_gate() {
 			callers="$(printf '%s' "$findings" | awk -F'\t' -v r="$p" '$1==r{print $2}' | sort -u | awk '{printf "%s ", $0}')"
 			echo "  [UNDISTRIBUTED] ${p}  ← 追跡下の ${callers}が名指し"
 		done <<<"$bad_files"
-		echo "[FAIL] 配られておらぬ道具が ${n_bad_files} 本 (参照 ${n_bad} 件) = 呼ぶ者は fresh clone へ配られるが呼ばれる者は配られぬ"
-		echo "  処方: .gitignore の whitelist へ否定規則を足すか、真に配るべきでなければ呼ぶ側を直せ"
+		echo "  ⇒ 配られておらぬ道具 ${n_bad_files} 本 (参照 ${n_bad} 件) = 呼ぶ者は fresh clone へ配られるが呼ばれる者は配られぬ"
+		echo "    処方: .gitignore の whitelist へ否定規則を足すか、真に配るべきでなければ呼ぶ側を直せ"
+	fi
+	if [ "$n_mis" -gt 0 ]; then
+		while IFS= read -r p; do
+			[ -n "$p" ] || continue
+			callers="$(printf '%s' "$mis_findings" | awk -F'\t' -v r="$p" '$1==r{print $2}' | sort -u | awk '{printf "%s ", $0}')"
+			# ★直し先を出力に載せる★ = 「赤い」だけでは読む者が次に何をすべきか分からぬ。
+			#   物差し R は元より「同じ basename が別の場所に在る」で赤くしておるゆえ、
+			#   ★其の別の場所を出せる★ (出せぬなら赤にしておらぬ)。
+			local cand
+			cand="$(printf '%s\n' "$head_base" | awk -F'\t' -v b="${p##*/}" -v r="$p" '$1==b && $2!=r{print $2}' | sort -u | head -3 | awk '{printf "%s ", $0}')"
+			echo "  [MISDIRECTED] ${p}  ← 追跡下の ${callers}が名指し / 実体は ${cand}に在る"
+		done <<<"$mis_files"
+		echo "  ⇒ 宛先違いの案内 ${n_mis_files} 本 (参照 ${n_mis} 件) = 名指された path に file が無く、同じ名の file が別の場所に在る"
+		echo "    処方: 呼ぶ側の綴りを実体の path へ直せ (実体を動かす側が正しい場合も在る。どちらが正かは人が判ずる)"
+	fi
+
+	if [ "$n_bad" -gt 0 ] || [ "$n_mis" -gt 0 ]; then
+		echo "[FAIL] 配られておらぬ道具 ${n_bad_files} 本 / 宛先違いの案内 ${n_mis_files} 本"
 		return 1
 	fi
 	[ "$allow_bad" -ne 0 ] && return 1
-	echo "[PASS] 配線されておる道具は全て HEAD に在る"
+	echo "[PASS] 配線されておる道具は全て HEAD に在り、宛先違いの案内も無い"
 	return 0
 }
 
@@ -316,6 +422,98 @@ selftest() {
 	printf '%s' "$o" | grep -q '本 gate の網' \
 		&& { echo "  ok   T11b ★赤でも網の狭さを名乗っておる (N3)★"; pass=$((pass + 1)); } \
 		|| { echo "  ★NG★ T11b 赤の時に scope を名乗っておらぬ"; fail=$((fail + 1)); }
+
+	# ── cmd_1441: 物差し R (宛先違い) と その除外 3 つ ──
+
+	# T12 ★抽出器を grep から awk へ入れ替えた事で、取れる綴りが変わっておらぬか★
+	#   ★之を試験に据える理由★ = 総和 (参照 1051 件) が動けば、以後の全ての数が
+	#   旧い測りと比べられなくなる。★入れ替えは静かに数を変える★ゆえ、実弾で固定する。
+	#   ★引っ掛け易い形を並べてある★: 行頭の一致 / 直前がスラッシュ / 1 行に複数 / 拡張子なし。
+	local fx="$tmp/extract_fixture.txt"
+	cat >"$fx" <<'FIXEOF'
+scripts/a.sh at line head
+bash "$D/scripts/b.sh" && python3 "$D/lib/c.py"
+source .opencode/agents/shogun.md
+# shellcheck source=lib/proc_lock.sh
+prefix-scripts/d.sh and config/e.yaml
+instructions/generated/claude-karo.md
+no path here at all
+FIXEOF
+	local got want
+	want="$(grep -oE '(scripts|lib|config|instructions|templates|saytask|agents)/[A-Za-z0-9_./-]+' "$fx" || true)"
+	got="$(extract_refs <"$fx" | cut -f1)"
+	if [ "$want" = "$got" ]; then
+		echo "  ok   T12 ★新旧の抽出器が同じ綴りを同じ順で返す (総和が動かぬ証)★"; pass=$((pass + 1))
+	else
+		echo "  ★NG★ T12 抽出器の入れ替えで綴りが変わった"; diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | sed 's/^/         /'; fail=$((fail + 1))
+	fi
+
+	# T12b ★文脈 (直前がスラッシュか / shellcheck の行か) を現に見分けておるか★
+	#   綴りが同じでも文脈欄が常に 0 なら、除外 E2/E3 は永久に発火せぬ (=素通し)。
+	local ctx
+	ctx="$(extract_refs <"$fx" | awk -F'\t' '$2==1 || $3==1 {print $1"|"$2$3}' | sort -u | tr '\n' ' ')"
+	printf '%s' "$ctx" | grep -q 'agents/shogun.md|10' && printf '%s' "$ctx" | grep -q 'lib/proc_lock.sh|01'
+	if [ $? -eq 0 ]; then
+		echo "  ok   T12b ★直前スラッシュと shellcheck 行を現に見分けておる★"; pass=$((pass + 1))
+	else
+		echo "  ★NG★ T12b 文脈欄が働いておらぬ: $ctx"; fail=$((fail + 1))
+	fi
+
+	# ── R と E1/E2/E3 を撃つための木 ──
+	#   HEAD に scripts/lib/tool.sh を置き、呼ぶ側は scripts/tool.sh (実在せぬ) を名指す。
+	#   = ★同じ名の file が別の場所に在る★ = 物差し R が当たる形。
+	mk_red_repo() {
+		local d="$1" caller_path="$2" caller_body="$3"
+		rm -rf "$d"; mkdir -p "$d/scripts/lib" "$d/$(dirname "$caller_path")"; cd "$d" || return 1
+		git init -q . && git config user.email t@t && git config user.name t
+		local i
+		for i in $(seq 1 60); do printf '#!/usr/bin/env bash\nbash "$D/scripts/dep.sh"\n' >"scripts/f$i.sh"; done
+		printf '#!/usr/bin/env bash\necho dep\n' >scripts/dep.sh
+		printf '#!/usr/bin/env bash\necho tool\n' >scripts/lib/tool.sh
+		mkdir -p .opencode/agents && printf '# shogun\n' >.opencode/agents/shogun.md
+		printf '#!/usr/bin/env bash\necho lock\n' >scripts/lib/proc_lock.sh
+		printf '%b' "$caller_body" >"$caller_path"
+		git add -A >/dev/null && git commit -q -m init
+		cd - >/dev/null || return 1
+	}
+
+	# T13 ★物差し R が現に赤を出す★ = 実在せぬ参照でも、同じ名が別の場所に在れば赤
+	#   (T3 と対を成す。T3 = 名がどこにも無ければ緑。この2本で「MISSING を丸ごと赤に
+	#    しておらぬ」と「宛先違いだけは赤にする」の両方が固定される)
+	mk_red_repo "$tmp/r12" "scripts/caller.sh" '#!/usr/bin/env bash\n# 案内: scripts/tool.sh を読め\n'
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r12" 2>&1)"; rc=$?
+	chk "T13 宛先違い (同じ名が別の場所に在る) → FAIL" 1 "$rc" "$o"
+	printf '%s' "$o" | grep -q 'MISDIRECTED\] scripts/tool.sh' && printf '%s' "$o" | grep -q '実体は scripts/lib/tool.sh' \
+		&& { echo "  ok   T13b ★名指しと【直し先】の両方を出しておる★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T13b 直し先を出しておらぬ"; printf '%s\n' "$o" | sed 's/^/         /'; fail=$((fail + 1)); }
+
+	# T14 ★E1: 退役品が己の旧 usage を記す形は赤にせぬ★
+	mk_red_repo "$tmp/r13" "scripts/retired/old.sh" '#!/usr/bin/env bash\n# 旧 usage: scripts/tool.sh\n'
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r13" 2>&1)"; rc=$?
+	chk "T14 E1 retired からの呼びは赤にせぬ" 0 "$rc" "$o"
+
+	# T15 ★E2: shellcheck の source= 行は赤にせぬ★ (path は呼ぶ script の dir 基準)
+	mk_red_repo "$tmp/r14" "scripts/caller.sh" '#!/usr/bin/env bash\n# shellcheck source=lib/proc_lock.sh\nsource "$D/scripts/lib/proc_lock.sh"\n'
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r14" 2>&1)"; rc=$?
+	chk "T15 E2 shellcheck source= 行は赤にせぬ" 0 "$rc" "$o"
+
+	# T16 ★E3: 別 dir の suffix を切り取った断片は赤にせぬ★
+	mk_red_repo "$tmp/r15" "scripts/caller.sh" '#!/usr/bin/env bash\ncat "$D/.opencode/agents/shogun.md"\n'
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r15" 2>&1)"; rc=$?
+	chk "T16 E3 直前がスラッシュの断片は赤にせぬ" 0 "$rc" "$o"
+
+	# T17 ★除外が【素通しでない】ことの証★ = 同じ木で除外の条件だけを外せば赤くなるか。
+	#   ★之を撃たねば、E1/E2/E3 は「常に除外する」壊れ方をしていても T14〜T16 は緑のままである★
+	#   (三号が 23:47 に名乗った「黙るだけを主張する試験は、門が壊れても緑」の形)。
+	mk_red_repo "$tmp/r16" "scripts/caller.sh" '#!/usr/bin/env bash\n# 註: lib/proc_lock.sh (shellcheck の指示ではない普通の行)\n'
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r16" 2>&1)"; rc=$?
+	chk "T17 同じ綴りでも shellcheck 行でなければ赤くなる (E2 が素通しでない証)" 1 "$rc" "$o"
+
+	# T18 ★網の狭さ (宛先違いの側) も毎回 名乗る★ — T11 の系統
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r1" 2>&1)"
+	printf '%s' "$o" | grep -q '宛先違い (MISDIRECTED) の網は更に狭い' && printf '%s' "$o" | grep -q '見ぬ ⑤' \
+		&& { echo "  ok   T18 ★宛先違いの網の狭さを緑でも名乗っておる★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T18 宛先違いの scope を名乗っておらぬ"; fail=$((fail + 1)); }
 
 	unset GATE_ALLOW_OVERRIDE
 

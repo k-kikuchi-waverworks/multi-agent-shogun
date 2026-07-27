@@ -73,6 +73,16 @@ plans/**/README.md
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md
+# cmd_1441 (2026-07-28): ★AGENTS.md の兄弟 2 本★ = 同じ scripts/build_instructions.sh が
+#   CLAUDE.md から作る生成物でありながら、白名簿に名が無かった。
+#   ★追跡下ゆえ今は配られておる★ = fresh clone にも現に在る (26,734 / 26,697 byte を実測)。
+#   ★危ういのは一度 index から外れた日である★ = 使い捨ての clone で実演した:
+#     `git rm --cached` の後に `git add` を撃つと ★.gitignore に弾かれて拒まれる★
+#     (AGENTS.md は白名簿に在るゆえ通る)。⇒ 生成物の置き場を動かす・作り直しの途中で
+#     一度 index から外す、といった手を踏んだ日に ★3 兄弟のうち 2 本だけが静かに落ちる★。
+#   ★本日 13 度 踏んだのと同じ形ゆえ、踏む前に足す★ (従来は踏んでから足しておった)。
+!.github/copilot-instructions.md
+!agents/default/system.md
 
 # Multi-CLI: OpenCode agent file
 !.opencode/agents/*.md

@@ -814,7 +814,12 @@ try:
         cfg = yaml.safe_load(f) or {}
     tiers = cfg.get('capability_tiers')
     if not tiers or not isinstance(tiers, dict):
-        sys.exit(0)
+        # cmd_1462: 以前はここで黙って exit 0 だった。
+        # 呼び手から見ると「成功したが何も言わない」形で、
+        # 「該当が無い」のか「決められなかった」のかが区別できなかった。
+        print('[NO-RECOMMENDATION] capability_tiers が設定ファイルに無い: ${settings}', file=sys.stderr)
+        print('  ⇒ Bloom レベルからモデルを決める材料が無い。「該当なし」ではなく「判定不能」である', file=sys.stderr)
+        sys.exit(2)
 
     bloom = int('${bloom_level}')
     cost_priority = {'chatgpt_pro': 0, 'claude_max': 1}
@@ -874,7 +879,13 @@ try:
             candidates.append((cost_priority.get(cg, 99), mb, model))
 
     if not all_models:
-        sys.exit(0)
+        # cmd_1462: ここも以前は黙って exit 0 だった。
+        print('[NO-RECOMMENDATION] capability_tiers に候補が 1 つも残らなかった (bloom=' + str(bloom) + ')', file=sys.stderr)
+        if allowed_groups is not None:
+            print('  ⇒ available_cost_groups=' + str(sorted(allowed_groups)) + ' で全て除外された', file=sys.stderr)
+        else:
+            print('  ⇒ capability_tiers の中身が辞書として読めなかった', file=sys.stderr)
+        sys.exit(2)
 
     if not candidates:
         best = max(all_models, key=lambda x: x[0])
@@ -887,11 +898,33 @@ try:
         print(chosen_model)
         if chosen_mb - bloom >= 2:
             print(f'[WARN] overqualified: {chosen_model} (max_bloom={chosen_mb}) for bloom level {bloom}. Consider adding a lower-tier model.', file=sys.stderr)
-except Exception:
-    pass
+except Exception as e:
+    # cmd_1462: 以前は except Exception: pass で、あらゆる異常が
+    # 「空を返して成功」に化けていた。設定ファイルが壊れていても呼び手は気づけなかった。
+    print('[NO-RECOMMENDATION] 設定を読む途中で異常: ' + type(e).__name__ + ': ' + str(e), file=sys.stderr)
+    print('  設定ファイル: ${settings}', file=sys.stderr)
+    sys.exit(3)
 ")
+    local py_rc=$?
+
+    # cmd_1462: 空のまま rc=0 を返さない。
+    #   rc=0 → 必ずモデル名を 1 行 印字する
+    #   rc=1 → bloom レベルが 1〜6 でない
+    #   rc=2 → 判定材料が無い / 候補が全て除外された（理由は stderr）
+    #   rc=3 → 設定を読む途中で異常（理由は stderr）
+    # 呼び手は「空文字」ではなく rc で分岐できる。
+    if [[ -z "$result" ]]; then
+        if [[ $py_rc -eq 0 ]]; then
+            # ここへ来るのは、python が何も印字せずに 0 を返した時だけ。
+            # 上の3つの出口を塞いだので起きない筈だが、起きたら黙らせない。
+            echo "[NO-RECOMMENDATION] モデル名が返らないまま正常終了した (想定外の経路)" >&2
+            return 2
+        fi
+        return "$py_rc"
+    fi
 
     echo "$result"
+    return "$py_rc"
 }
 
 # =============================================================================

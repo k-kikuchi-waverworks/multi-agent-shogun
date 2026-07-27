@@ -508,12 +508,60 @@ load_adapter_with() {
     [ "$result" = "claude-opus-4-6" ]
 }
 
-@test "TC-DMR-026: FR-03 capability_tiersセクション不在 → 空文字" {
+@test "TC-DMR-026: FR-03 capability_tiers 不在 → 空のまま rc=0 にしない (cmd_1462)" {
+    # 旧: 空文字を返して rc=0 だった。呼び手から見ると「成功したが何も言わない」形で、
+    #     「該当が無い」のか「決められなかった」のかが区別できなかった。
+    #     2026-07-28 に live の settings.yaml が現にこの状態で、
+    #     L1/L3/L5/L6 のどれでも空+rc=0 が返っていた。
+    # 新: rc=2 を返し、理由を stderr に名乗る。
+    # 守りは二重である (cmd_1462 の変異テストで実測):
+    #   python 側の名乗りを消しても、bash 側の backstop が rc=2 を返す。
+    #   ただし理由は「想定外の経路」という一般的な文言になる。
+    #   このテストは理由の具体性まで見るので、python 側を消せば赤くなる。
     load_adapter_with "${TEST_TMP}/settings_no_tiers.yaml"
-    result=$(get_recommended_model 3)
-    [ "$result" = "" ]
+
+    run get_recommended_model 3
+    [ "$status" -eq 2 ]
+    [ -z "$output" ] || [[ "$output" == *"NO-RECOMMENDATION"* ]]
+
+    # 理由が名指されること (stdout ではなく stderr へ出す)
+    local err
+    err=$(get_recommended_model 3 2>&1 1>/dev/null) || true
+    [[ "$err" == *"NO-RECOMMENDATION"* ]]
+    [[ "$err" == *"capability_tiers"* ]]
+
+    # stdout は空のままであること (モデル名を捏造しない)
+    local out
+    out=$(get_recommended_model 3 2>/dev/null) || true
+    [ "$out" = "" ]
 }
 
+@test "TC-DMR-026b: FR-03 設定ファイルが壊れている → 黙って空を返さない (cmd_1462)" {
+    # 旧: except Exception: pass で、あらゆる異常が「空を返して rc=0」に化けていた。
+    #     設定ファイルが壊れていても、呼び手には「該当なし」と同じ顔で返っていた。
+    # 新: rc=3 を返し、例外の中身を stderr に名乗る。
+    printf 'capability_tiers: [壊れた\n  yaml: です\n' > "${TEST_TMP}/settings_broken.yaml"
+    load_adapter_with "${TEST_TMP}/settings_broken.yaml"
+
+    run get_recommended_model 3
+    [ "$status" -eq 3 ]
+
+    local err
+    err=$(get_recommended_model 3 2>&1 1>/dev/null) || true
+    [[ "$err" == *"NO-RECOMMENDATION"* ]]
+    [[ "$err" == *"Error"* ]]   # 例外の型名が出ること (中身を隠さない)
+}
+
+@test "TC-DMR-026c: FR-03 設定ファイルが存在しない → 黙って空を返さない (cmd_1462)" {
+    load_adapter_with "${TEST_TMP}/no_such_settings.yaml"
+
+    run get_recommended_model 3
+    [ "$status" -eq 3 ]
+
+    local err
+    err=$(get_recommended_model 3 2>&1 1>/dev/null) || true
+    [[ "$err" == *"FileNotFoundError"* ]]
+}
 @test "TC-DMR-027: FR-03 範囲外(0) → exit 1" {
     load_adapter_with "${TEST_TMP}/settings_with_tiers.yaml"
     run get_recommended_model 0
@@ -1004,29 +1052,47 @@ print(len(doc.get('history', [])))
 # ============================================================
 # TC-FAM-001〜009: find_agent_for_model() — Phase 2 ユニットテスト
 # ============================================================
-# NOTE: ユニットテスト環境ではtmuxセッションが存在しない。
+# NOTE(旧): ユニットテスト環境ではtmuxセッションが存在しない。
 #       pane_target が空 → 最初の候補を即返す動作になる（設計どおり）。
 #       tmux統合はE2Eテストで検証する。
+#
+# ★この前提は誤りだった (cmd_1462・2026-07-28 に実測)★
+#   これらのテストは multiagent セッションの中から走ることがある。その時 tmux は在り、
+#   足軽が実際に働いていれば find_agent_for_model はビジーと判定して
+#   別の空いている足軽へフォールバックする。
+#   結果、テストは布陣と関係なく落ちる。しかも落ちる本数は其の時の忙しさで変わる。
+#   実測 = 08:5x に 5 本、その数分後に 4 本。★同じ木・同じ commit で数が動いた★
+#
+#   ⇒ 「tmux が無いはず」を前提にせず、ビジー判定を明示的に固定する。
+#      固定するのはビジー判定だけで、足軽を選ぶ判断そのものは本物を通す。
+#      実際の pane に対する検証は E2E (TC-BLOOM-004/005) が受け持つ。
+unit_stub_all_agents_idle() {
+    agent_is_busy_check() { return 1; }   # 1 = idle
+}
 
 @test "TC-FAM-001: 完全一致の足軽が存在 → ashigaru1 を返す（Spark）" {
+    unit_stub_all_agents_idle
     load_adapter_with "${TEST_TMP}/settings_mixed_cli.yaml"
     result=$(find_agent_for_model "gpt-5.3-codex-spark")
     [ "$result" = "ashigaru1" ]
 }
 
 @test "TC-FAM-002: Sonnet足軽が存在 → ashigaru4 を返す" {
+    unit_stub_all_agents_idle
     load_adapter_with "${TEST_TMP}/settings_mixed_cli.yaml"
     result=$(find_agent_for_model "claude-sonnet-4-6")
     [ "$result" = "ashigaru4" ]
 }
 
 @test "TC-FAM-003: Opus足軽が存在 → ashigaru6 を返す" {
+    unit_stub_all_agents_idle
     load_adapter_with "${TEST_TMP}/settings_mixed_cli.yaml"
     result=$(find_agent_for_model "claude-opus-4-6")
     [ "$result" = "ashigaru6" ]
 }
 
 @test "TC-FAM-004: 対応モデルの足軽がない + 他の足軽が存在 → フォールバック（いずれかの足軽）" {
+    unit_stub_all_agents_idle
     load_adapter_with "${TEST_TMP}/settings_mixed_cli.yaml"
     result=$(find_agent_for_model "gpt-5.1-codex-max")
     # 完全一致なし → フォールバックとして番号最小の足軽を返す
@@ -1047,12 +1113,14 @@ print(len(doc.get('history', [])))
 }
 
 @test "TC-FAM-007: 複数の同モデル足軽 → 番号最小を返す（ashigaru1）" {
+    unit_stub_all_agents_idle
     load_adapter_with "${TEST_TMP}/settings_all_spark.yaml"
     result=$(find_agent_for_model "gpt-5.3-codex-spark")
     [ "$result" = "ashigaru1" ]
 }
 
 @test "TC-FAM-008: capability_tiersなし設定でも動作する（後方互換）" {
+    unit_stub_all_agents_idle
     load_adapter_with "${TEST_TMP}/settings_no_tiers.yaml"
     # no_tiersでもagents定義がある場合はSpark足軽を探して返す
     result=$(find_agent_for_model "gpt-5.3-codex-spark")
@@ -1060,6 +1128,7 @@ print(len(doc.get('history', [])))
 }
 
 @test "TC-FAM-009: 足軽のみ対象（karo, gunshiは除外される）" {
+    unit_stub_all_agents_idle
     load_adapter_with "${TEST_TMP}/settings_mixed_cli.yaml"
     # karo, gunshiのモデルを指定 → ashiguruの中に一致なし → フォールバックor先頭
     result=$(find_agent_for_model "claude-sonnet-4-5-20250929")

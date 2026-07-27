@@ -73,24 +73,74 @@ setup() {
         skip "tmux session 'multiagent' が存在しない。VPS上でshutsuijin後に実行せよ。"
     fi
 
-    # lib/cli_adapter.sh のロード
+    TEST_TMP="$(mktemp -d)"
+    make_fixture_settings
+
+    # ★振り分けの判断を試すテストは fixture の布陣に対して撃つ★ (cmd_1462)
+    #   live の config/settings.yaml に対して撃つと、家老が班構成を変えるたびに落ちる。
+    #   守りたいのは「この布陣なら、この Bloom level はこのモデルへ行く」という判断であって、
+    #   今日たまたま誰が何のモデルかではない。
+    #   live を読む道は TC-BLOOM-100 に 1 本だけ残してある (下を参照)。
     export CLI_ADAPTER_PROJECT_ROOT="$PROJECT_ROOT"
-    export CLI_ADAPTER_SETTINGS="${PROJECT_ROOT}/config/settings.yaml"
+    export CLI_ADAPTER_SETTINGS="${TEST_TMP}/settings_fixture.yaml"
     # shellcheck disable=SC1090
     source "${PROJECT_ROOT}/lib/cli_adapter.sh"
     # shellcheck disable=SC1090
     source "${PROJECT_ROOT}/lib/agent_status.sh" 2>/dev/null || true
 }
 
+# 試験用の布陣。実際の班構成とは無関係で、動かない。
+#   Spark  (max_bloom=3) = ashigaru1-3
+#   Sonnet (max_bloom=5) = ashigaru4-5
+#   Opus   (max_bloom=6) = ashigaru6-7
+make_fixture_settings() {
+    cat > "${TEST_TMP}/settings_fixture.yaml" <<'FIXEOF'
+capability_tiers:
+  gpt-5.3-codex-spark:
+    max_bloom: 3
+    cost_group: chatgpt_pro
+  claude-sonnet-4-6:
+    max_bloom: 5
+    cost_group: claude_max
+  claude-opus-4-6:
+    max_bloom: 6
+    cost_group: claude_max
+cli:
+  agents:
+    ashigaru1: {cli: codex,  model: gpt-5.3-codex-spark}
+    ashigaru2: {cli: codex,  model: gpt-5.3-codex-spark}
+    ashigaru3: {cli: codex,  model: gpt-5.3-codex-spark}
+    ashigaru4: {cli: claude, model: claude-sonnet-4-6}
+    ashigaru5: {cli: claude, model: claude-sonnet-4-6}
+    ashigaru6: {cli: claude, model: claude-opus-4-6}
+    ashigaru7: {cli: claude, model: claude-opus-4-6}
+FIXEOF
+}
+
 teardown() {
-    # テスト後にtaskファイルをクリーンアップ
+    # fixture の一時ディレクトリを片付ける (cmd_1462)
+    [ -n "${TEST_TMP:-}" ] && rm -rf "$TEST_TMP"
     :
 }
 
+# 振り分けの判断だけを見るための固定 (cmd_1462)。
+#
+# find_agent_for_model は 2 つを見る。
+#   (a) 設定のどの足軽がそのモデルか  ← fixture で固定できる
+#   (b) その足軽が今ビジーか          ← live の tmux を見る。固定できない
+# (b) をそのままにすると、実際に足軽が働いている時は空いている別の足軽へ
+# フォールバックし、テストは布陣と関係なく落ちる (2026-07-28 に現に踏んだ)。
+#
+# ここで固定するのは (b) だけである。振り分けの判断そのもの (a) は本物を通す。
+# 実際の pane のビジー状態に対する検証は TC-BLOOM-004/005 が受け持つ。
+stub_all_agents_idle() {
+    agent_is_busy_check() { return 1; }   # 1 = idle
+}
 # ─────────────────────────────────────────────
 # TC-BLOOM-001: L1タスク → Spark足軽（ashigaru1/2/3）に振られる
 # ─────────────────────────────────────────────
 @test "TC-BLOOM-001: L1タスク → Sparkエージェントに振られる" {
+    stub_all_agents_idle
     run get_recommended_model 1
     [ "$status" -eq 0 ]
     # L1はSpark (max_bloom=3)が最安
@@ -107,6 +157,7 @@ teardown() {
 # TC-BLOOM-002: L5タスク → Sonnet足軽（ashigaru4/5）に振られる
 # ─────────────────────────────────────────────
 @test "TC-BLOOM-002: L5タスク → Sonnetエージェントに振られる" {
+    stub_all_agents_idle
     run get_recommended_model 5
     [ "$status" -eq 0 ]
     [[ "$output" == *"sonnet"* ]]
@@ -121,6 +172,7 @@ teardown() {
 # TC-BLOOM-003: L6タスク → Opus足軽（ashigaru6/7）に振られる
 # ─────────────────────────────────────────────
 @test "TC-BLOOM-003: L6タスク → Opusエージェントに振られる" {
+    stub_all_agents_idle
     run get_recommended_model 6
     [ "$status" -eq 0 ]
     [[ "$output" == *"opus"* ]]
@@ -129,6 +181,49 @@ teardown() {
     run find_agent_for_model "$recommended"
     [ "$status" -eq 0 ]
     [[ "$output" =~ ^ashigaru[6-7]$ ]]
+}
+
+
+# ─────────────────────────────────────────────
+# TC-BLOOM-100: live の設定ファイルを読む唯一の 1 本 (cmd_1462)
+# ─────────────────────────────────────────────
+@test "TC-BLOOM-100: live の settings.yaml を読んでも、黙って空を返さない" {
+    # ★このテストが守っているもの★
+    #
+    # 上の 4 本は fixture の布陣に対して撃つ。班構成が動いても落ちないためである。
+    # その代わり、live の config/settings.yaml を 1 本も読まなくなる。
+    # そうすると「設定ファイルの形が変わって、adapter が読めなくなった」時に
+    # 誰も気づかない。この 1 本がその穴を塞ぐ。
+    #
+    # ★今日の布陣は見ない★。見るのは「adapter が live の設定に対して
+    #   はっきりした答を返すか」だけである。答は 2 通りしかない。
+    #     rc=0 → モデル名を 1 行 返す
+    #     rc=2 → 判定材料が無い、と理由を名乗る (今日はこちら。capability_tiers 未設定)
+    #   ★空を返して rc=0★ は、どちらでもない。これが cmd_1462 で直したバグである。
+    #
+    # ゆえに、このテストが赤くなる時に疑うのは次の 2 つ。
+    #   ・config/settings.yaml が壊れた (YAML として読めない → rc=3)
+    #   ・adapter が設定を読む道が壊れた
+
+    local live_settings="${PROJECT_ROOT}/config/settings.yaml"
+    [ -f "$live_settings" ]
+
+    # live の設定を読ませる (このテストだけ fixture を使わない)
+    run env CLI_ADAPTER_PROJECT_ROOT="$PROJECT_ROOT" \
+            CLI_ADAPTER_SETTINGS="$live_settings" \
+            bash -c 'source "$CLI_ADAPTER_PROJECT_ROOT/lib/cli_adapter.sh" >/dev/null 2>&1; get_recommended_model 5'
+
+    if [ "$status" -eq 0 ]; then
+        # モデル名を返したなら、空であってはならない
+        [ -n "$output" ]
+    else
+        # 返せないなら、理由を名乗っていること。黙って空で終わらせない
+        [ "$status" -eq 2 ] || [ "$status" -eq 3 ]
+        run env CLI_ADAPTER_PROJECT_ROOT="$PROJECT_ROOT" \
+                CLI_ADAPTER_SETTINGS="$live_settings" \
+                bash -c 'source "$CLI_ADAPTER_PROJECT_ROOT/lib/cli_adapter.sh" >/dev/null 2>&1; get_recommended_model 5 2>&1 1>/dev/null'
+        [[ "$output" == *"NO-RECOMMENDATION"* ]]
+    fi
 }
 
 # ─────────────────────────────────────────────
@@ -240,6 +335,7 @@ teardown() {
 # TC-BLOOM-006: L3タスク → Sonnet足軽には振られない（Codex優先）
 # ─────────────────────────────────────────────
 @test "TC-BLOOM-006: L3タスクはSpark足軽が優先（Sonnetへのオーバーエンジニアリングなし）" {
+    stub_all_agents_idle
     run get_recommended_model 3
     [ "$status" -eq 0 ]
 

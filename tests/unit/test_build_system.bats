@@ -121,7 +121,21 @@ setup() {
 @test "opencode: generated markdown is LF-only and has no trailing whitespace [R6]" {
     local file
 
-    for file in "$OUTPUT_DIR"/opencode-*.md "$PROJECT_ROOT"/.opencode/agents/*.md; do
+    # 数える対象を先に配列へ集め、0 本なら不合格にする（cmd_1462）。
+    # nullglob を立てるのは、当たらない glob がパターン文字列のまま渡るのを止めるため。
+    # 立てないと [ -f ] がそれを飛ばし、1 本もチェックしないまま合格して終わる（実測済み）。
+    shopt -s nullglob
+    local files=("$OUTPUT_DIR"/opencode-*.md "$PROJECT_ROOT"/.opencode/agents/*.md)
+    shopt -u nullglob
+
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "母数 0: $OUTPUT_DIR と $PROJECT_ROOT/.opencode/agents に対象の .md が 1 本も無い。" >&2
+        echo "  これは『全部チェックした』ではなく『1 本も見なかった』である" >&2
+        echo "  (setup_file の build が落ちて生成物が出来ていない疑い)" >&2
+        return 1
+    fi
+
+    for file in "${files[@]}"; do
         [ -f "$file" ] || continue
 
         if LC_ALL=C grep -n $'\r' "$file"; then

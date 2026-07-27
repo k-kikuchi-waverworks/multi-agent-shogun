@@ -12,6 +12,19 @@ load "../test_helper/bats-support/load"
 load "../test_helper/bats-assert/load"
 
 setup_file() {
+    # ルートを探す目印について（cmd_1462 で直した点）
+    #
+    # 以前はこの探索が scripts/slim_yaml.py を目印にしていた。
+    # つまり「テスト対象そのもの」を道しるべに使っていたので、
+    # 対象が消えた日に探索が失敗し、3 本とも SKIP になった（実測済み）。
+    # しかも SKIP の理由は「project root が見つからない」と表示され、
+    # 本当の原因（対象スクリプトが無い）を隠していた。
+    # bats は SKIP を TAP の `ok` として出すので、数だけ見ると合格に見える。
+    #
+    # 目印をこのテストファイル自身に替えた。テストが走っている以上、必ず存在する。
+    # そのうえで「対象が無い」は SKIP ではなく不合格として扱う（SKIP=FAIL の規則どおり）。
+    local self_marker="tests/e2e/e2e_slim_retention.bats"
+
     resolve_project_root() {
         local c d abs git_root
         local -a candidates
@@ -37,7 +50,7 @@ setup_file() {
                 fi
 
                 abs="$(cd "$d" 2>/dev/null && pwd || true)"
-                if [ -n "$abs" ] && [ -f "$abs/scripts/slim_yaml.py" ]; then
+                if [ -n "$abs" ] && [ -f "$abs/$self_marker" ]; then
                     printf '%s\n' "$abs"
                     return 0
                 fi
@@ -45,7 +58,7 @@ setup_file() {
         done
 
         git_root="$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || true)"
-        if [ -n "$git_root" ] && [ -f "$git_root/scripts/slim_yaml.py" ]; then
+        if [ -n "$git_root" ] && [ -f "$git_root/$self_marker" ]; then
             printf '%s\n' "$git_root"
             return 0
         fi
@@ -53,10 +66,24 @@ setup_file() {
         return 1
     }
 
-    PROJECT_ROOT="$(resolve_project_root)" || skip "Unable to locate project root for slim retention test"
+    if ! PROJECT_ROOT="$(resolve_project_root)"; then
+        echo "リポジトリのルートが見つからない（目印: $self_marker）。" >&2
+        echo "  テストの置き場所が変わった可能性がある。SKIP にはしない。" >&2
+        return 1
+    fi
     export PROJECT_ROOT
-    [ -f "$PROJECT_ROOT/scripts/slim_yaml.py" ] || skip "slim_yaml.py not found at $PROJECT_ROOT"
-    command -v python3 &>/dev/null || skip "python3 not available"
+
+    if [ ! -f "$PROJECT_ROOT/scripts/slim_yaml.py" ]; then
+        echo "テスト対象が無い: $PROJECT_ROOT/scripts/slim_yaml.py" >&2
+        echo "  これは環境の問題ではなく、対象そのものが失われている。SKIP ではなく不合格とする。" >&2
+        return 1
+    fi
+
+    if ! command -v python3 &>/dev/null; then
+        echo "python3 が無いので slim_yaml.py を実行できない。" >&2
+        echo "  SKIP=FAIL の規則により、走らなかったことを合格として扱わない。" >&2
+        return 1
+    fi
 }
 
 build_tmp_project() {

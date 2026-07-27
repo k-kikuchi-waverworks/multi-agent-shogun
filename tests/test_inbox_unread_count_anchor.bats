@@ -124,6 +124,25 @@ BODY
 }
 
 @test "T-301: ★共有 script に素の数え方が 1 つも残っておらぬ★ (族の再発を repo 全体で塞ぐ)" {
-    run bash -c "grep -rnE \"grep -c ['\\\"]read: (false|true)\" '$PROJECT_ROOT/scripts' || true"
+    # cmd_1462 で足した 2 つの確認。
+    # このテストは「0 件だから合格」と言う形なので、そのままだと
+    # 「本当に 0 件」と「探せていないから 0 件」が同じ緑で返る。
+    local pattern="grep -c ['\\\"]read: (false|true)"
+
+    # (1) canary — この検索式が今も当たることを先に示す。
+    #     既知の違反を 1 本 置いて、同じ式で現に見つかることを確かめる。
+    #     式が古くなって何も拾えなくなった日は、ここが先に赤くなる。
+    mkdir -p "$TESTDIR/probe"
+    printf 'n=$(grep -c "read: false" "$f")\n' > "$TESTDIR/probe/offender.sh"
+    run bash -c "grep -rnE \"$pattern\" '$TESTDIR/probe' || true"
+    [ -n "$output" ]
+
+    # (2) 探す先にファイルが在ること。母数 0 のまま緑にしない。
+    local n
+    n=$(find "$PROJECT_ROOT/scripts" -type f -name '*.sh' | wc -l)
+    [ "$n" -gt 0 ]
+
+    # (3) 本題 — 共有スクリプトに素の数え方が残っていないこと。
+    run bash -c "grep -rnE \"$pattern\" '$PROJECT_ROOT/scripts' || true"
     [ -z "$output" ]
 }

@@ -79,7 +79,9 @@ gate_scope_notice() {
 	echo "  ★宛先違い (MISDIRECTED) の網は更に狭い — cmd_1441★"
 	echo "    見る = MISSING のうち ★同じ名の file が HEAD の別の path に現に在る★ 物のみ"
 	echo "    見ぬ ⑤ ★実体がどこにも無い宛先違いは永久に見えぬ★ (直し先が無い物は在り得ぬ path と区別が付かぬ)"
-	echo "    見ぬ ⑥ 除外 3 つに当たる物は見ぬ (retired からの呼び / shellcheck source= 行 / 直前が スラッシュ の断片)"
+	echo "    見ぬ ⑥ 除外 4 つに当たる物は見ぬ (retired からの呼び / shellcheck source= 行 / 直前が スラッシュ の断片 / 本 gate 自身からの呼び)"
+	echo "    見ぬ ⑥-b E4 (cmd_1445) = 本 gate 自身が唯一の呼び手である宛先違いは見えぬ。"
+	echo "        他の者も同じ綴りを名指しておれば赤は残る (参照 1 件ごとに効くゆえ)"
 	echo "    見ぬ ⑦ ★名は合うが別物である場合を見分けられぬ★ (名だけで照合しており中身を見ておらぬ) = 誤検知の側の穴"
 }
 
@@ -120,22 +122,41 @@ extract_refs() {
 #
 #   ★物差し R★ = 「同じ basename の file が HEAD の別の path に現に在る」物だけを赤へ。
 #     考え方は一本である ＝ ★案内が宛先を書き違えておる (＝直し先が在る) 物だけを名指す★。
-#   ★除外 3 つ★ (いずれも機械で決まる。人の判断を要さぬ):
+#   ★除外 4 つ★ (いずれも機械で決まる。人の判断を要さぬ):
 #     E1 呼ぶ者が scripts/retired/ 配下   … 退役品が己の旧 usage を記す形
 #     E2 参照が shellcheck の source= 行  … その path は ★呼ぶ script の dir 基準★ ゆえ
 #                                            repo root から解けぬのが正しい
 #     E3 抽出位置の直前が `/`             … 別 dir の suffix を切り取った断片
 #                                            (例: .opencode/agents/x.md から agents/x.md)
+#     E4 呼ぶ者が本 gate 自身             … 門は己を検める者ではない (cmd_1445)
+#
+#   ★E4 を足した理由 (cmd_1445・軍師一号が cmd_1441 の検分で名指した)★
+#     本 gate の selftest は偽 repo を組むために path の綴りを本体へ書く。その綴りは
+#     ★HEAD の追跡下に在る★ゆえ、gate は己の作り物を「案内」と読んで赤を出す。
+#     現に cmd_1441 の commit が MISDIRECTED 2 本を生み、★直すべき呼び手が居らぬ赤★になった
+#     (作り物ゆえ「呼ぶ側を直せ」が当たらぬ)。毎朝 鳴って直せぬ門は、やがて外される。
+#     ⇒ 気を付ける側でなく構造の側で塞ぐ。
+#   ★E4 の効き方は【参照 1 件ごと】である (file ごとではない)★
+#     同じ綴りを門以外の者も名指しておれば、その組は残るゆえ ★赤のまま★ になる。
+#     = 門が唯一の呼び手である時だけ黙る。★本物を隠す幅を、構造で最小にしてある★ (T20 が証)。
+#   ★E4 が見えなくする物 (名乗っておく)★
+#     門自身の中に ★真の宛先違いが書かれ、且つ他に呼ぶ者が一人も居らぬ★ 場合は永久に見えぬ。
+#     本 gate が名指す path はほぼ全て註と作り物ゆえ、この形は「直せる案内」ではない。
 #
 #   ★退けた案を書き残す (同じ案を作り直させぬため — 六号 cmd_1438 §5 の実測)★
 #     「実行子 (bash/python3/source/exec) の直後の参照だけを赤へ」は ★向きが逆に働く★:
 #     真の宛先違いを 0/4 しか掴まず、掴んだ 9 件は 9/9 とも在り得ぬ path であった。
 #     理由 = ★宛先違いは悉く「註」の側に居り、実行子は例示文の側にこそ多い★。
+# 本 gate 自身の path (repo root 相対)。E4 の判定に使う。
+# selftest の偽 repo でも同じ綴りの file を置いて撃つゆえ、定数で足りる。
+GATE_SELF_REL="scripts/gate_undistributed_tooling.sh"
+
 is_misdirected() {
 	local ref="$1" caller="$2" prevslash="$3" scline="$4" hbase="$5"
 	case "$caller" in scripts/retired/*) return 1 ;; esac   # E1
 	[ "$scline" = "1" ] && return 1                          # E2
 	[ "$prevslash" = "1" ] && return 1                       # E3
+	[ "$caller" = "$GATE_SELF_REL" ] && return 1             # E4
 	local base="${ref##*/}"
 	# R = 同じ basename が HEAD の【別の】path に在るか
 	printf '%s\n' "$hbase" | awk -F'\t' -v b="$base" -v r="$ref" '
@@ -462,8 +483,9 @@ FIXEOF
 	# ── R と E1/E2/E3 を撃つための木 ──
 	#   HEAD に scripts/lib/tool.sh を置き、呼ぶ側は scripts/tool.sh (実在せぬ) を名指す。
 	#   = ★同じ名の file が別の場所に在る★ = 物差し R が当たる形。
+	#   第 4/5 引数 (任意) = ★二人目の呼び手★。E4 が「門以外の呼び手まで黙らせておらぬ」を撃つのに使う。
 	mk_red_repo() {
-		local d="$1" caller_path="$2" caller_body="$3"
+		local d="$1" caller_path="$2" caller_body="$3" caller2_path="${4:-}" caller2_body="${5:-}"
 		rm -rf "$d"; mkdir -p "$d/scripts/lib" "$d/$(dirname "$caller_path")"; cd "$d" || return 1
 		git init -q . && git config user.email t@t && git config user.name t
 		local i
@@ -473,6 +495,10 @@ FIXEOF
 		mkdir -p .opencode/agents && printf '# shogun\n' >.opencode/agents/shogun.md
 		printf '#!/usr/bin/env bash\necho lock\n' >scripts/lib/proc_lock.sh
 		printf '%b' "$caller_body" >"$caller_path"
+		if [ -n "$caller2_path" ]; then
+			mkdir -p "$(dirname "$caller2_path")"
+			printf '%b' "$caller2_body" >"$caller2_path"
+		fi
 		git add -A >/dev/null && git commit -q -m init
 		cd - >/dev/null || return 1
 	}
@@ -508,6 +534,28 @@ FIXEOF
 	mk_red_repo "$tmp/r16" "scripts/caller.sh" '#!/usr/bin/env bash\n# 註: lib/proc_lock.sh (shellcheck の指示ではない普通の行)\n'
 	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r16" 2>&1)"; rc=$?
 	chk "T17 同じ綴りでも shellcheck 行でなければ赤くなる (E2 が素通しでない証)" 1 "$rc" "$o"
+
+	# ── cmd_1445: E4 (門は己を検める者ではない) ──
+
+	# T19 ★E4 が現に効く★ = 門自身が名指した宛先違いは赤にせぬ。
+	#   T13 と同じ木・同じ綴りで、呼び手だけを門自身へ替えてある。
+	#   ⇒ T13 が赤・T19 が緑 = ★差は呼び手だけ★ゆえ、E4 以外の理由では説明が付かぬ。
+	mk_red_repo "$tmp/r17" "$GATE_SELF_REL" '#!/usr/bin/env bash\n# 作り物: scripts/tool.sh を名指す\n'
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r17" 2>&1)"; rc=$?
+	chk "T19 E4 門自身からの呼びは赤にせぬ" 0 "$rc" "$o"
+
+	# T20 ★E4 が【本物を隠さぬ】証★ = 同じ綴りを門自身と別の呼び手の両方が名指せば、赤は残る。
+	#   ★之を撃たねば、E4 は「その綴りを永久に免じる」壊れ方をしていても T19 は緑のままである★
+	#   (E1〜E3 に対する T17 と同じ形。除外を足す時は必ず素通しでない証を対で置く)。
+	mk_red_repo "$tmp/r18" "$GATE_SELF_REL" '#!/usr/bin/env bash\n# 作り物: scripts/tool.sh を名指す\n' \
+		"scripts/other_caller.sh" '#!/usr/bin/env bash\n# 案内: scripts/tool.sh を読め\n'
+	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r18" 2>&1)"; rc=$?
+	chk "T20 E4 は門以外の呼び手まで黙らせぬ (素通しでない証)" 1 "$rc" "$o"
+	printf '%s' "$o" | grep -q 'MISDIRECTED\] scripts/tool.sh' \
+		&& printf '%s' "$o" | grep -q 'scripts/other_caller.sh' \
+		&& ! printf '%s' "$o" | grep -q "が名指し.*$GATE_SELF_REL" \
+		&& { echo "  ok   T20b ★残った赤の呼び手は門以外だけ (門の分だけが落ちておる)★"; pass=$((pass + 1)); } \
+		|| { echo "  ★NG★ T20b 呼び手の畳み方が期待と違う"; printf '%s\n' "$o" | sed 's/^/         /'; fail=$((fail + 1)); }
 
 	# T18 ★網の狭さ (宛先違いの側) も毎回 名乗る★ — T11 の系統
 	o="$(GATE_SRC_MIN=10 GATE_REF_MIN=10 run_gate "$tmp/r1" 2>&1)"

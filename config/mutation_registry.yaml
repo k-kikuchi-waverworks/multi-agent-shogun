@@ -5,6 +5,12 @@
 # scripts/gate_mutation_replay.py が全件を再走し、赤くならなくなった変異を名指しする。
 #
 # ★掟★
+#   ・★★entry は【mutations: list の末尾 = 下の `coverage_waivers:` の直前】へ挿せ★★ (cmd_1409)
+#     ★file の末尾へ継ぐな★ — 五号 08:15 実測: 末尾へ継いだ entry は mutations: の下に入らず
+#     ★最後の top-level key (tree_census_waivers) の値として黙って呑まれる★ =
+#     parse は通り・道具も何も申さず・★mutations の総数も動かぬ★ ⇒ ★「登録した」自体が嘘になる★。
+#     ★挿した直後に機械へ数えさせよ★: python3 scripts/gate_registry_append.py --count config/mutation_registry.yaml
+#     (pre-commit の gate-4 が同じ検分を撃つ。★呑まれは翌朝の replay にも見えぬ★ = 載っておらぬ牙は撃たれもせぬ)
 #   ・出所はこの 1 file のみ (二重管理禁 — cmd_1350 の harness順/実機順の食い違いと同型の罠を作るな)
 #   ・0 件は PASS ではない (空にする変更をしたなら、その変更こそ疑え)
 #   ・entry を外す時は理由を commit log に書け (黙って外すな)
@@ -2887,6 +2893,108 @@ mutations:
     expect: nonzero
     red_needle: "not ok 1 T-ML-000"
     timeout: 600
+
+  - id: MUT-1409-G1
+    origin: cmd_1409
+    suspected_by: ashigaru5
+    desc: |
+      ★層A1 (mutations: の外に居る entry を名指す口) を折ると selftest T1 が赤くなるべき★。
+      折っても緑なら、gate-4 は ★五号 08:15 が現に踏んだ形 (末尾へ継いだ entry が
+      tree_census_waivers の値として呑まれる) を見ておらぬ★ = 門が在るだけの飾りに堕ちる。
+    paths: [scripts/gate_registry_append.py, config/mutation_registry.yaml]
+    mutate: |
+      sed -i 's/            if _is_entry_node(node):/            if False and _is_entry_node(node):/' scripts/gate_registry_append.py
+    test: |
+      python3 scripts/gate_registry_append.py --selftest
+    expect: nonzero
+    red_needle: "NG   T1 末尾へ継ぐと『呑まれ』と名指す"
+    anchor_sites: 1
+    timeout: 120
+
+  - id: MUT-1409-G2
+    origin: cmd_1409
+    suspected_by: ashigaru6
+    desc: |
+      ★層A2 (文字では "- id:" と書かれておるが節点に居らぬ = block scalar の中へ落ちた形) を
+      殺すと selftest T3 が赤くなるべき★。層A1 には見えぬ呑まれ方ゆえ、此の層が消えれば
+      ★「呑まれ 0」と報じながら現に呑まれておる★盤面が作れる。
+    paths: [scripts/gate_registry_append.py, config/mutation_registry.yaml]
+    mutate: |
+      sed -i 's/        if m and m.group(1) not in all_node_ids:/        if False:/' scripts/gate_registry_append.py
+    test: |
+      python3 scripts/gate_registry_append.py --selftest
+    expect: nonzero
+    red_needle: "NG   T3 desc の block scalar へ落ちた entry を層A2 が名指す"
+    anchor_sites: 1
+    timeout: 120
+
+  - id: MUT-1409-G3
+    origin: cmd_1409
+    suspected_by: ashigaru6
+    desc: |
+      ★層B (家老の処方(2) = 「diff の entry 数と台帳の総数の増分の一致」) の不一致を空に倒すと
+      selftest T6b が赤くなるべき★。倒しても緑なら「書いて足した 1 件・登録の増分 0 件」を
+      ★機械が見ておりながら黙る★ = 数を刷るだけで判じておらぬ門になる。
+    paths: [scripts/gate_registry_append.py, config/mutation_registry.yaml]
+    mutate: |
+      sed -i 's/    out\["mismatch"\] = sorted(written_added - reg_added)/    out["mismatch"] = []/' scripts/gate_registry_append.py
+    test: |
+      python3 scripts/gate_registry_append.py --selftest
+    expect: nonzero
+    red_needle: "NG   T6b 末尾へ継げば増分が合わぬと名指す"
+    anchor_sites: 1
+    timeout: 120
+
+  - id: MUT-1409-G4
+    origin: cmd_1409
+    suspected_by: ashigaru6
+    desc: |
+      ★「測れなんだ (parse 不能・mutations: 欠落)」を 0 件と混ぜて黙る形へ倒すと selftest T4b が
+      赤くなるべき★。★測れておらぬは緑ではない★ (本夜の族) — 此の枝が死ぬと、
+      壊れた台帳を ★呑まれ 0★ と報じて通す道が開く。
+    paths: [scripts/gate_registry_append.py, config/mutation_registry.yaml]
+    mutate: |
+      sed -i 's/    if not scan\["ok"\]:/    if False:/' scripts/gate_registry_append.py
+    test: |
+      python3 scripts/gate_registry_append.py --selftest
+    expect: nonzero
+    red_needle: "NG   T4b rc=2 (黙って PASS にせぬ)"
+    anchor_sites: 1
+    timeout: 120
+
+  - id: MUT-1409-G5
+    origin: cmd_1409
+    suspected_by: ashigaru6
+    desc: |
+      ★gate-4 の【配線】を消すと wiring bats が赤くなるべき★ (scripts/gate_precommit.sh から
+      呼び出し行を削る)。★呑まれは翌朝の replay にも見えぬ★ = 台帳に載っておらぬ牙は撃たれもせぬゆえ、
+      ★配線が消えた日、我らは何の音も聞かぬ★ (cmd_1359 stall_watchdog / 04:27 軍師二号「実体7・配線4」の族)。
+    paths: [scripts/gate_precommit.sh, tests/unit/test_gate_registry_append_wiring.bats]
+    mutate: |
+      sed -i '/scripts\/gate_registry_append.py" 2>&1/d' scripts/gate_precommit.sh
+    test: |
+      bats tests/unit/test_gate_registry_append_wiring.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-RA-000"
+    anchor_sites: 1
+    timeout: 180
+
+  - id: MUT-1409-G6
+    origin: cmd_1409
+    suspected_by: ashigaru6
+    desc: |
+      ★gate-4 を「常に鳴る門」へ倒すと selftest T2b が赤くなるべき★ (呑まれ 0 の盤面でも鳴らせる)。
+      ★常に鳴る門は必ず外される★ (cmd_1388 の族) ゆえ、★正しく挿した時に黙る事★も牙で縛る。
+      = ★「鳴る事」と同じ重さで「鳴らぬ事」を守る★。
+    paths: [scripts/gate_registry_append.py, config/mutation_registry.yaml]
+    mutate: |
+      sed -i 's/    n_bad = len(scan\["swallowed"\]) + len(scan\["text_only"\])/    n_bad = 1/' scripts/gate_registry_append.py
+    test: |
+      python3 scripts/gate_registry_append.py --selftest
+    expect: nonzero
+    red_needle: "NG   T2b rc=0"
+    anchor_sites: 1
+    timeout: 120
 
 coverage_waivers: []
 

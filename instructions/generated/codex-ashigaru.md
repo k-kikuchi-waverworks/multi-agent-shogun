@@ -493,7 +493,8 @@ Status is defined per YAML file type. **Keep it minimal. Simple is best.**
 Fixed status set (do not add casually):
 - `queue/shogun_to_karo.yaml`: `pending`, `in_progress`, `deferred`, `done`,
   `superseded`, `archived`, `dispatched`, `cancelled` (8 values — schema v2 vocabulary)
-- `queue/tasks/ashigaruN.yaml`: `assigned`, `blocked`, `done`, `failed`
+- `queue/tasks/ashigaruN.yaml`: `assigned`, `blocked`, `in_progress`, `done`, `failed`,
+  `cancelled`, `archived` (+ placeholder-only `idle`, see below)
 - `queue/tasks/pending.yaml`: `pending_blocked`
 - `queue/ntfy_inbox.yaml`: `pending`, `processed`
 
@@ -589,6 +590,10 @@ Meanings and allowed/forbidden actions (short):
   - Allowed: Karo unblocks by changing to `assigned` when ready, then inbox_write
   - Forbidden: nudging or starting work while `blocked`
 
+- `in_progress`: the assignee has picked it up and is working
+  - Allowed: the assignee sets this themselves after Karo wrote `assigned`
+  - Forbidden: another agent setting it on someone else's file
+
 - `done`: completed
   - Allowed: read-only; used for consolidation
   - Forbidden: reusing task_id for redo (use redo protocol)
@@ -596,6 +601,39 @@ Meanings and allowed/forbidden actions (short):
 - `failed`: failed with reason
   - Allowed: report must include reason + unblock suggestion
   - Forbidden: silent failure
+
+- `cancelled`: intentionally stopped before completion
+  - Allowed: read-only (history)
+  - Forbidden: resuming under the same task_id (issue a new one)
+
+- `archived`: the post itself has been retired (the agent no longer runs)
+  - Allowed: the file stays where it is, as a record
+  - Forbidden: **treating this as terminal.** See the archive rule below
+
+### タスクファイルの終端 / 非終端 (cmd_1463 で明文化)
+
+`scripts/slim_yaml.py` はこの区別で動きます。文書と機械が食い違うと、
+ファイルが消えるか、消えるべきものが残ります。
+
+| 値 | 終端か | slim_yaml の動き |
+|---|---|---|
+| `idle` / `assigned` / `blocked` / `in_progress` | 非終端 | そのまま置く |
+| `done` / `failed` / `cancelled` | 終端 | archive へ移す (常駐の持ち場なら idle の置き札へ戻す) |
+| `archived` | **非終端として扱う** | そのまま置く |
+
+**`archived` を終端にしてはいけません。** 現に `queue/tasks/` には
+`karo.yaml` / `ashigaru7.yaml` / `gunshi_a.yaml` / `gunshi_b.yaml` の 4 本が
+`archived` で在ります (2026-07-28 実測)。終端にすると 4 本ともファイルごと
+archive へ移り、家老の状態が消えます。`archived` は「退いた持ち場の記録」であって
+「終わったタスク」ではありません。
+
+**`completed` は使わないでください。`done` が正です。**
+控えには `completed` が 34 本 残っていますが、これは歴史であり、直しません
+(台帳の側では `done — complete (covers former "completed", "active")` で決着済み)。
+
+**`blocked` と `failed` は、控え 97 本の範囲では一度も使われていません**
+(2026-07-28 実測)。値が誤りだからではなく、その事態がまだ起きていないためです。
+「使われているはず」と読まないでください。
 
 Note:
 - Normally, "idle" is a UI state (no active task), not a YAML status value.

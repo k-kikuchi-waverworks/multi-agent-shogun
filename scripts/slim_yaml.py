@@ -62,9 +62,15 @@ TOP_LEVEL_IDLE_STUB = {'status': 'idle'}
 #   書いておるのは其の事であり、語彙を 1 組のまま直せば ★家老の task file が消える★。
 CMD_TERMINAL_STATUSES = {'done', 'superseded', 'cancelled', 'archived'}
 CMD_ACTIVE_STATUSES = {'pending', 'in_progress', 'deferred', 'dispatched'}
-# 足軽 task file (task_flow.md:100-123)。idle は task_id: null の置き札のみ許される値。
-TASK_TERMINAL_STATUSES = {'done', 'failed'}
-TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'blocked', 'pending_blocked'}
+# 足軽 task file。正本 = instructions/common/task_flow.md の
+# 「タスクファイルの終端 / 非終端」の表 (cmd_1463 で明文化)。
+# idle は task_id: null の置き札のみ許される値。
+# ★archived を終端へ入れるな★= 現に karo.yaml / ashigaru7.yaml / gunshi_a.yaml /
+#   gunshi_b.yaml の 4 本が archived で在り、終端にすると 4 本ともファイルごと
+#   archive へ移って家老の状態が消える。archived は「退いた持ち場の記録」である。
+TASK_TERMINAL_STATUSES = {'done', 'failed', 'cancelled'}
+TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'blocked', 'in_progress',
+                        'pending_blocked', 'archived'}
 # ntfy_inbox (task_flow.md:18)。
 NTFY_TERMINAL_STATUSES = {'processed'}
 INVENTORY_AGE_SECONDS = 30 * 86400

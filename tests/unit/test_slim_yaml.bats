@@ -128,18 +128,19 @@ PY
     assert_output --partial "non-canonical command status: cmd_bogus:superseded_by_17_30_correction"
 }
 
-# ★此の試験が守るのは家老の state そのものである★= 台帳の 8 値をそのまま task file へ当てると
-# status: archived の task file (karo.yaml 等) が終端と読まれ、file ごと archive へ移って idle stub に化ける。
-# task file の語彙は task_flow.md:100-123 の別語彙であり、archived は其処に無い = 触らず名指すのが正しい。
-@test "task file with status archived is named but never archived or stubbed" {
+# このテストが守るのは家老の状態そのものである。台帳の8値をそのまま task file へ当てると
+# status: archived の task file (karo.yaml 等) が終端と読まれ、ファイルごと archive へ移って
+# idle の置き札に化ける。task file の語彙は別で、archived は「退いた持ち場の記録」= 非終端である
+# (正本 = instructions/common/task_flow.md の「タスクファイルの終端 / 非終端」の表)。
+@test "task file with status archived is left alone and not named" {
     write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" "queue: []"
     write_yaml "$SHOGUN_QUEUE_DIR/tasks/karo.yaml" $'worker_id: karo\ntask_id: subtask_karo\nstatus: archived\n'
     write_yaml "$SHOGUN_QUEUE_DIR/tasks/gunshi_a.yaml" $'task_id: subtask_legacy_gunshi\nstatus: archived\n'
 
     run run_slim karo
     assert_success
-    assert_output --partial "canonical task karo.yaml has non-canonical status 'archived'"
-    assert_output --partial "task file gunshi_a.yaml has non-canonical status 'archived'"
+    refute_output --partial "karo.yaml has non-canonical status"
+    refute_output --partial "gunshi_a.yaml has non-canonical status"
 
     [ "$(yaml_value "$SHOGUN_QUEUE_DIR/tasks/karo.yaml" "status")" = "archived" ]
     [ "$(yaml_value "$SHOGUN_QUEUE_DIR/tasks/karo.yaml" "task_id")" = "subtask_karo" ]

@@ -3265,6 +3265,84 @@ mutations:
     red_needle: not ok 18 T-AGE-018
     timeout: 300
 
+  # ── cmd_1411「力の禁」の門を守る牙 3 本 (MUT-1411-001〜003) ─────────────────
+  # ★守る対象 = scripts/process_signal_guard.py の【退化の名乗り】★ (12:38 commit a587212)。
+  # ★paths に兄弟 (shell_expansion_guard.py) を必ず入れる★=
+  #   ★scratch は paths だけの複写ゆえ、兄弟を欠けば【健全な盤面が作れず baseline が赤】になる★
+  #   = ★六号が 12:39 に現に踏み、runner は緑と嘘をつかず UNDETERMINED と名乗った★
+  #   = ★本朝の族α (paths が一本きりで育った検が兄弟を読めず落ちる) と同じ形★。
+  # ★赤は二度 見た★= 手で当てた変異 3/3 (12:37) + runner の replay 3/3 PASS (12:40:38)。
+  - id: MUT-1411-001
+    desc: ★拒みの便への【退化しておる旨】の同梱を落とす変異★ = ★六号の初版の試験が緑のまま見逃した当の穴★。exit 0 の stderr は呼び手の目に入らぬ事が在り、exit 2 の便だけが必ず返る ⇒ 之を落とせば ★拒まれた者は喧しさの出所を読めぬまま「禁が辛い」と読む★ (cmd_1388 = 塞ぎ過ぎた禁は外される) の入口
+    origin: cmd_1411
+    suspected_by: ashigaru6
+    paths:
+    - scripts/process_signal_guard.py
+    - scripts/shell_expansion_guard.py
+    - tests/unit/test_process_signal_guard_degraded.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/process_signal_guard.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    _banner = degraded_banner()\n    if _banner:\n        lines += ["", _banner]\n'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_process_signal_guard_degraded.bats
+    expect: nonzero
+    red_needle: not ok 2 T-PSG-001
+    timeout: 300
+  - id: MUT-1411-002
+    desc: ★判ずる前の一行 (main の名乗り) を落とす変異★ = ★通す形では拒みの便が出ぬゆえ、之を落とすと【退化して走っておる事】が何処にも出ぬ★ = ★黙って過剰に拒み・黙って見落とす門★ (軍師一号 09:5x が現に踏んだ経路)
+    origin: cmd_1411
+    suspected_by: gunshi1
+    paths:
+    - scripts/process_signal_guard.py
+    - scripts/shell_expansion_guard.py
+    - tests/unit/test_process_signal_guard_degraded.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/process_signal_guard.py")
+      s = p.read_text(encoding="utf-8")
+      old = "    _banner = degraded_banner()\n    if _banner:\n        print(_banner, file=sys.stderr)\n"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_process_signal_guard_degraded.bats
+    expect: nonzero
+    red_needle: not ok 3 T-PSG-002
+    timeout: 300
+  - id: MUT-1411-003
+    desc: ★健全な時にも名乗らせる変異 (常に鳴る門)★ = ★守りを増やす向きに見えて実は減らす★ = ★毎度 鳴る門は読まれなくなり、真に退化した日の一行が同じ雑音に紛れる★ (cmd_1388 の族を負の側から縛る)
+    origin: cmd_1411
+    suspected_by: ashigaru6
+    paths:
+    - scripts/process_signal_guard.py
+    - scripts/shell_expansion_guard.py
+    - tests/unit/test_process_signal_guard_degraded.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/process_signal_guard.py")
+      s = p.read_text(encoding="utf-8")
+      old = "    if _TOKENIZER_OK:\n        return None\n"
+      new = "    if False:\n        return None\n"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_process_signal_guard_degraded.bats
+    expect: nonzero
+    red_needle: not ok 4 T-PSG-003
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

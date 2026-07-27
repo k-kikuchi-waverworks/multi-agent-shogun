@@ -53,7 +53,10 @@ cli:
       type: claude
       ${1:-deprecated: true}
 other:
-  deprecated: true
+  agents:
+    ghost:
+      type: claude
+      deprecated: true
 EOF
 }
 
@@ -135,8 +138,13 @@ old2" ]
 #   これを拾うと、無関係な設定で点呼の母数が動く。
 
 @test "T-ARD-006: cli 節の外の deprecated は拾わない" {
+    # 見本の末尾に、cli 節と【同じ形】の agents 節をもう1つ置いてある (other: 配下)。
+    # 字下げだけで弾けない形にしてあるので、節を追っていなければ ghost を拾ってしまう。
+    # 初版の見本は 2 字下げの deprecated を置いていただけで、字下げの違いで
+    # たまたま通っていた (変異 MUT-S を当てても落ちなかった) = 何も証明していなかった。
     _write_fixture
     run _deprecated
+    [[ "$output" != *"ghost"* ]]
     [[ "$output" != *"other"* ]]
 }
 

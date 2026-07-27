@@ -93,11 +93,35 @@ bash は `inbox3` を食って `bash: inbox3: command not found` に置き換え
 nudge の文字は pane に残らない。既存の確認は「残っていない = 送信成功」と読む。
 **食われた形が、届いた形と同じ顔で通っていた。**
 
+## 廃止済みのエージェントの扱い (18:14 の家老の裁)
+
+口を置いた直後、家老が撃って `gunshi_a` と `gunshi_b` が「不在」と出た。
+この2件は cmd_645 で廃止され、定義だけ `config/settings.yaml` に残っている。
+pane は元より無いので、判定としては正しい。
+
+しかし放置すれば **点呼が毎回 2 件の赤を出す**。毎朝 鳴る警報は外される。
+かといって一覧から除くと **「居たものが黙って消える」** 形になり、後から読む者が誤る。
+
+ゆえに **除かずに札を替える**。
+
+- `lib/agent_registry.sh` に `agent_registry_deprecated_agents` を置いた。
+  `cli.agents.<name>.deprecated: true` を読む。名前は直書きしていない。
+- `scripts/agent_status.sh` と `scripts/pane_cli_liveness.sh` の両方で、
+  廃止済みは **プロセスを見ない**。札は「廃止済」、実体欄は `-`。
+- **母数の内訳を常に出す**。`母数 11 件 = 現役 9 件 + 廃止済み 2 件 (gunshi_a,gunshi_b)`。
+  黙って除かない・黙って混ぜない。
+- 生きている pane の判定 (argv を辿る形) は 1 文字も変えていない。
+
+これで `scripts/pane_cli_liveness.sh` の rc は、廃止済みだけが非生存の時に 0 を返す。
+現に生きているべき pane が落ちた時だけ 1 になる。
+
 ## 試験
 
 ```bash
-bats tests/unit/test_pane_cli_liveness.bats            # 12 本
+bats tests/unit/test_pane_cli_liveness.bats            # 13 本
+bats tests/unit/test_agent_registry_deprecated.bats    #  9 本 (廃止済みの側)
 bash tests/mutation_cmd1418_pane_cli_liveness.sh       # 変異 6 本
+bash tests/mutation_cmd1418_deprecated_agents.sh       # 変異 6 本 (廃止済みの側)
 ```
 
 試験は使い捨ての tmux セッションを建てて畳む。稼働中の multiagent には触れない。
@@ -116,6 +140,22 @@ CLI の代わりに `exec -a claude /bin/sleep 300` で argv[0] を偽装した�
 | MUT-D | node 噛ませの分岐を外す | T-PCL-008 |
 | MUT-E | mismatch を dead へ倒す | T-PCL-005 |
 | NC | 註釈を 1 行 足す | (落ちない = 正しい) |
+
+廃止済みの側 (被検体 = `lib/agent_registry.sh`)。
+
+| 変異 | 壊す所 | 落ちる試験 |
+|---|---|---|
+| MUT-P | flag を見ずに全件 廃止済と読む | T-ARD-001 / 004 |
+| MUT-Q | 名前を直書き (gunshi_a/b) にする | T-ARD-001 / 002 / 003 |
+| MUT-R | `deprecated: false` も拾う | T-ARD-004 |
+| MUT-S | cli 節の外も拾う | T-ARD-006 |
+| MUT-T | 可否判定を常に真にする | T-ARD-005 |
+| NC | 註釈を 1 行 足す | (落ちない = 正しい) |
+
+**MUT-S が最初 落ちなかった。** 見本 (fixture) の節外 `deprecated` を 2 字下げで置いていたため、
+節を追わなくても字下げの違いで弾けてしまい、T-ARD-006 は **何も証明していなかった**。
+見本を cli 節と同じ形 (`other: > agents: > ghost:`) に直して、節を追う実装だけが通る形にした。
+変異を撃たなければ、この空の門は緑のまま残っていた。
 
 ## 保守で気をつけること
 

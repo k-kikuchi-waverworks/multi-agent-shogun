@@ -3792,6 +3792,33 @@ mutations:
     red_needle: not ok 1 T-QR-002
     timeout: 300
 
+  - id: MUT-1418-ARD1
+    origin: cmd_1418
+    suspected_by: ashigaru1
+    desc: |
+      廃止済みを拾う口が「flag の値を現に読んでいる」ことの牙。
+      lib/agent_registry.sh は settings.yaml の 6 空白 deprecated: true だけを拾う。
+      この判定を「6 空白の欄なら何でも拾う」へ緩めると、deprecated 行を別の欄
+      (model: …) へ差し替えた見本でも拾われてしまい、T-ARD-003 が赤くなるべき。
+      緩めても緑なら、その試験は flag を読んでいる証拠になっていない。
+    paths: [lib, tests, config]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("lib/agent_registry.sh")
+      s = p.read_text(encoding="utf-8")
+      old = 'deprecated:[[:space:]]*true([[:space:]]|$)'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, '[A-Za-z0-9_-]+:[[:space:]]*([[:space:]]|$)', 1),
+                   encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_agent_registry_deprecated.bats --filter "T-ARD-003"
+    expect: nonzero
+    red_needle: not ok 1 T-ARD-003
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

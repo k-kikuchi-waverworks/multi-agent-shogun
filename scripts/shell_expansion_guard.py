@@ -400,11 +400,62 @@ def inspect_argument(raw_unsafe: str, prose: bool = True) -> list[str]:
     return reasons
 
 
+def _mask_quotes_and_comments(text: str) -> str:
+    """引用符の中と註を空白へ置き換える。長さは変えないので位置がずれない。
+
+    なぜ必要か (軍師一号の cmd_1414 検分・非blocking 1):
+      定義の照合は綴りを見るだけなので、実行されない場所に書かれた「NAME=」まで
+      定義と読んでしまう。
+        引用符の中 … --title "母数 N=12 と数えた" --evidence "$N 件であった"
+        註の中     … # Z=1 と註に書いた / bash … --evidence "本文 $Z を書く"
+      どちらも shell は定義として実行しないのに、免除だけが効いていた。
+
+    置き換える向きは安全側である。定義が見つからなければ免除しないので、
+    判定は止める側へ倒れる。`export "X=1"` のような引用符の中の本物の定義も
+    落ちるが、落ちて起きることは「免除されない」だけなので害が無い。
+    """
+    out: list[str] = []
+    quote: str | None = None
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if quote is None:
+            if c in ("'", '"'):
+                quote = c
+                out.append(" ")
+                i += 1
+                continue
+            if c == "#" and (i == 0 or text[i - 1] in " \t\n;&|("):
+                j = text.find("\n", i)
+                j = n if j < 0 else j
+                out.append(" " * (j - i))
+                i = j
+                continue
+            out.append(c)
+            i += 1
+            continue
+        # 引用符の中
+        if c == "\\" and quote == '"' and i + 1 < n:
+            out.append("  ")
+            i += 2
+            continue
+        if c == quote:
+            quote = None
+        out.append(" ")
+        i += 1
+    return "".join(out)
+
+
 def _defined_names(head: str) -> set[str]:
-    """head (= その引数より前の綴り) の中で定義された変数名。"""
+    """head (= その引数が始まる位置より前の綴り) の中で定義された変数名。
+
+    head をどこで切るかがこの関数の要である。呼ぶ側は必ず「その引数が始まる位置まで」
+    を渡すこと。行の終わりまで渡すと、引数より後ろに書かれた定義まで免除の根拠になる。
+    shell は左から実行するので、後ろの定義はその引数には効いていない。
+    """
     names: set[str] = set()
     for rx in _DEF_RES:
-        for m in rx.finditer(head):
+        for m in rx.finditer(_mask_quotes_and_comments(head)):
             names.add(m.group(1))
     return names
 
@@ -441,14 +492,26 @@ def scan_unregistered(scanned: str) -> list[dict]:
     findings: list[dict] = []
     offset = 0
     for line in scanned.splitlines(keepends=True):
-        head_upto = offset + len(line)
-        offset = head_upto
+        line_start = offset
+        offset += len(line)
         if not line.strip():
             continue
         try:
             tokens = tokenize(line)
         except Exception:
             continue                            # 解けぬ時は通す (fail-OPEN と揃える)
+
+        # 各 token が行のどこから始まるかを採る (Token は位置を持たないため)。
+        # 免除の根拠を「その引数より前」だけから取るのに要る。
+        _pos_of: dict[int, int] = {}
+        _cur = 0
+        for _t in tokens:
+            _txt = _t.unsafe_text
+            _p = line.find(_txt, _cur)
+            if _p < 0:                          # 見つからねば安全側 = 行頭までしか見ぬ
+                _p = _cur
+            _pos_of[id(_t)] = _p
+            _cur = _p + len(_txt)
 
         groups: list[list[Token]] = []
         cur: list[Token] = []
@@ -462,7 +525,13 @@ def scan_unregistered(scanned: str) -> list[dict]:
         if cur:
             groups.append(cur)
 
-        defined: set[str] | None = None
+        # 定義の一覧を行ごとに1度だけ求める形をやめた (cmd_1414 非blocking 1)。
+        #   前は行の頭で1度だけ求め、しかも行の終わりまでを見ていた。
+        #   そのため引数より後ろに置いた定義が免除の根拠になっていた:
+        #       … --evidence "刻は $SHA じゃ"; SHA=$(git rev-parse HEAD)
+        #     shell は左から実行するので、この $SHA は空文字に落ちる。それでも門は免除していた。
+        #   つまり免除の範囲が、免除の理由より広かった。
+        #   今は引数ごとに、その引数が始まる位置までを見る。
         for grp in groups:
             for i, tok in enumerate(grp):
                 basename = tok.value.rsplit("/", 1)[-1]
@@ -476,8 +545,9 @@ def scan_unregistered(scanned: str) -> list[dict]:
                     unsafe = arg.unsafe_text
                     prose = bool(_PROSE_RE.search(_strip_expansions(unsafe)))
                     if prose:
-                        if defined is None:
-                            defined = _defined_names(scanned[:head_upto])
+                        arg_at = _pos_of.get(id(arg), len(line))
+                        defined = _defined_names(
+                            scanned[:line_start] + line[:arg_at])
                         if r2a_exempt(unsafe, defined):
                             prose = False       # R2 は当てぬ。★R1 は下で当たる★
                     for reason in inspect_argument(unsafe, prose=prose):

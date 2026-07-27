@@ -48,6 +48,18 @@ setup() {
 python3 - <<PY
 s = "parent_cmd: $NEW"
 PY'
+    # 免除が広すぎた5つの型 (軍師一号 07:23 の指摘 3 つ + 拙者が足した 2 つ)
+    #   POST  = 引数より後ろに定義がある (shell は左から走るゆえ $SHA は空へ落ちる)
+    POST='bash scripts/cmd_id_alloc.sh --evidence "刻は $SHA じゃ"; SHA=$(git rev-parse HEAD)'
+    #   PROSE = 引数そのものの中に N= と書いてある (定義ではなく本文である)
+    PROSE='bash scripts/cmd_id_alloc.sh --evidence "母数 N=12 と書いた $N 件"'
+    #   CMT   = 引数より後ろの註に定義がある (註は実行されぬ)
+    CMT='bash scripts/cmd_id_alloc.sh --evidence "本文 $Z を書く"   # Z=1'
+    #   QPRE  = 引数より前の【引用符の中】に定義がある (文字列であって定義ではない)
+    QPRE='bash scripts/cmd_id_alloc.sh --title "母数 N=12 と数えた" --evidence "$N 件であった"'
+    #   CPRE  = 引数より前の【註の中】に定義がある
+    CPRE='# Z=1 と註に書いた
+bash scripts/cmd_id_alloc.sh --evidence "本文 $Z を書く"'
 }
 
 # ★変異が【1 箇所だけ】に当たったかを確かめる (cmd_1414 で己が踏んだ形への手当て)★
@@ -122,6 +134,36 @@ verdict() {  # verdict <guard_path> <command>
     [ "$status" -eq 0 ]
 }
 
+# ── 陽性: 免除の根拠は「その引数より前に、現に実行される形で」書かれた定義だけ ──
+#   軍師一号の検分 (07:23・非blocking 1) が指摘した穴である。
+#   直す前の照合は (a) その行の終わりまでを見ており (b) 引用符の中と註も見ていた。
+#   そのため shell が定義として実行しない綴りまで「定義済み」と読み、免除だけが効いた。
+#
+#   実測 (2026-07-28 07:5x・HEAD=70c6bb0 の門と作業ツリーの門を並べて撃った):
+#     5つとも HEAD では rc=0 (通る) / 直した後は rc=2 (止まる)。
+#   指摘は3つだったが、POST・PROSE・CMT は2つの直しのどちらでも塞がる (下の陰性2本を見よ)。
+#   引用符と註の潰しだけが効く形を切り分けるために QPRE・CPRE を足した。
+
+@test "T-SGS-015: 引数より後ろに書いた定義では免除されぬ" {
+    [ "$(verdict "$GUARD" "$POST")" -eq 2 ]
+}
+
+@test "T-SGS-016: 引数そのものの中の N= は定義ではない" {
+    [ "$(verdict "$GUARD" "$PROSE")" -eq 2 ]
+}
+
+@test "T-SGS-017: 引数より後ろの註の中の定義では免除されぬ" {
+    [ "$(verdict "$GUARD" "$CMT")" -eq 2 ]
+}
+
+@test "T-SGS-018: 引数より前でも、引用符の中の N= は定義ではない" {
+    [ "$(verdict "$GUARD" "$QPRE")" -eq 2 ]
+}
+
+@test "T-SGS-019: 引数より前でも、註の中の Z= は定義ではない" {
+    [ "$(verdict "$GUARD" "$CPRE")" -eq 2 ]
+}
+
 # ── 陰性 (変異): 守りを外せば黙る ────────────────────────────────────
 #   ★どの変異も、先に原本が現に鳴ることを確かめてから撃つ★
 #   = 「黙る」だけを主張すれば、門が丸ごと壊れても緑になるゆえ (cmd_1399 の教訓)。
@@ -168,6 +210,43 @@ verdict() {  # verdict <guard_path> <command>
 
     # ③ 変異体は止める = 据え置きが現に守っておった
     [ "$(verdict "$M" "$HEREDOC")" -eq 2 ]
+}
+
+@test "T-SGS-104: 免除の根拠を行の終わりまで見ると、後置きの定義まで免除する" {
+    # ① 原本が現に鳴ることを先に確かめる
+    [ "$(verdict "$GUARD" "$POST")" -eq 2 ]
+
+    # ② 変異を当てる: 引数の手前で切るのをやめ、行の終わりまで見る (直す前の形)
+    M="$WORK/mut_s4.py"
+    sed 's/ + line\[:arg_at\])$/ + line)  # MUTANT-S4/' "$GUARD" > "$M"
+    assert_mutated_once "$GUARD" "$M" MUTANT-S4
+
+    # ③ 変異体は黙る = 引数の手前で切る形が現に効いていた
+    [ "$(verdict "$M" "$POST")" -eq 0 ]
+
+    # ④ 射程を名乗る: この変異では PROSE と CMT は鳴ったままである。
+    #    2つの直しが同じ型を二重に覆っているためで、守りが消えたわけではない。
+    [ "$(verdict "$M" "$PROSE")" -eq 2 ]
+    [ "$(verdict "$M" "$CMT")" -eq 2 ]
+}
+
+@test "T-SGS-105: 引用符と註を潰すのをやめると、実行されぬ定義まで免除する" {
+    # ① 原本が現に鳴ることを先に確かめる
+    [ "$(verdict "$GUARD" "$QPRE")" -eq 2 ]
+    [ "$(verdict "$GUARD" "$CPRE")" -eq 2 ]
+
+    # ② 変異を当てる: 引用符の中と註を潰さずに定義を探す (直す前の形)
+    M="$WORK/mut_s5.py"
+    sed 's/rx.finditer(_mask_quotes_and_comments(head)):$/rx.finditer(head):  # MUTANT-S5/' \
+        "$GUARD" > "$M"
+    assert_mutated_once "$GUARD" "$M" MUTANT-S5
+
+    # ③ 変異体は黙る = 潰す処理が現に効いていた
+    [ "$(verdict "$M" "$QPRE")" -eq 0 ]
+    [ "$(verdict "$M" "$CPRE")" -eq 0 ]
+
+    # ④ 射程を名乗る: この変異でも POST は鳴ったままである (①と同じ理由)
+    [ "$(verdict "$M" "$POST")" -eq 2 ]
 }
 
 # ── 門そのものの自己試験 ────────────────────────────────────────────

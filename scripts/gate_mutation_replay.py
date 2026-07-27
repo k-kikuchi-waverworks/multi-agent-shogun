@@ -263,6 +263,56 @@ def anchor_firings(a_root: Path, b_root: Path) -> tuple[int, list]:
     return worst, detail
 
 
+def hunk_sites(a_root: Path, b_root: Path) -> list:
+    """★行の塊が【どの file から来たか】を返す★ (cmd_1387・2026-07-27)。
+
+    ★何故 要るか★= 物差しB (行の塊) で鳴った時、読む者へ手掛かりが 1 つも出ておらなんだ。
+      内訳 (anchor_firings の detail) は ★同一の (old→new) が 2 回以上出た時にしか埋まらぬ★ =
+      物差しA が 1 で物差しB が 2 の盤面では ★常に空である★。
+      ⇒ ★鳴っても持ち主が動けぬ★ = 本日ずっと狩ってきた「名乗らぬ計器」そのものである。
+
+    ★実害 (2026-07-27 18:40)★= 六号が五号の牙を「2 箇所で発火」と報せたが、
+      内訳が空ゆえ ★どの file の塊かを渡せなんだ★。
+      五号は静かな盤面で 3 回 撃ち直して 3 回とも PASS を見るしか無く、
+      ★持ち主が己の牙を疑う以外に道が無かった★ (五号 18:57 の言)。
+      ★file 名さえ出ておれば、其の場で「変異が書かぬ file の塊である」と判った★。
+
+    返す物 = [{"file": 相対路, "count": 塊の数, "sample": 変わった綴りの頭}] を塊の多い順に。
+    ★数え方は _diff_shape と同一でなければならぬ★ (別の数を出せば計器が二つに割れる)。
+    """
+    import difflib
+    af, bf = _tree_text_files(a_root), _tree_text_files(b_root)
+    out = []
+    for rel in sorted(set(af) & set(bf)):
+        al, bl = _read_lines_safe(af[rel]), _read_lines_safe(bf[rel])
+        if al is None or bl is None or al == bl:
+            continue
+        pieces = []
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+                None, al, bl, autojunk=False).get_opcodes():
+            if tag == "equal":
+                continue
+            old, new = "".join(al[i1:i2]), "".join(bl[j1:j2])
+            if "".join(old.split()) == "".join(new.split()):
+                continue
+            pieces.append(("".join(old.split()), "".join(new.split())))
+        dels = [i for i, (o, n) in enumerate(pieces) if o and not n]
+        adds = [i for i, (o, n) in enumerate(pieces) if n and not o]
+        used, moved = set(), 0
+        for d in dels:
+            for a in adds:
+                if a not in used and pieces[d][0] == pieces[a][1]:
+                    used.add(a)
+                    moved += 1
+                    break
+        n = len(pieces) - moved
+        if n <= 0:
+            continue
+        sample = next((o or nw for o, nw in pieces if (o or nw)), "")
+        out.append({"file": rel, "count": n, "sample": sample[:60]})
+    return sorted(out, key=lambda d: -d["count"])
+
+
 def changed_line_hunks(a_root: Path, b_root: Path) -> int:
     """★物差しB (cmd_1382 差し戻し)★: 変わった行の【離れた塊】が幾つかを数える。
 
@@ -430,10 +480,19 @@ def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: i
                  ("綴り" if by_spelling > by_hunks else
                   ("行の塊 (綴りは測っておらぬ)" if not spelling_measure else
                    f"行の塊 (綴りとしては {by_spelling} 箇所にしか見えぬ)")))
+        # ★物差しB で鳴った時の手掛かり (cmd_1387)★= 上の内訳 (綴りの内訳) は
+        #   ★同一の (old→new) が 2 回以上出た時にしか埋まらぬ★ ゆえ、物差しB が鳴らした盤面では
+        #   ★常に空である★ = ★鳴っても持ち主が動けぬ★ (2026-07-27 18:40 に現に起きた)。
+        #   ⇒ ★塊が【どの file から来たか】を必ず添える★ = 持ち主が「己の変異が書かぬ file の
+        #     塊である」を其の場で判ぜられる (五号が 3 回 撃ち直す羽目になった当の穴)。
+        hs = "; ".join(f"{x['file']}×{x['count']}"
+                       + (f"「{x['sample']}」" if x["sample"] else "")
+                       for x in hunk_sites(pristine, mut)[:4])
         return (f"★同一の綴り置換が {fired} 箇所で発火 (申告は {declared} 箇所)★ = 狙い+余所を"
                 f"巻き込んでおる。赤が出ても【どの箇所の赤か】を名指しできぬ。"
                 f" 数えた物差し = {which} ({spell_note} / 行の塊 {by_hunks})."
                 + (f" 内訳: {d}." if d else "")
+                + (f" 塊の出所: {hs}." if hs else "")
                 + f" 処方 = anchor を一意な綴りへ絞る (前後の行を含める) か、全置換が意図なら"
                 f" 台帳へ anchor_sites: {fired} と書け (黙って全置換するのを禁じておる)")
 
@@ -445,8 +504,12 @@ def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: i
     if declared > fired:
         # ★過大申告 = 申告が飾りになる道★ (cmd_1382 差し戻し (ii)・足軽二号の名指し)。
         # 旧版は fired > declared しか見ておらず、anchor_sites: 99 と書けば門は黙った。
+        # ★此処にも塊の出所を添える (cmd_1387)★= 「2 と申告したが実測 1」と言われた者が
+        #   次に問うのは ★其の 1 は何処の 1 か★ である (六号が 19:03 に己で踏んで判った)。
+        hs = "; ".join(f"{x['file']}×{x['count']}" for x in hunk_sites(pristine, mut)[:4])
         return (f"★anchor_sites の申告 {declared} 箇所に対し、実測は {fired} 箇所★ = 過大申告。"
-                f" ({spell_note} / 行の塊 {by_hunks})"
+                f" ({spell_note} / 行の塊 {by_hunks}"
+                + (f" / 塊の出所 {hs}" if hs else "") + ")"
                 f" ★申告を大きく書けば門は黙る★ ゆえ、申告と実測の食い違いは両向きに咎める。"
                 f" 処方 = 台帳の anchor_sites を {fired} へ直せ (実測に合わせよ)")
 
@@ -3038,6 +3101,45 @@ def selftest() -> int:
         check("T65e ★現に 2 箇所を撃つ変異は猶 2 と数える (見落としへ倒れておらぬ)★",
               max(_a65b, _b65b) == 2, f"物差しA={_a65b} 物差しB={_b65b} (期待 採用=2)")
 
+        # ─────────────────────────────────────────────────────────────────
+        # T66: ★物差しB で鳴った時、塊が【どの file から来たか】を名乗る★ (cmd_1387)
+        #   機序 = 綴りの内訳 (anchor_firings の detail) は ★同一の (old→new) が 2 回以上
+        #   出た時にしか埋まらぬ★ ゆえ、物差しA=1・物差しB=2 の盤面では ★常に空★ であった。
+        #   ⇒ ★鳴っても持ち主が動けぬ★ = 2026-07-27 18:40 に現に起きた
+        #     (六号が五号へ内訳を渡せず、五号は静かな盤面で 3 回 撃ち直すしか無かった)。
+        #   ★両側から縛る★:
+        #     (a) 物差しB が鳴らした時 = ★file 名が出る★
+        #     (b) 綴りが鳴らした時 = ★従来の内訳 (old→new×n) が消えておらぬ★
+        #   片側だけでは「片方を足して片方を落とした」が判らぬ。
+
+        # (a) 離れた 2 file を 1 箇所ずつ書き換える = 綴りは 1・行の塊は 2
+        r66 = _mk_playground(T / "hunk66")
+        (r66 / "alpha.txt").write_text("aaa\nbbb\n", encoding="utf-8")
+        (r66 / "beta.txt").write_text("ccc\nddd\n", encoding="utf-8")
+        reg66 = T / "hunk66reg.yaml"
+        _write_reg(reg66, [dict(_entry(
+            "MUT-T66",
+            "sed -i 's/bbb/BBB/' alpha.txt && sed -i 's/ddd/DDD/' beta.txt",
+            test="bash check.sh"), paths=["tool.sh", "check.sh", "alpha.txt", "beta.txt"])])
+        rc, out = _invoke(["--registry", str(reg66), "--repo-root", str(r66)])
+        expect("T66a ★塊の出所に file 名が出る (alpha)★", 2, rc, "alpha.txt", out)
+        check("T66b ★もう一方の file も出る (beta)★", "beta.txt" in out,
+              f"出力に beta.txt が無い: {out[-400:]}")
+        check("T66c ★塊の出所という語で名乗る★", "塊の出所" in out,
+              f"出力に「塊の出所」が無い: {out[-400:]}")
+
+        # (b) ★退行の検め★= 同一の綴りが 2 箇所で発火する盤面では従来の内訳が今も出る
+        r66b = _mk_playground(T / "hunk66b")
+        (r66b / "dup.txt").write_text("zzz\nqqq\nzzz\n", encoding="utf-8")
+        reg66b = T / "hunk66breg.yaml"
+        _write_reg(reg66b, [dict(_entry(
+            "MUT-T66B", "sed -i 's/zzz/ZZZ/g' dup.txt", test="bash check.sh"),
+            paths=["tool.sh", "check.sh", "dup.txt"])])
+        rc, out = _invoke(["--registry", str(reg66b), "--repo-root", str(r66b)])
+        expect("T66d ★綴りの内訳は消えておらぬ (退行なし)★", 2, rc, "内訳:", out)
+        check("T66e ★綴りの内訳が old→new×n の形で出る★", "×2" in out,
+              f"出力に「×2」が無い: {out[-400:]}")
+
         # T50: ★gate の実出力の語が docs に在ること★ (cmd_1382 差し戻し・軍師二号)
         #   ★書いた場所と読まれる場所を揃える★ = 赤を見た者が docs を grep して辿り着けるか。
         #   ★語が食い違えば此処が赤くなる★ ゆえ、次に出力を整理する者が黙って道を切れぬ。
@@ -3066,7 +3168,9 @@ def selftest() -> int:
                                    # 付帯5 (負の主張の刃・2026-07-27)
                                    "誰も証しておらぬ", "対象なし",
                                    # 付帯3 幽霊の出所割り + 物差し是正 (cmd_1408・2026-07-27)
-                                   "別台帳に実在", "真に未登録", "判別不能", "捨てた綴り")
+                                   "別台帳に実在", "真に未登録", "判別不能", "捨てた綴り",
+                                   # 物差しB で鳴った時の手掛かり (cmd_1387・2026-07-27)
+                                   "塊の出所")
                        if w not in doc_txt]
             expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
                    0, len(missing))

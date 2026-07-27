@@ -34,6 +34,24 @@
        読み手 = 上記いずれも `isinstance(doc, dict)` でない doc を ★黙って skip する★
        害     = 落ちもせず、読まれもせぬ = 最も見つけにくい形で記録が消える
 
+    R5 (cmd_1407・警告のみ) ★門が己の要求する鍵を名乗る★
+       R1〜R4 が問うたのは「読み手が parse できるか」までである。★parse できても
+       読み手が【探しておる鍵】を持たねば、其の report は在って無いのと同じ★。
+       六号が 05:46 に実測した形が之である = PASS を返した report を番人が読めておらぬ。
+       読み手 = scripts/idle_revive_scan.py report_completion_state (1546-1585)
+         1572  inner = doc["report"] if isinstance(doc.get("report"), dict) else doc
+               ⇒ ★task_id を置く高さは「document 直下」か「report: の直下」の二つのみ★。
+                 任意の名 (例 `cmd1426_two_writers:`) の下へ入れた鍵は ★読み手から見えぬ★。
+         1573-1575  r_task_id != task_id なら continue  (★黙って飛ばす★)
+         1576-1578  timestamp が解けねば continue      (★黙って飛ばす★)
+         1534-1543  parse_iso_to_naive_local = ★isinstance(s, str) が偽なら即 None★
+               ⇒ ★timestamp の引用符を外すと YAML が datetime へ変え、str でなくなり黙って飛ぶ★
+       害 = status: done と書いてあっても not_done と読まれ、
+            ★「働いておるのに idle」と判定される★ (cmd_1395 が塞いだ害の、鍵の側の面)
+       ★落とさぬ★ = R5 は書き手の画面へ ★名指すだけ★ で、CLI の rc を赤にせぬ
+            (家老 22:24 の枷「名指すまでに留めよ」)。hook 経路のみ exit 2 で書き手へ返すが、
+            ★PostToolUse の exit 2 は既に済んだ書込を取り消さぬ★ = 何も落ちておらぬ。
+
 ★fail-OPEN (loud)★
     此の門の誤りで全 agent の Write が止まる方が害が大きい。内部異常は通す。
     ★但し黙って通さぬ★= stderr へ出す (黙る番人こそ本 cmd の敵ゆえ)。
@@ -47,6 +65,7 @@ Usage:
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -226,6 +245,163 @@ def validate_text(text: str, stem: str) -> list[str]:
     return problems
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# R5 (cmd_1407) — ★門が【己の要求する鍵】を名乗る★
+#
+# ★規則を発明せぬ★= 下の 3 つは いずれも読み手の code を写した物である。
+#   写経ではなく ★同じ形で書き、守っておる行を message に載せる★ (R1-R4 と同じ流儀)。
+# ★警告のみ★= 返り値は problems と別の list。CLI の rc を赤にせぬ。
+# ══════════════════════════════════════════════════════════════════════════
+READER = "scripts/idle_revive_scan.py"
+COMPLETION_WORDS = {"done", "completed", "complete", "finished"}
+
+
+def reader_view(text: str) -> list[dict] | None:
+    """★読み手が見る高さ★ の mapping を並べて返す (idle_revive_scan.py:1569-1572 の写し)。
+
+    None = parse できぬ (R1 が既に名指しておる)。
+    """
+    try:
+        parsed = list(yaml.safe_load_all(text))
+    except yaml.YAMLError:
+        return None
+    view: list[dict] = []
+    for doc in parsed:
+        if not isinstance(doc, dict):
+            continue  # 読み手も同じく飛ばす (R4 が別途 名指す)
+        inner = doc["report"] if isinstance(doc.get("report"), dict) else doc
+        if isinstance(inner, dict):
+            view.append(inner)
+    return view
+
+
+def reader_can_parse_time(value) -> bool:
+    """idle_revive_scan.py:1534-1543 (parse_iso_to_naive_local) と同じ判定。"""
+    if not isinstance(value, str):
+        return False  # ★引用符を外すと YAML が datetime を作り、此処で黙って落ちる★
+    try:
+        datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return True
+
+
+def current_task(stem: str) -> tuple[str | None, str | None, set]:
+    """queue/tasks/{agent}.yaml の (task_id, updated_at, 前任 id の集合)。読めねば空。
+
+    ★前任 id を併せて返す理由★= 新任が配られた直後に前任の完遂を書く形は ★正しい★。
+    実測 (2026-07-27 22:3x) = 軍師二号が現に其の形であった (新任 22:30 / 前任の完遂 22:35)。
+    task YAML は其れを prev_task_id* として自ら申告しておるゆえ、★申告に在る id では鳴らさぬ★。
+    """
+    empty: tuple[str | None, str | None, set] = (None, None, set())
+    agent = stem.replace("_report", "")
+    ty = _SCRIPTS_DIR.parent / "queue" / "tasks" / f"{agent}.yaml"
+    if not ty.is_file():
+        return empty
+    try:
+        loaded = yaml.safe_load(ty.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, OSError):
+        return empty  # ★task 側の壊れを report の書き手の赤にせぬ★
+    if not isinstance(loaded, dict):
+        return empty
+    body = loaded.get("task") if isinstance(loaded.get("task"), dict) else loaded
+    if not isinstance(body, dict):
+        return empty
+    tid = body.get("task_id")
+    upd = body.get("updated_at") or body.get("timestamp")
+    prev = {v for k, v in body.items()
+            if isinstance(k, str) and k.startswith("prev_task_id") and isinstance(v, str)}
+    return (tid if isinstance(tid, str) else None,
+            upd if isinstance(upd, str) else None,
+            prev)
+
+
+def warn_text(text: str, stem: str, task_lookup=None) -> list[str]:
+    """R5 = ★読み手が探す鍵を持っておるか★。返り = 警告 list (空 = 何も言うことなし)。
+
+    task_lookup = (task_id, updated_at) を返す callable。★試験が現物の queue/tasks/ を
+    書き換えずに R5c を撃てるようにする口★ (既定 = current_task)。
+    """
+    warnings: list[str] = []
+    view = reader_view(text)
+    if view is None:
+        return warnings  # parse 落ちは R1/R2 の領分
+
+    keyed = [d for d in view if d.get("task_id") or d.get("primary_task")]
+
+    # ── R5a = 読み手の高さに鍵が1つも無い ──
+    if not keyed:
+        tops = []
+        for d in view:
+            tops += [k for k in d.keys() if isinstance(k, str)]
+        warnings.append(
+            "[R5a] 読み手に task_id が1つも見えぬ\n"
+            f"     読み手 = {READER}:1572 は task_id を ★document 直下★ か ★report: の直下★ でしか探さぬ。\n"
+            f"     此の report の最上位の鍵 = {tops[:6]}\n"
+            "     ⇒ 任意の名 (例 cmd1426_xxx:) の下へ入れた task_id は ★見えぬ★。\n"
+            f"     害 = {READER}:1573-1575 で全 document が continue され、"
+            "status: done と書いても ★not_done と読まれる★ = 【働いておるのに idle】"
+        )
+
+    # ── R5b = 鍵は在るが timestamp が解けぬ ──
+    for d in keyed:
+        tid = d.get("task_id") or d.get("primary_task")
+        ts = d.get("timestamp")
+        if reader_can_parse_time(ts):
+            continue
+        if ts is None:
+            why = "timestamp が無い"
+        elif not isinstance(ts, str):
+            why = (f"timestamp が str でない (got {type(ts).__name__}: {ts!r}) "
+                   "— ★YAML は引用符の無い日時を datetime へ変える★ ⇒ '…' で括れ")
+        else:
+            why = f"timestamp を fromisoformat が解けぬ ({ts!r})"
+        warnings.append(
+            f"[R5b] task_id={tid!r} の document で {why}\n"
+            f"     読み手 = {READER}:1576-1578 は解けぬ timestamp を ★黙って飛ばす★ "
+            f"(判定は同 :1534-1543 = isinstance(s, str) が偽なら即 None)\n"
+            "     害 = 其の document は無かったことになり、完遂が届かぬ"
+        )
+
+    # ── R5c = 現任の task_id と食い違う完遂 ──
+    #   ★常に鳴る門にせぬ★= 単なる不一致では鳴らさぬ。前任の完遂を書いた直後に
+    #   新任が配られる形は ★正しく不一致★ ゆえ (実測: 22:2x 時点で現物 9 本すべて不一致)。
+    #   鳴らすのは ★現任が配られた【後に】書かれた完遂が、別の id を名乗っておる時★ のみ。
+    task_id, task_upd, prev_ids = (task_lookup or current_task)(stem)
+    if task_id and keyed:
+        ids = {d.get("task_id") or d.get("primary_task") for d in keyed}
+        if task_id not in ids:
+            newer = []
+            for d in keyed:
+                st = d.get("status")
+                if not (isinstance(st, str) and st.strip().lower() in COMPLETION_WORDS):
+                    continue
+                rid = d.get("task_id") or d.get("primary_task")
+                if rid in prev_ids:
+                    continue  # ★task YAML 自身が前任と申告しておる = 正しい形★
+                ts = d.get("timestamp")
+                if (isinstance(ts, str) and isinstance(task_upd, str)
+                        and reader_can_parse_time(ts) and ts >= task_upd):
+                    newer.append(rid)
+            if newer:
+                warnings.append(
+                    f"[R5c] 現任が配られた後に書かれた完遂が、別の task_id を名乗っておる\n"
+                    f"     task YAML = {task_id!r} (updated_at={task_upd}) / 此の report = {newer}\n"
+                    f"     読み手 = {READER}:1573-1575 は現任の id でしか探さぬ ⇒ "
+                    "★此の完遂は現任の完遂として数えられぬ★\n"
+                    "     (前任の報告を書いておるだけなら、之は正しい形である — 書き手が判ぜよ)"
+                )
+    return warnings
+
+
+def warn_file(path: pathlib.Path) -> list[str]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return warn_text(text, path.stem)
+
+
 def validate_file(path: pathlib.Path) -> list[str]:
     try:
         text = path.read_text(encoding="utf-8")
@@ -241,6 +417,15 @@ def render(path: pathlib.Path, problems: list[str]) -> str:
         f"★家老は此の report を読めぬ = 貴殿の完遂は届かぬ★ — 直してから報告せよ。"
     )
     return head + "\n" + "\n".join(problems)
+
+
+def render_warn(path: pathlib.Path, warnings: list[str]) -> str:
+    """R5 の名指し。★落としておらぬ★ = 書込は既に済んでおり、之は報せである。"""
+    head = (
+        f"[report_validate] ⚠ {path} は parse できるが ★読み手が探す鍵を持っておらぬ★ (R5)\n"
+        f"★何も落としておらぬ★ — 書込は済んでおる。直さねば ★完遂が黙って届かぬ★ という報せである。"
+    )
+    return head + "\n" + "\n".join(warnings)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -394,18 +579,90 @@ def selftest() -> int:
         ok = ok and passed
         print(f"  {'ok ' if passed else 'NG '} {name}{detail}")
 
+    # ── R5 (cmd_1407) = ★鍵を消せば赤・正しい物では静か★ を両方向で ──
+    #   ★試験の前提を焼き付けぬ★= task YAML は差し替え可能な口 (task_lookup) から与える。
+    _NO_TASK = lambda _stem: (None, None, set())  # noqa: E731  R5c を黙らせる (R5a/R5b だけを撃つ)
+    for name, text, stem, lookup, needle in [
+        (
+            "W1 任意名の下へ入れた task_id (三号の現物と同じ形) = 読み手から見えぬ",
+            "cmd1426_two_writers:\n  task_id: subtask_1426\n  status: done\n"
+            "  timestamp: '2026-07-27T20:42:00'\n",
+            "ashigaru3_report", _NO_TASK, "[R5a]",
+        ),
+        (
+            "W1n report: の直下へ置けば ★緑★ (読み手が見る高さ)",
+            "report:\n  task_id: subtask_1426\n  status: done\n"
+            "  timestamp: '2026-07-27T20:42:00'\n",
+            "ashigaru3_report", _NO_TASK, None,
+        ),
+        (
+            "W1n2 document 直下へ平置きしても ★緑★ (読み手が見るもう一つの高さ)",
+            "task_id: subtask_1426\nstatus: done\ntimestamp: '2026-07-27T20:42:00'\n",
+            "ashigaru3_report", _NO_TASK, None,
+        ),
+        (
+            "W2 timestamp が無い (六号 05:46 の実測と同じ形)",
+            "task_id: subtask_1426\nstatus: done\n",
+            "ashigaru3_report", _NO_TASK, "[R5b]",
+        ),
+        (
+            "W3 timestamp の引用符を外した = YAML が datetime を作り str でなくなる",
+            "task_id: subtask_1426\nstatus: done\ntimestamp: 2026-07-27T20:42:00\n",
+            "ashigaru3_report", _NO_TASK, "[R5b]",
+        ),
+        (
+            "W4 現任が配られた後の完遂が別の id を名乗る",
+            "task_id: subtask_OLD\nstatus: done\ntimestamp: '2026-07-27T23:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_NEW", "2026-07-27T22:24:00", set()), "[R5c]",
+        ),
+        (
+            "W4n 前任の完遂を書いた【後に】新任が配られた形 = ★緑★ (常に鳴る門にせぬ)",
+            "task_id: subtask_OLD\nstatus: done\ntimestamp: '2026-07-27T18:16:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_NEW", "2026-07-27T22:24:00", set()), None,
+        ),
+        (
+            "W4n2 task YAML が prev_task_id で前任と申告しておる = ★緑★ "
+            "(軍師二号 22:35 の現物と同じ形)",
+            "task_id: subtask_OLD\nstatus: done\ntimestamp: '2026-07-27T22:35:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_NEW", "2026-07-27T22:30:00", {"subtask_OLD"}), None,
+        ),
+    ]:
+        got = warn_text(text, stem, task_lookup=lookup)
+        if needle is None:
+            passed = not got
+            detail = "" if passed else " / 出た警告=" + "; ".join(g.split("\n")[0] for g in got)
+        else:
+            passed = any(needle in g for g in got)
+            detail = (" / " + "; ".join(g.split("\n")[0] for g in got)) if got else \
+                     " / ★警告が1つも出ておらぬ★"
+        ok = ok and passed
+        print(f"  {'ok ' if passed else 'NG '} {name}{detail}")
+
     # ★盤面の側の負例★= 現に在る report 9 本が緑であること (門が狼少年でない証)
     reports_dir = _SCRIPTS_DIR.parent / "queue" / "reports"
     live = sorted(reports_dir.glob("*.yaml")) if reports_dir.is_dir() else []
+    r5_hit = []
     for p in live:
         problems = validate_file(p)
         passed = not problems
         ok = ok and passed
         mark = "ok " if passed else "NG "
         detail = "" if passed else " / " + "; ".join(x.split("\n")[0] for x in problems)
+        w = warn_file(p)
+        if w:
+            r5_hit.append((p.name, [x.split("]")[0] + "]" for x in w]))
         print(f"  {mark}N2 現物 {p.name} = 緑であるべき{detail}")
     if not live:
         print("  -- N2 現物の report が見当たらぬ (skip)")
+    # ★N3 = 母数の印字★ (judge には効かせぬ)。R5 は警告ゆえ現物が赤くとも FAIL にせぬが、
+    #   ★数を黙らせぬ★= 「R1-R4 は全部 緑、なれど読み手には見えておらぬ」を一目で出す。
+    print(f"  ── N3 現物 {len(live)} 本のうち ★R5 が名指す物 = {len(r5_hit)} 本★ "
+          f"(judge には効かせぬ = 警告ゆえ)")
+    for nm, rules in r5_hit:
+        print(f"       {nm}: {'+'.join(sorted(set(rules)))}")
 
     print("=== 総judge:", "PASS" if ok else "FAIL", "===")
     return 0 if ok else 1
@@ -441,10 +698,20 @@ def hook_main() -> int:
               f" {BORROW_ERROR}", file=sys.stderr)
 
     problems = validate_file(path)
-    if not problems:
+    warnings = warn_file(path)
+    if not problems and not warnings:
         return 0
-    print(render(path, problems), file=sys.stderr)
-    return 2  # PostToolUse: exit 2 = stderr を書き手へ返す
+    out = []
+    if problems:
+        out.append(render(path, problems))
+    if warnings:
+        out.append(render_warn(path, warnings))
+    print("\n".join(out), file=sys.stderr)
+    # PostToolUse: exit 2 = stderr を書き手へ返す。
+    # ★R5 だけの時も 2 を返す★ = 書き手の画面へ届く口は之しか無い (家老 22:24 の
+    #   「書き手の画面へ即座に名指す」)。★PostToolUse の 2 は済んだ書込を取り消さぬ★
+    #   ゆえ「落とすな」の枷は破っておらぬ。CLI 経路 (main) の rc は赤にせぬ。
+    return 2
 
 
 def main() -> int:
@@ -465,6 +732,12 @@ def main() -> int:
             rc = 1
         else:
             print(f"PASS: {path}")
+        # ★R5 は rc を動かさぬ★ (家老 22:24「名指すまでに留めよ」)。
+        #   ★但し黙らぬ★= PASS の直後に警告を出す = 「PASS だが読み手には見えぬ」を
+        #   一目で分ける (之が本 cmd の当の病である)。
+        warnings = warn_file(path)
+        if warnings:
+            print(render_warn(path, warnings), file=sys.stderr)
     return rc
 
 

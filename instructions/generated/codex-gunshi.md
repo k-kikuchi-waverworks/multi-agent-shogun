@@ -982,7 +982,9 @@ The active queue file (`queue/shogun_to_karo.yaml`) must only contain
 `pending`, `in_progress` and `deferred` entries. All other statuses are archived.
 
 When a cmd reaches a terminal status (`done`, `cancelled`),
-Karo must move the entire YAML entry to `queue/shogun_to_karo_archive.yaml`.
+Karo must move the entire YAML entry to `queue/archive/shogun_to_karo_<timestamp>.yaml`
+(the generational archive that actually exists — 16 generations as of 2026-07-28 07:24).
+`queue/shogun_to_karo_archive.yaml` (singular, at the queue root) has never existed.
 
 | Status | In active file? | Action |
 |--------|----------------|--------|

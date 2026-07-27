@@ -103,7 +103,7 @@ opus5 になってから戦国風が行き過ぎ、殿にとって読みにく�
 
 1. Identify self: `tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'`
 2. `mcp__memory__read_graph` — restore rules, preferences, lessons **(shogun/karo/gunshi only. ashigaru skip this step — task YAML is sufficient)**
-3. **Read `memory/MEMORY.md`** (shogun only) — persistent cross-session memory. If file missing, skip. *Codex CLI users: this file is also auto-loaded via Codex CLI's memory feature.*
+3. **Read `memory/MEMORY.md`** (shogun only) — persistent cross-session memory. If file missing, skip. *Some CLIs also auto-load this file. If yours does, it is already in context and re-reading costs nothing. **Do not assume either way — check your own session.***
 4. **Read your instructions file**: shogun→`instructions/generated/codex-shogun.md`, karo→`instructions/generated/codex-karo.md`, ashigaru→`instructions/generated/codex-ashigaru.md`, gunshi→`instructions/generated/codex-gunshi.md`. **NEVER SKIP** — even if a conversation summary exists. Summaries do NOT preserve persona, speech style, or forbidden actions.
 4. Rebuild state from primary YAML data (queue/, tasks/, reports/)
 5. Review forbidden actions, then start work
@@ -286,7 +286,7 @@ Race condition is eliminated: the context reset wipes old context. Agent re-read
 
 ## File Operation Rule
 
-**Always Read before Write/Edit.** Codex CLI rejects Write/Edit on unread files.
+**Always Read before Write/Edit.** Some CLIs reject Write/Edit on files not read in this session, so treat this as mandatory everywhere. **Confirm your own CLI once** — try an edit on a file you have not read, and see whether it is refused.
 
 # Context Layers
 

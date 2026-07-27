@@ -13,8 +13,59 @@
 #
 # 実行方法:
 #   bats tests/e2e/e2e_bloom_routing.bats
+#
+# ═══════════════════════════════════════════════════════════════
+# ★TC-BLOOM-004 と 005 は、稼働中の agent を止めます★ (cmd_1462)
+# ═══════════════════════════════════════════════════════════════
+#
+# この 2 本は、実際の tmux pane へキー入力を送ります。
+#   ・ashigaru4 / ashigaru5 の pane へ "echo 'Working...'; sleep 30" を打ち込む
+#   ・テストの終わりに、その pane へ Ctrl-C を送る
+# その間、その agent の作業は止まります。手元の環境ではなく、動いている agent です。
+#
+# 2026-07-28 に測ったところ、pane が存在する環境ではこの 2 本は skip されず、
+# そのまま実行されていました。つまり誰かが何気なく `bats tests/e2e/` を走らせると、
+# 他の者の作業が止まります。
+#
+# そこで、この 2 本は明示的に opt-in した時だけ走る形にしました。
+#
+#   E2E_BLOOM_ALLOW_LIVE_PANES=1 bats tests/e2e/e2e_bloom_routing.bats
+#
+# 走らせてよいのは、全 agent がアイドルで、止めてよいと分かっている時だけです。
+#
+# opt-in していない時は SKIP にしません。不合格にします。
+# SKIP は「走っていないのに合格」に見えるためです（この repo では SKIP=FAIL）。
+# 不合格の文面に「何が守られていないか」を書いてあります。
+#
+# 残りの 4 本（001/002/003/006）は opt-in を要りません。
+# get_recommended_model と find_agent_for_model を呼ぶだけで、pane へ書き込みません
+# （lib/ の中に send-keys は 1 件も無いことを確認済み）。
+#
+# 詳細: docs/content/ops/cmd_1462_e2e_live_pane_optin.md
 
 PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
+
+# 稼働中の pane へ書き込むテストの入口。tmux を触る前に必ず通す。
+require_live_pane_optin() {
+    if [ "${E2E_BLOOM_ALLOW_LIVE_PANES:-0}" = "1" ]; then
+        return 0
+    fi
+    echo "このテストは走っていません。合格ではありません。" >&2
+    echo "" >&2
+    echo "  理由: 稼働中の agent の pane へ実際にキー入力を送るため、既定では走らせない。" >&2
+    echo "  何が起きるか: ashigaru4/5 の pane へ \"sleep 30\" を打ち込み、終了時に Ctrl-C を送る。" >&2
+    echo "                その間、その agent の作業は止まる。" >&2
+    echo "" >&2
+    echo "  走らせるには: E2E_BLOOM_ALLOW_LIVE_PANES=1 bats tests/e2e/e2e_bloom_routing.bats" >&2
+    echo "  走らせてよいのは、全 agent がアイドルで、止めてよいと分かっている時だけ。" >&2
+    echo "" >&2
+    echo "  今 守られていないもの: ビジー時の Bloom ルーティング" >&2
+    echo "    ・ashigaru4 がビジーの時、L5 タスクが ashigaru5 へ回るか (TC-BLOOM-004)" >&2
+    echo "    ・Sonnet 足軽が全員ビジーの時、Codex へ降格せず QUEUE になるか (TC-BLOOM-005)" >&2
+    echo "" >&2
+    echo "  詳細: docs/content/ops/cmd_1462_e2e_live_pane_optin.md" >&2
+    return 1
+}
 
 setup() {
     # tmuxセッションの存在確認
@@ -85,12 +136,19 @@ teardown() {
 # kill/restart発生なし（ビジーペイン不変確認）
 # ─────────────────────────────────────────────
 @test "TC-BLOOM-004: ashigaru4ビジー時、L5タスクはashigaru5に振られる" {
+    # ★稼働中の agent へ書き込む。tmux を触る前に opt-in を確かめる★
+    require_live_pane_optin || return 1
+
     # ashigaru4のペインターゲットを取得
     pane4=$(tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{@agent_id}' \
         | awk '$2 == "ashigaru4" {print $1}')
 
     if [[ -z "$pane4" ]]; then
-        skip "ashigaru4ペインが見つからない"
+        # opt-in した上で pane が無いのは環境の問題ではなく、前提が崩れている。
+        # SKIP にすると「走っていないのに合格」になるので不合格にする。
+        echo "opt-in したが ashigaru4 の pane が見つからない。" >&2
+        echo "  出陣していないか、@agent_id が設定されていない。" >&2
+        return 1
     fi
 
     # sleep でビジー状態を作成（teardownはtrapで保証）
@@ -103,7 +161,9 @@ teardown() {
     busy_rc=0
     agent_is_busy_check "$pane4" && true || busy_rc=$?
     if [[ $busy_rc -ne 0 ]]; then
-        skip "ashigaru4をビジー状態にできなかった（busy_rc=${busy_rc}）"
+        echo "ashigaru4 をビジー状態にできなかった（busy_rc=${busy_rc}）。" >&2
+        echo "  ビジー判定そのものが壊れている可能性がある。SKIP にせず不合格とする。" >&2
+        return 1
     fi
 
     # L5タスクのルーティング
@@ -125,13 +185,19 @@ teardown() {
 # TC-BLOOM-005: ashigaru4/5両方ビジー + L5タスク → QUEUE（Codexに降格しない）
 # ─────────────────────────────────────────────
 @test "TC-BLOOM-005: Sonnet足軽全員ビジー時、QUEUEになる（Codexへの降格なし確認）" {
+    # ★稼働中の agent へ書き込む。tmux を触る前に opt-in を確かめる★
+    require_live_pane_optin || return 1
+
     pane4=$(tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{@agent_id}' \
         | awk '$2 == "ashigaru4" {print $1}')
     pane5=$(tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index} #{@agent_id}' \
         | awk '$2 == "ashigaru5" {print $1}')
 
     if [[ -z "$pane4" || -z "$pane5" ]]; then
-        skip "ashigaru4またはashigaru5ペインが見つからない"
+        # 理由は TC-BLOOM-004 と同じ。SKIP にせず不合格にする。
+        echo "opt-in したが ashigaru4 または ashigaru5 の pane が見つからない。" >&2
+        echo "  出陣していないか、@agent_id が設定されていない。" >&2
+        return 1
     fi
 
     # sleep でashigaru4/5をビジー状態に（teardownはtrapで保証）
@@ -146,7 +212,9 @@ teardown() {
     rc5=0; agent_is_busy_check "$pane5" && true || rc5=$?
 
     if [[ $rc4 -ne 0 || $rc5 -ne 0 ]]; then
-        skip "ashigaru4/5のいずれかをビジー状態にできなかった（rc4=${rc4}, rc5=${rc5}）"
+        echo "ashigaru4/5 のいずれかをビジー状態にできなかった（rc4=${rc4}, rc5=${rc5}）。" >&2
+        echo "  ビジー判定そのものが壊れている可能性がある。SKIP にせず不合格とする。" >&2
+        return 1
     fi
 
     # L5タスクのルーティング

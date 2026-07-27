@@ -172,6 +172,12 @@ scripts/seo_qc.sh
 #   落とす側を選んだ理由 = ★retired 配下を指す形 (乙案) は下の cmd_1445 の註と真っ向から食い違う★。
 #   なお retired 3 本は今も追跡下である。★.gitignore は既に index に在る file を追跡外にはせぬ★
 #   (隔離した木で実測: retired/ratelimit_check.sh は check-ignore で除外と出るが、現に追跡下に在る)。
+#   ★上の「除外と出る」は git check-ignore --no-index を撃った時に限る (六号 実測 2026-07-28 04:28)。★
+#     機序 = check-ignore は★追跡下の path を元より評さぬ★ゆえ素では rc=1 (除外されぬ) を返す。
+#     --no-index は index を見ずに規則だけで判ずるゆえ rc=0 (除外) を返す。同じ path で答が割れる。
+#     実測 = retired/discord_post.sh と retired/dashboard-viewer.py (共に追跡下) は 素 rc=1 / --no-index rc=0。
+#     ★同じ綴りで両方を見た★= retired/ratelimit_check.sh は 63ecdc7 (cmd_1448) で追跡下から外れた後、
+#     ★規則を1行も触れておらぬのに素でも rc=0 へ転じた★= 効いておるのは追跡の有無だけである証。
 # ★cmd_1448 (2026-07-28) で ratelimit_check.sh だけ上の 1 行を戻した (足軽四号)。★
 #   ★六号の判断は当時の前提の下では正しい。前提の方が誤っておった。★
 #   前提の誤り = 退役 commit fd78d52 は「参照0」と名乗ったが、★その時点で現に呼ぶ者が居った★

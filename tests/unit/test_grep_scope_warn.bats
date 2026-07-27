@@ -31,6 +31,12 @@
 #   移した先 (002/004/003/012) は働きを直に検める側であり、六号が 4 本とも
 #   赤の理由が働きであることを実測している。
 #   ★filter には ^ の錨が要る★ = 素の "T-GSW-002" は T-GSW-006 の題にも当たり 2 本 走る。
+#
+# ■ 変異試験は【2 回 撃つ】形にしてある (23:3x・六号の名指しを実測で追認して直した)
+#   変異体に「黙ること／名指さぬこと」だけを言わせる形は、★門が丸ごと壊れて何も吐かぬ時にも満たされる★。
+#   実測: run_hook を即 return 0 に潰した門で全 22 本を撃つと、002 は赤・★006/020/021/022 は緑のまま★。
+#   ゆえに 006/020/021/022 は ① 原本を撃って鳴ることを確かめ → ② 変異体を撃って黙ることを確かめる、の順にした。
+#   ①が無ければ、之らは単独では何も証しておらぬ (台帳の replay は 1 本だけを走らせるゆえ、単独で立つ要が在る)。
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
@@ -145,6 +151,12 @@ _mutate() {
 #   ★之が赤にならぬなら、T-GSW-002 は守りでなく飾りである★
 # ---------------------------------------------------------------------------
 @test "T-GSW-006: mutation A (blind set emptied) kills the naming in T-GSW-002" {
+    # ① 先に原本を撃ち、★名指すこと★を確かめる (= 陽性の対照)
+    #    之が無いと「門が何も吐かぬ」時にも ② が満たされ、006 は緑のまま通る。
+    run _fire "grep -rn 'canary_only_in_untracked' ." ""
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "plans/untracked_a.md"
+    # ② 変異体を撃ち、名指しが消えることを確かめる
     local mutant
     mutant="$(_mutate 's|^    allp = \[p for p in out.stdout.split("\\0") if p\]|    allp = []|')"
     run _fire "grep -rn 'canary_only_in_untracked' ." "" "$mutant"
@@ -303,6 +315,9 @@ _mutate() {
 # T-GSW-020: 変異E = rg の再帰判定に `and not roots` を戻すと T-GSW-014 が黙る
 # ---------------------------------------------------------------------------
 @test "T-GSW-020: mutation E (rg path guard restored) silences T-GSW-014" {
+    run _fire "rg 'canary_only_in_untracked' ." ""      # ① 原本は鳴る
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "plans/untracked_a.md"
     local mutant
     mutant="$(_mutate 's|^    if not recursive and prog in ("rg", "ugrep"):|    if not recursive and prog in ("rg", "ugrep") and not roots:|')"
     run _fire "rg 'canary_only_in_untracked' ." "" "$mutant"
@@ -314,6 +329,9 @@ _mutate() {
 # T-GSW-021: 変異F = git grep の読み取りを外すと T-GSW-017 が黙る
 # ---------------------------------------------------------------------------
 @test "T-GSW-021: mutation F (git grep detection removed) silences T-GSW-017" {
+    run _fire "git grep -n 'canary_only_in_untracked'" ""   # ① 原本は鳴る
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "plans/untracked_a.md"
     local mutant
     mutant="$(_mutate 's|^    if tokens\[0\] == "git" and len(tokens) > 1 and tokens\[1\] == "grep":|    if False:|')"
     run _fire "git grep -n 'canary_only_in_untracked'" "" "$mutant"
@@ -326,6 +344,9 @@ _mutate() {
 #   ★「読めなんだ」が「異常なし」の顔になる形の再現★
 # ---------------------------------------------------------------------------
 @test "T-GSW-022: mutation G (lex failure returns empty) makes the gate silent again" {
+    run _fire 'grep -rn "unbalanced .' ""                # ① 原本は鳴る
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "一つも検めておらぬ"
     local mutant
     mutant="$(_mutate 's|^        return None$|        return []|')"
     run _fire 'grep -rn "unbalanced .' "" "$mutant"

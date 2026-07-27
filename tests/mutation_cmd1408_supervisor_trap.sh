@@ -17,7 +17,13 @@
 #     ★watcher を一体も起動せぬ★・pane_gate も不使用ゆえ drift 層も沈黙。
 #   ・SHOGUN_LOCK_DIR を tmp へ逃がす ⇒ 本番の lock / marker の mtime を汚さぬ。
 #   ・__WATCHER_SUPERVISOR_TESTING__=1 ⇒ 本番の lifetime lock を奪わぬ。
-#   ・前後で process 数を数え、★増えておらぬこと★を機械で確かめる。
+#   ・偽 `nohup` も置く ⇒ ★process を起こす道を構造として塞ぐ★
+#     (偽 tmux だけでは ledger_guard が pane 非依存ゆえ漏れる)。
+#   ・汚しておらぬ証は ★因果★ で採る = 己の log に [START] が在るか (0 であるべき)。
+#     ★盤面の pid 増減は参考に留める★ = 本番 supervisor が 5 秒毎に回るゆえ
+#     他所由来で動きうる ⇒ 之を FAIL にすれば ★己と無縁の赤★ を作る。
+#   ・★計器 canary が当たらねば PASS を出さず UNDETERMINED (rc=2) へ倒す★
+#     = ★「道具が見えぬ」を「盤面は綺麗」と混ぜぬ★。
 # ══════════════════════════════════════════════════════════════════
 set -uo pipefail
 

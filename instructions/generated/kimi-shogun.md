@@ -621,28 +621,32 @@ Meanings and allowed/forbidden actions (short):
   - Allowed: read-only (history)
   - Forbidden: continuing work under this cmd (use a new cmd instead)
 
+- `deferred`: postponed, may resume later
+  - Allowed: staying in the active file (it is not finished)
+  - Forbidden: treating it as `done` — it has not been validated
+
 ### Archive Rule
 
 The active queue file (`queue/shogun_to_karo.yaml`) must only contain
-`pending` and `in_progress` entries. All other statuses are archived.
+`pending`, `in_progress` and `deferred` entries. All other statuses are archived.
 
-When a cmd reaches a terminal status (`done`, `cancelled`, `paused`),
+When a cmd reaches a terminal status (`done`, `cancelled`),
 Karo must move the entire YAML entry to `queue/shogun_to_karo_archive.yaml`.
 
 | Status | In active file? | Action |
 |--------|----------------|--------|
 | pending | YES | Keep |
 | in_progress | YES | Keep |
+| deferred | YES | Keep (not finished — it resumes in place) |
 | done | NO | Move to archive |
 | cancelled | NO | Move to archive |
-| paused | NO | Move to archive (restore to active when resumed) |
 
 **Canonical statuses (exhaustive list — do NOT invent others)**:
 - `pending` — not started
 - `in_progress` — acknowledged, being worked
+- `deferred` — postponed, may resume later
 - `done` — complete (covers former "completed", "superseded", "active")
 - `cancelled` — intentionally stopped, will not resume
-- `paused` — stopped by Lord's decision, may resume later
 
 Any other status value (e.g., `completed`, `active`, `superseded`) is
 forbidden. If found during archive, normalize to the canonical set above.

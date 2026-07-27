@@ -3398,6 +3398,56 @@ mutations:
     red_needle: not ok 1 T-FB-003
     timeout: 300
 
+  # ── cmd_1413「錨を絞る口」を守る牙 2 本 (MUT-1413-AS1/AS2) ──────────────────
+  # ★守る対象 = scripts/anchor_shrink.py★ (家老 13:11/13:12 の裁 = 一斉置換はせぬ・口だけ据える)。
+  # ★★六号の初版の試験は此の 2 変異を素通りした★★= ★見本が弱く、機械の最短 = 推し であった★
+  #   ⇒ ★見本を作り直して縛った (門でなく【見本】が弱かった = 本日 三度目の同じ形)★。
+  # ★赤は二度 見た★= 手で当てた変異 3/3 (13:18) + runner の replay 2/2 PASS (13:19:29)。
+  - id: MUT-1413-AS1
+    desc: ★錨を絞る口が【行末に接する prefix】を弾く枝を消す変異★ = ★絞った先が再び行末に接する = 直したつもりで同じ病を配る形★。★六号の初版の試験は此の変異を素通りした (見本が弱かった)★ゆえ、見本を作り直して縛った
+    origin: cmd_1413
+    suspected_by: ashigaru6
+    paths:
+    - scripts/anchor_shrink.py
+    - tests/unit/test_anchor_shrink.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/anchor_shrink.py")
+      s = p.read_text(encoding="utf-8")
+      old = '            continue                      # ★行末に接する prefix は【同じ病】ゆえ採らぬ★'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, '            pass', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_anchor_shrink.bats --filter T-AS-006
+    expect: nonzero
+    red_needle: not ok 1 T-AS-006
+    timeout: 300
+  - id: MUT-1413-AS2
+    desc: ★推しを【機械の最短】へ倒す変異★ = ★2 字の綴りを推す口になる★ = ★今日の file の中でだけ一意な綴りは file が育てば黙って非一意へ転じる★ = ★鈍りの穴を塞いで【誤爆の穴】を開ける★ (六号 13:09 実測 = shogun 台帳に最短 2 字の本が現に在る)
+    origin: cmd_1413
+    suspected_by: ashigaru6
+    paths:
+    - scripts/anchor_shrink.py
+    - tests/unit/test_anchor_shrink.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/anchor_shrink.py")
+      s = p.read_text(encoding="utf-8")
+      old = '"recommended": word or machine,'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, '"recommended": machine,', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_anchor_shrink.bats --filter T-AS-007
+    expect: nonzero
+    red_needle: not ok 1 T-AS-007
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

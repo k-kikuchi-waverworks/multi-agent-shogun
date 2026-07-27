@@ -459,6 +459,295 @@ def print_qc_result(qc_hits, stats, threshold_min):
               f"刻が未来ゆえ除外={len(stats['future'])}" + canary)
 
 
+# ── 起票漏れの突合 (cmd_1459) ──────────────────────────────────────────────
+# 問い = ★「着地した report が在るのに、軍師の帳面に其の cmd を指す任が無い」★。
+#
+# ★何ゆえ cmd_1454 の検め (scan_qc_dispatch) では足りぬか★ — 軍師一号の実測
+# (2026-07-28 07:10:08)。cmd_1454 は「軍師の inbox に未読のまま N 分」を見る。
+# 而して作法は「読んだら即 read: true」を命じておる。
+#   ⇒ ★作法どおりに振る舞う軍師は、其の手で検めの目を閉じる。★
+#   ⇒ 残る窓は「軍師が便を読むまで」であって「家老が任を起こすまで」ではない。
+#   ⇒ ★今 在る検めが捕えるのは【軍師の停止】であり、【家老の起票漏れ】ではない。★
+# 現に其の刻、三便 (三号 07:07 / 一号 07:08:50 / 二号 07:10:40) が検分を乞うており、
+# 軍師一号の帳面は done のまま、機械は「hit なし」と答えた。
+# ★本検めは其の隙を埋める物であり、cmd_1454 を置き換える物ではない。★
+#
+# ★入口を report YAML に取った理由 (実測・2026-07-28 07:2x)★:
+#   足軽 6 体のうち ★ashigaru4 と ashigaru6 は report_to: karo★ で、軍師の inbox に
+#   一通も居らぬ (差出人の実測 = ashigaru1/2/3/5 のみ・ashigaru4/6 は 0 通)。
+#   ⇒ ★軍師の inbox を入口にすると、6 体中 2 体が構造として見えぬ。★
+#   report YAML は 6 体すべてが書くゆえ、此方を入口に取る。
+#
+# ★★射程 = 見ておらぬ範囲を、緑と同じ大きさで書く (条6)★★:
+#   見ぬ ① ★report YAML は上書きされる (append でない)★ ⇒ 同じ体が続けて 2 件
+#          着地させると、先の 1 件は本検めの目に入らぬまま消える。
+#   見ぬ ② ★軍師の帳面の【構造の欄】しか見ぬ★ (parent_cmd / prev_parent_cmd* /
+#          covers_cmds*)。註の散文に cmd_NNNN と書かれても「指しておる」とは数えぬ。
+#          ★之は意図である★ = 散文まで数えれば「話に出た」だけで漏れが埋まる
+#          (実測 = 構造の欄 35 件に対し散文まで含めると 68 件・散文のみ 33 件)。
+#   見ぬ ③ ★検分が帳面を通らずに起きた形は見えぬ★ = 足軽が軍師へ直に乞えば検分は
+#          起きるが、帳面には残らぬ。実測 2 件 (cmd_1444「一号が直に乞うた形」/
+#          cmd_1449「五号が直に乞うた形」) — ★いずれも起票漏れとしては真である★。
+#   見ぬ ④ 台帳に載らぬ cmd の可否は判ぜられぬ (status 不明として名乗る)。
+LEDGER_FILENAME = "shogun_to_karo.yaml"
+QC_LEDGER_DEFAULT_THRESHOLD_MIN = 10  # karo.md の ≤10 min に合わせる (行番号で指さぬ)
+_CMD_RE = re.compile(r"cmd_\d+")
+_CMD_IN_TASK_ID_RE = re.compile(r"\d{3,5}")
+# ★軍師の帳面が「指す」と数える欄★ = 構造の側のみ (射程 ② の実体)。
+_POINTER_KEY_RE = re.compile(r"parent_cmd|covers_cmds")
+# ★家老が承知で退けた物★ = 台帳の status が此処に在る間は【家老の inbox へ鳴らさぬ】。
+#   ★但し黙って落とさぬ★ = log には必ず名と status を刷る (下の print で必ず出る)。
+#   ★done を此処に入れておらぬ★ = 入れれば ★家老が cmd を畳んだ途端に漏れが消える★
+#   = 「畳めば無かったことになる」形になる。畳まれた物は鳴らさぬが ★数える★。
+LEDGER_QUIET_STATUSES = {"deferred", "superseded", "archived", "done"}
+# 此のうち【鳴らす側】= 台帳が開いておる (= 今 手を打てる) 物のみ。
+LEDGER_ACTIONABLE_QUIET = {"deferred", "superseded", "archived"}
+
+
+def cmd_of_report(task_id, parent_cmd):
+    """report が指す cmd を返す。(cmd, 拾い元) — 拾えねば (None, None)。
+
+    ★parent_cmd 欄が正★。無ければ task_id の数字から組む (現物の report は
+    parent_cmd を持たぬ物が半分ほど在るゆえ両方の道が要る・2026-07-28 実測 =
+    6 本中 3 本が parent_cmd 欄を持ち 3 本は task_id からの復元であった)。
+    ★拾えなんだ物は None を返し、呼び手が「拾えなんだ」と名乗れるようにする★
+    (黙って落とせば、其の体は本検めにとって存在せぬ = 本朝ずっと狩っておる族)。
+    """
+    if isinstance(parent_cmd, str):
+        m = _CMD_RE.search(parent_cmd)
+        if m:
+            return m.group(0), "parent_cmd"
+    if isinstance(task_id, str):
+        m = _CMD_IN_TASK_ID_RE.search(task_id)
+        if m:
+            return "cmd_" + m.group(0), "task_id"
+    return None, None
+
+
+def _walk_pointer_cmds(node, key, acc, where):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _walk_pointer_cmds(v, k, acc, where)
+        return acc
+    if isinstance(node, list):
+        for v in node:
+            _walk_pointer_cmds(v, key, acc, where)
+        return acc
+    if key and _POINTER_KEY_RE.search(str(key)) and isinstance(node, str):
+        for m in _CMD_RE.finditer(node):
+            acc.setdefault(m.group(0), []).append(f"{where}:{key}")
+    return acc
+
+
+def gunshi_ledger_pointers(tasks_dir: Path):
+    """軍師の帳面が【構造の欄で】指す cmd の集合 (cmd -> 何処で指しておるか)。"""
+    ptr, files, unreadable = {}, [], []
+    for path in sorted(tasks_dir.glob("gunshi*.yaml")):
+        files.append(path.name)
+        try:
+            with path.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError) as e:
+            # ★読めなんだ帳面を「指しておらぬ」側へ倒さぬ★ = 倒せば偽陽性が湧く。
+            print(f"[stall_watchdog] WARN: gunshi task YAML parse failed: {path}: {e}",
+                  file=sys.stderr)
+            unreadable.append(path.name)
+            continue
+        _walk_pointer_cmds(data, None, ptr, path.name)
+    return ptr, files, unreadable
+
+
+def load_cmd_ledger_status(ledger_path: Path):
+    """台帳 (shogun_to_karo.yaml) の id -> status。読めねば None を返す。
+
+    ★None と空 dict を分ける★ = 「読めなんだ」と「一件も無い」は別物である
+    (前者で全件を鳴らせば、台帳が壊れた朝に本検めが暴れる)。
+    """
+    try:
+        with ledger_path.open(encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError) as e:
+        print(f"[stall_watchdog] WARN: 台帳が読めぬ: {ledger_path}: {e}",
+              file=sys.stderr)
+        return None
+    entries = data.get("commands") if isinstance(data, dict) else data
+    if not isinstance(entries, list):
+        return None
+    out = {}
+    for e in entries:
+        if isinstance(e, dict) and e.get("id"):
+            out[str(e["id"])] = normalize_status(e.get("status"))
+    return out
+
+
+def scan_qc_ledger_miss(reports_dir: Path, tasks_dir: Path, ledger_path: Path,
+                        threshold_min: int, now=None):
+    """着地した report ↔ 軍師の帳面 の突合 (cmd_1459)。戻り値 (hits, quiet, stats)。
+
+    hits  = ★家老の inbox へ鳴らす側★ (台帳が開いており、今 手を打てる物)
+    quiet = ★鳴らさぬが必ず名乗る側★ (家老が承知で退けた物・既に畳まれた物)
+    """
+    if now is None:
+        now = datetime.datetime.now()
+    ptr, ptr_files, ptr_unreadable = gunshi_ledger_pointers(tasks_dir)
+    ledger = load_cmd_ledger_status(ledger_path)
+
+    stats = {
+        "report_files": 0, "landed": 0,
+        "pointer_cmds": len(ptr), "pointer_files": ptr_files,
+        "pointer_unreadable": ptr_unreadable,
+        "ledger_readable": ledger is not None,
+        "ledger_entries": 0 if ledger is None else len(ledger),
+        "unreadable_reports": [], "cmd_undetermined": [],
+        # ★刻が未来の report★ = 経過が負ゆえ ★閾値を永久に超えぬ★ =
+        #   経過で切る検めから【黙って】消える。実測 = ashigaru1_report.yaml の刻が
+        #   2026-07-28T07:45:00 で file の mtime は 07:08 (27 分 先) であった。
+        #   ★黙って skip せず、必ず名乗らせる (家老の裁 07:23)。★
+        "future_dated": [],
+    }
+    hits, quiet = [], []
+
+    for path in sorted(reports_dir.glob("ashigaru*_report.yaml")):
+        stats["report_files"] += 1
+        agent = path.name.replace("_report.yaml", "")
+        try:
+            with path.open(encoding="utf-8") as f:
+                docs = list(yaml.safe_load_all(f))
+        except (OSError, yaml.YAMLError) as e:
+            stats["unreadable_reports"].append({"agent": agent, "err": str(e)})
+            continue
+        latest, latest_dt = None, None
+        for doc in docs:
+            if not isinstance(doc, dict):
+                continue
+            inner = doc["report"] if isinstance(doc.get("report"), dict) else doc
+            dt = parse_iso_to_naive_local(inner.get("timestamp"))
+            if dt is None:
+                continue
+            if latest_dt is None or dt > latest_dt:
+                latest, latest_dt = inner, dt
+        if latest is None:
+            continue
+        status = normalize_status(latest.get("status"))
+        if status not in COMPLETION_STATUSES:
+            continue
+        stats["landed"] += 1
+        task_id = latest.get("task_id") or latest.get("primary_task")
+        cmd, src = cmd_of_report(task_id, latest.get("parent_cmd"))
+        if cmd is None:
+            stats["cmd_undetermined"].append({"agent": agent, "task_id": task_id})
+            continue
+        elapsed_min = int((now - latest_dt).total_seconds() // 60)
+        if elapsed_min < 0:
+            stats["future_dated"].append({
+                "agent": agent, "cmd": cmd, "task_id": task_id,
+                "timestamp": latest_dt.isoformat(sep=" "), "ahead_min": -elapsed_min,
+            })
+        if cmd in ptr:
+            continue
+        if elapsed_min < threshold_min:
+            continue
+        led_status = None if ledger is None else ledger.get(cmd)
+        rec = {
+            "agent": agent, "cmd": cmd, "task_id": task_id, "cmd_source": src,
+            "elapsed_min": elapsed_min, "report_status": status,
+            "ledger_status": led_status,
+            "timestamp": latest_dt.isoformat(sep=" "),
+        }
+        if led_status in LEDGER_QUIET_STATUSES:
+            quiet.append(rec)
+        else:
+            hits.append(rec)
+    return hits, quiet, stats
+
+
+def format_ledger_miss_alert(hit, threshold_min):
+    return (f"🚨 起票漏れの疑い: {hit['agent']} の report ({hit['task_id']} / "
+            f"{hit['cmd']}) が {hit['report_status']} で着地して {hit['elapsed_min']} 分。"
+            f"★軍師の帳面 (queue/tasks/gunshi*.yaml) の構造の欄が {hit['cmd']} を"
+            f"指しておらぬ★ (台帳 status={hit['ledger_status'] or '不明'})。"
+            f"karo.md の 10 分規律 (閾値 {threshold_min} 分) を超えておる。"
+            f"  ※★本検めが見ておるのは【帳面が指すか】のみ★ — "
+            f"足軽が軍師へ直に乞うて検分が済んでおる形は、帳面に残らぬゆえ此処に出る。"
+            f"承知で退けるなら台帳の status を deferred にすれば鳴らぬ。")
+
+
+def ledger_miss_alert_key(hit):
+    return f"qcledger|{hit['agent']}|{hit['cmd']}"
+
+
+def notify_karo_ledger_miss(hit, threshold_min):
+    return subprocess.run(
+        ["bash", str(INBOX_WRITE_SH), "karo",
+         format_ledger_miss_alert(hit, threshold_min),
+         "stall_watchdog_qc_ledger_miss_alert", "stall_watchdog"],
+        capture_output=True, text=True,
+    )
+
+
+def print_ledger_miss_result(hits, quiet, stats, threshold_min):
+    """★母数を必ず載せる (条1)★ / ★黙った物も必ず名乗る (条5・条6)★。
+
+    ★欄の名に LM_ を冠しておる。之は飾りではない — 消すな。★
+      本 script は 3 つの検めが同じ stdout へ刷る。既存の負の対照は
+      ★`[[ "$output" != *"AGENT="* ]]`★ の形で「此の走行に hit 行が一つも無い」を
+      主張しており、★別の検めが素の AGENT= を刷った途端に赤くなる★
+      (2026-07-28 07:3x に現に 5 本 落ちた = 拙者が踏んだ)。
+      ⇒ ★欄の名を検めごとに分ければ、各々の検めを独立に主張できる。★
+      ★他人の試験を書き替えて通すのでなく、己の出力の側で避けた。★
+    """
+    for u in stats["unreadable_reports"]:
+        print(f"ACTION=ledger_miss_report_unreadable LM_ASHI={u['agent']} "
+              f"⇒ ★読めなんだゆえ起票漏れを判じられぬ = 健全と読むな★")
+    for u in stats["cmd_undetermined"]:
+        print(f"ACTION=ledger_miss_cmd_undetermined LM_ASHI={u['agent']} "
+              f"LM_TASK_ID={u['task_id']} ⇒ ★cmd を拾えなんだゆえ突合から落ちた★")
+    for u in stats["future_dated"]:
+        print(f"ACTION=report_future_dated LM_ASHI={u['agent']} LM_CMD={u['cmd']} "
+              f"LM_TIMESTAMP={u['timestamp']} LM_AHEAD_MIN={u['ahead_min']} "
+              f"⇒ ★report の刻が未来である★ = 経過が負ゆえ "
+              f"★経過で切る検め (本検め・cmd_1454 の検め) から永久に消える★。"
+              f"書き手が刻を直すまで、此の体の遅れは鳴らぬ")
+    for q in quiet:
+        print(f"QC_LEDGER_MISS_QUIET LM_ASHI={q['agent']} LM_CMD={q['cmd']} "
+              f"LM_LEDGER_STATUS={q['ledger_status']} "
+              f"LM_LATE_MIN={q['elapsed_min']} "
+              f"⇒ ★帳面は指しておらぬが、台帳が {q['ledger_status']} ゆえ鳴らさぬ"
+              f"(数には入れる)★")
+    for h in hits:
+        print(f"QC_LEDGER_MISS LM_ASHI={h['agent']} LM_CMD={h['cmd']} "
+              f"LM_TASK_ID={h['task_id']} LM_LATE_MIN={h['elapsed_min']} "
+              f"LM_LEDGER_STATUS={h['ledger_status']} "
+              f"LM_CMD_SOURCE={h['cmd_source']}")
+    # ★母数は hit の有無に依らず必ず刷る (条1)★ — 初版は hit が在る時に
+    # 母数を落としており、★「1 件 鳴った」と「6 件 中 1 件 鳴った」が
+    # log 上で見分けられなんだ★ (己で踏んだ・2026-07-28 07:2x に直した)。
+    if True:
+        # ★canary★ = 「見た上での 0」と「そもそも見ておらぬ 0」を分ける。
+        if stats["pointer_cmds"] == 0:
+            canary = (" ★★canary 赤 = 軍師の帳面が指す cmd が 1 件も無い ⇒ "
+                      "探し方 (file 名か欄の名) が当たっておらぬ疑い。"
+                      "此の 0 を『漏れ無し』と読むな★★")
+        elif stats["landed"] == 0:
+            canary = (" ★★canary 赤 = 着地した report が 1 件も無い ⇒ "
+                      "探し方が当たっておらぬ疑い★★")
+        elif not stats["ledger_readable"]:
+            canary = (" ★★台帳が読めなんだ ⇒ 承知の遅れを分けられぬ★★")
+        else:
+            canary = (f" (canary 緑 = 帳面 {stats['pointer_cmds']} 件・"
+                      f"着地 report {stats['landed']} 件・"
+                      f"台帳 {stats['ledger_entries']} 件を現に見ておる)")
+        head = ("起票漏れ hit なし。" if not hits
+                else f"起票漏れ hit={len(hits)} 件。")
+        print(f"[stall_watchdog] {head}閾値={threshold_min}分 "
+              f"report file={stats['report_files']} 着地={stats['landed']} "
+              f"帳面={','.join(stats['pointer_files']) or 'なし'} "
+              f"鳴らさず名乗った分={len(quiet)} "
+              f"読めぬreport除外={len(stats['unreadable_reports'])} "
+              f"cmd不明除外={len(stats['cmd_undetermined'])} "
+              f"刻が未来={len(stats['future_dated'])}" + canary)
+
+
 def format_alert_message(hit):
     base = (f"🚨 bookkeeping 漏れ検出: {hit['agent']} task YAML "
             f"({hit['task_id']}, {hit['parent_cmd']}) status=assigned のまま、"
@@ -541,6 +830,14 @@ def main(argv=None):
                          f"Task Explicitly」の節の ≤10 min に合わせてある (★行番号で指さぬ★)。")
     ap.add_argument("--no-qc-scan", action="store_true",
                     help="10 分規律の検めを走らせぬ (帳簿漏れ scan だけを撃つ時)。")
+    ap.add_argument("--qc-ledger-threshold-min", type=int,
+                    default=QC_LEDGER_DEFAULT_THRESHOLD_MIN,
+                    help=f"起票漏れの突合の閾値 (default "
+                         f"{QC_LEDGER_DEFAULT_THRESHOLD_MIN})。cmd_1459。")
+    ap.add_argument("--no-qc-ledger-scan", action="store_true",
+                    help="起票漏れの突合 (cmd_1459) を走らせぬ。")
+    ap.add_argument("--ledger", type=Path, default=None,
+                    help="台帳 (shogun_to_karo.yaml) の path を差し替える (試験用)。")
     ap.add_argument("--cooldown-min", type=int, default=DEFAULT_COOLDOWN_MIN,
                     help=f"同一 (agent, task_id) の再警報を抑える分数 "
                          f"(default {DEFAULT_COOLDOWN_MIN})。★常に赤い検知は無視されて死ぬ★")
@@ -550,10 +847,14 @@ def main(argv=None):
         tasks_dir = args.queue_root / "tasks"
         reports_dir = args.queue_root / "reports"
         inbox_dir = args.queue_root / "inbox"
+        ledger_path = args.queue_root / LEDGER_FILENAME
     else:
         tasks_dir = DEFAULT_TASKS_DIR
         reports_dir = DEFAULT_REPORTS_DIR
         inbox_dir = DEFAULT_INBOX_DIR
+        ledger_path = REPO_ROOT / "queue" / LEDGER_FILENAME
+    if args.ledger is not None:
+        ledger_path = args.ledger
 
     hits, assigned_count, redispatch_skipped, unreadable_reports = scan(
         tasks_dir, reports_dir, args.threshold_min)
@@ -561,6 +862,11 @@ def main(argv=None):
     qc_hits, qc_stats = ([], None)
     if not args.no_qc_scan:
         qc_hits, qc_stats = scan_qc_dispatch(inbox_dir, args.qc_threshold_min)
+
+    ml_hits, ml_quiet, ml_stats = ([], [], None)
+    if not args.no_qc_ledger_scan:
+        ml_hits, ml_quiet, ml_stats = scan_qc_ledger_miss(
+            reports_dir, tasks_dir, ledger_path, args.qc_ledger_threshold_min)
 
     if args.json:
         print(json.dumps(hits, ensure_ascii=False))
@@ -575,6 +881,14 @@ def main(argv=None):
         if qc_stats is not None:
             print(json.dumps({"qc_dispatch_late": qc_hits,
                               "qc_stats": {k: v for k, v in qc_stats.items()}},
+                             ensure_ascii=False))
+        # ★json の口でも起票漏れを落とさぬ★ = 口ごとに射程が違えば
+        # 「json には出ぬ = 無い」と読まれる (同じ穴が口を変えて戻る)。
+        # ★鳴らさなんだ分 (quiet) と刻が未来の物も同じ口へ載せる。★
+        if ml_stats is not None:
+            print(json.dumps({"qc_ledger_miss": ml_hits,
+                              "qc_ledger_miss_quiet": ml_quiet,
+                              "qc_ledger_miss_stats": ml_stats},
                              ensure_ascii=False))
     else:
         # ★黙った件は黙って黙らぬ★ = 再dispatchと見て鳴らさなかった分を必ず印字する。
@@ -612,6 +926,9 @@ def main(argv=None):
                   f"REPORT_STATUS={h['report_status']}")
         if qc_stats is not None:
             print_qc_result(qc_hits, qc_stats, args.qc_threshold_min)
+        if ml_stats is not None:
+            print_ledger_miss_result(ml_hits, ml_quiet, ml_stats,
+                                     args.qc_ledger_threshold_min)
 
     if args.dry_run or args.queue_root is not None:
         return 0
@@ -650,6 +967,23 @@ def main(argv=None):
             continue
         state[key] = {"last_alert": now.isoformat(timespec="seconds"),
                       "msg_id": h["msg_id"]}
+    # ── 起票漏れの警報 (cmd_1459) ──────────────────────────────────
+    # cooldown は同じ簿を使う (key に "qcledger|" を冠して衝突を避ける)。
+    for h in ml_hits:
+        key = ledger_miss_alert_key(h)
+        last = parse_iso_to_naive_local(state.get(key, {}).get("last_alert"))
+        if last is not None and (now - last).total_seconds() < args.cooldown_min * 60:
+            print(f"[stall_watchdog] cooldown 中ゆえ再警報せず: "
+                  f"{key} (cooldown={args.cooldown_min}分)")
+            continue
+        proc = notify_karo_ledger_miss(h, args.qc_ledger_threshold_min)
+        if proc.returncode != 0:
+            print(f"[stall_watchdog] ERROR: inbox_write failed for ledger miss "
+                  f"{key}: {proc.stderr.strip()}", file=sys.stderr)
+            exit_code = 1
+            continue
+        state[key] = {"last_alert": now.isoformat(timespec="seconds"),
+                      "cmd": h["cmd"]}
     _save_alert_state(state)
     return exit_code
 

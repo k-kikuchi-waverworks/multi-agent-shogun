@@ -164,6 +164,7 @@ scripts/seo_qc.sh
 !scripts/session_start_hook.sh
 !scripts/agent_status.sh
 !scripts/switch_cli.sh
+!scripts/ratelimit_check.sh
 # cmd_1447 (2026-07-28): ★!scripts/ratelimit_check.sh と !scripts/discord_post.sh を此処から落とした。★
 #   機序 = 実体は fd78d52 (2026-07-02・cmd_1159) で scripts/retired/ へ退役したが、その commit は
 #   git mv だけを撃っており .gitignore を触っておらぬ。★白名簿は指す先を失っても何も申さぬ★ゆえ
@@ -171,6 +172,16 @@ scripts/seo_qc.sh
 #   落とす側を選んだ理由 = ★retired 配下を指す形 (乙案) は下の cmd_1445 の註と真っ向から食い違う★。
 #   なお retired 3 本は今も追跡下である。★.gitignore は既に index に在る file を追跡外にはせぬ★
 #   (隔離した木で実測: retired/ratelimit_check.sh は check-ignore で除外と出るが、現に追跡下に在る)。
+# ★cmd_1448 (2026-07-28) で ratelimit_check.sh だけ上の 1 行を戻した (足軽四号)。★
+#   ★六号の判断は当時の前提の下では正しい。前提の方が誤っておった。★
+#   前提の誤り = 退役 commit fd78d52 は「参照0」と名乗ったが、★その時点で現に呼ぶ者が居った★
+#   (android/.../AgentsViewModel.kt:181 が `bash $projectPath/scripts/ratelimit_check.sh` を撃つ。
+#    fd78d52^ の木で実測して確かめた)。走査が .kt を見ておらなんだ ＝ 「0 件」が
+#   「無かった」ではなく「見ておらぬ」であった族。★ゆえに実体を scripts/ へ戻し、指し先を真にした。★
+#   戻した後に現に動くことも実測済 (rc=0・現在値を出力)。retired 位置では
+#   ★己の路の解き方が壊れて依存を読めず落ちておった★ (rc=1) ＝ 指し先を直すだけでは足りなんだ。
+#   ★退役 3 本の残り 2 本は据え置き★= 生きた呼び手を数え直した結果、
+#   discord_post.sh = 0 本 / dashboard-viewer.py = 0 本 (CHANGELOG の履歴記述のみ・呼び手でない)。
 # ★scripts/discord_channel_inventory.sh と scripts/discord_channel_delete.sh は【永久に追跡せぬ】★
 #   (家老裁定 2026-07-26・cmd_1367 軍師一号検分)。★ここに書く理由 = 次の者が迷うのは docs を
 #   読む時ではなく、この file を編む時ゆえ★ (先例 = 下記 gpu_sidecar_stop.sh の運用記録の注)。

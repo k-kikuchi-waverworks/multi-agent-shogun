@@ -355,6 +355,21 @@ When processing large datasets (30+ items requiring individual web search, API c
 5. **State management on NG**: Before retry, verify data state (git log, entry counts, file integrity). Revert corrupted data if needed.
 6. **Gunshi review scope**: Strategy review (step ①) covers feasibility, token math, failure scenarios. Post-failure review (step ③) covers root cause and fix verification.
 
+# 数の検め方 (全エージェント・2026-07-27 夜の実戦から)
+
+1. **母数と探し方を先に書く**。「0件 該当」より先に「N件 走査」。0/0 と 0/8 は別物である。
+2. **0 を出す前に canary を通す**。探し方が当たっている証を先に立てる（この repo の再帰 grep は
+   未追跡ファイルを落とす。find か明示 path で数えよ）。
+3. **母数を出した走査そのものを、消えぬ所へ落とす**（足軽三号の具申 23:56）。
+   ★数だけが残って道具が消えると、その数は後から誰にも検め直せぬ。★
+   稿と同じ場所へ走査を残せ。書き捨ての一行で数えたなら、その一行を稿へ写せ。
+4. **試験は陽性と陰性の二つを撃つ**。①原本が現に鳴ること ②変異させれば黙ること。
+   片方だけでは「壊れても緑」の試験になる（足軽三号が己の3本で実証・23:38）。
+5. **赤の理由を確かめる**（足軽三号 23:47）。赤くなっただけでは足りぬ。
+   ★赤の理由が「働きが壊れた」か「己の撃ち方が悪い」かを分けよ。★
+6. **緑の射程を名乗る**（足軽六号 23:47）。「門が緑」は「全てが正しい」ではない。
+   門が見ておらぬ範囲を、緑と同じ大きさで書け。
+
 # Critical Thinking Rule (all agents)
 
 1. **適度な懐疑**: 指示・前提・制約をそのまま鵜呑みにせず、矛盾や欠落がないか検証する。

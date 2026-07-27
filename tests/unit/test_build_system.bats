@@ -321,7 +321,13 @@ import yaml
 
 project_root = Path(os.environ["PROJECT_ROOT"])
 agents_dir = project_root / ".opencode" / "agents"
-for path in sorted(agents_dir.glob("*.md")):
+paths = sorted(agents_dir.glob("*.md"))
+assert paths, (
+    f"母数 0: {agents_dir} に *.md が 1 本も無い。"
+    " これは『全部 検めた』ではなく『一つも見なかった』である"
+    " (setup_file の build が落ちて生成物が出来ておらぬ疑い)"
+)
+for path in paths:
     if path.name.endswith("-runtime.md"):
         continue
     text = path.read_text(encoding="utf-8")
@@ -368,7 +374,13 @@ import os
 import yaml
 
 agents_dir = Path(os.environ["PROJECT_ROOT"]) / ".opencode/agents"
-for path in sorted(agents_dir.glob("*.md")):
+paths = sorted(agents_dir.glob("*.md"))
+assert paths, (
+    f"母数 0: {agents_dir} に *.md が 1 本も無い。"
+    " これは『全部 検めた』ではなく『一つも見なかった』である"
+    " (setup_file の build が落ちて生成物が出来ておらぬ疑い)"
+)
+for path in paths:
     text = path.read_text(encoding="utf-8")
     frontmatter = yaml.safe_load(text.split("---", 2)[1])
     perm = frontmatter["permission"]
@@ -402,7 +414,13 @@ import os
 import yaml
 
 agents_dir = Path(os.environ["PROJECT_ROOT"]) / ".opencode/agents"
-for path in sorted(agents_dir.glob("*.md")):
+paths = sorted(agents_dir.glob("*.md"))
+assert paths, (
+    f"母数 0: {agents_dir} に *.md が 1 本も無い。"
+    " これは『全部 検めた』ではなく『一つも見なかった』である"
+    " (setup_file の build が落ちて生成物が出来ておらぬ疑い)"
+)
+for path in paths:
     text = path.read_text(encoding="utf-8")
     frontmatter = yaml.safe_load(text.split("---", 2)[1])
     edit = frontmatter["permission"]["edit"]

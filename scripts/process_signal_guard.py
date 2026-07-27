@@ -71,12 +71,35 @@ import sys
 #   引用状態を保った分割は shell_expansion_guard が既に解いておる。同じ木に二つの
 #   tokenizer が居れば、黙って食い違う日が来る (本 repo が繰り返し踏んだ族ゆえ)。
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+_TOKENIZER_ERR: Exception | None = None
 try:
     from shell_expansion_guard import mask_heredoc_bodies, tokenize  # type: ignore
     _TOKENIZER_OK = True
 except Exception as _exc:  # 借り手が壊れておっても本 guard は判断を続ける
     _TOKENIZER_OK = False
     _TOKENIZER_ERR = _exc
+
+# ★★退化を黙って起こさぬ (cmd_1411 (b)・軍師一号の実測より)★★
+#   ★軍師一号 09:5x = 之を現に踏んだ★= ★兄弟 (shell_expansion_guard) を欠いた盤面で
+#   selftest 34/62・NG 28 = ★過剰に拒む 24 / 見落とす 4★★
+#   ⇒ ★★此の門は import が壊れた時【盲になる】のではなく【喧しくなる】★★
+#   ⇒ ★喧しさの出所が判らねば、手は「禁を外す」へ向く (cmd_1388 の族 = 塞ぎ過ぎた禁は外される)★
+#   ⇒ ★ゆえに【退化して走っておる事】を、判定の前に一行 名乗る★
+#     = ★★手を「import を直す」へ向けるための一行である★★。
+#   ★鳴る条件を狭く縛る★= ★健全な時は一言も出さぬ★ (常に鳴る門を作らぬ・cmd_1388)。
+_DEGRADED_BANNER = (
+    "[process_signal_guard] ★退化して走っておる★: tokenizer の借り先 "
+    "(scripts/shell_expansion_guard.py) を読めなんだ ({err}) — "
+    "★過剰に拒む側へ倒れる (実測 62 件中 NG 28 = 過剰 24 / 見落とし 4)★ = "
+    "★★之は禁が辛いのではない。直す先は import であって禁ではない★★"
+)
+
+
+def degraded_banner() -> str | None:
+    """★退化しておる時のみ一行を返す。健全なら None★ (試験が両側を撃てる形にしておく)"""
+    if _TOKENIZER_OK:
+        return None
+    return _DEGRADED_BANNER.format(err=_TOKENIZER_ERR)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -464,6 +487,13 @@ def format_denial(result: dict) -> str:
         "    「対象の cmdline が想定と違えば拒む・落とした後 再起動まで実測で見届ける」",
         "  ★迂回ではなく、殺してよい理由を機械が検める形にせよ★。",
     ]
+    # ★★退化しておるなら【拒みの便へも】焼く (cmd_1411 (b))★★
+    #   ★理由 = exit 0 の stderr は呼び手の目に入らぬ事が在る★が、
+    #   ★exit 2 の stderr は必ず呼び手へ返る★ = ★拒まれた者は必ず出所を読める★。
+    #   ⇒ ★「喧しい」と感じた其の便の中に、喧しさの出所が同梱されておる形★。
+    _banner = degraded_banner()
+    if _banner:
+        lines += ["", _banner]
     return "\n".join(lines)
 
 
@@ -577,6 +607,12 @@ def selftest() -> int:
 
 
 def main() -> int:
+    # ★★退化しておるなら、判ずる前に一行 名乗る (cmd_1411 (b))★★
+    #   ★健全なら一言も出さぬ★ = 常に鳴る門にせぬため。
+    _banner = degraded_banner()
+    if _banner:
+        print(_banner, file=sys.stderr)
+
     if "--selftest" in sys.argv:
         return selftest()
 
@@ -606,7 +642,14 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as exc:
-        # ★内部異常★ — 気配が在れば拒み、無ければ通す (R4 の二段)
-        raw = " ".join(sys.argv)
-        print(f"[process_signal_guard] WARN: 内部異常: {exc}", file=sys.stderr)
+        # ★★此処は【無条件 fail-OPEN】である (cmd_1411 (b) で名乗りを実態へ合わせた)★★
+        #   ★旧註は「気配が在れば拒み、無ければ通す (R4 の二段)」と申しておったが、
+        #   ★実際は気配を一度も測らず通しておった★ (raw を組み立てて捨てる死に code が在った)
+        #   = ★★門が己の射程を実際より広く名乗っておった形★★ = 本 repo が繰り返し狩ってきた族。
+        #   ★R4 の二段は analyze() の中に現に在る★ (tokenizer 欠落・解析失敗の両方で気配を測る)
+        #   ⇒ ★此処へ落ちるのは【analyze の外で起きた想定外】のみ★ =
+        #     ★其の場で禁を掛ければ全 agent の Bash が止まりうる★ゆえ通す側へ倒す。
+        #   ★但し黙って通さぬ★ = 一行 名乗る (下)。★守りを変えるなら家老の裁を経よ★。
+        print(f"[process_signal_guard] WARN: 内部異常ゆえ ★検めずに通した★ "
+              f"(fail-OPEN・R4 は掛かっておらぬ): {exc}", file=sys.stderr)
         sys.exit(0)

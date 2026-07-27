@@ -3494,11 +3494,11 @@ mutations:
     red_needle: not ok 1 T-SW-001
     timeout: 300
   - id: MUT-1387-SW3
-    desc: ★書き手 (switch_cli.sh) が刻を落とさぬ変異★ = ★読み手だけを試験すれば【誰も書かぬ file を読む番人】が全部緑になる★ (「登録した ≠ 壊せば落ちる」の二層に跨る顔)。★本牙のみ shell 側を撃つ★
+    desc: ★書き手 (lib/switch_record.sh) が刻を落とさぬ変異★ = ★読み手だけを試験すれば【誰も書かぬ file を読む番人】が全部緑になる★ (「登録した ≠ 壊せば落ちる」の二層に跨る顔)。★2026-07-27 17:3x に書き手を lib へ移した (切替と出陣で源を 1 つに保つ為) ⇒ 錨も移した = ★己の commit が己の牙を鈍らせる形を、同じ turn で塞いだ★
     origin: cmd_1387
     suspected_by: ashigaru6
     paths:
-    - scripts/switch_cli.sh
+    - lib/switch_record.sh
     - tests/unit/test_idle_revive_switch_note.bats
     # ★兄弟 (族α)★= 本牙は shell 側を撃つが、試験の setup_file は SCAN_PY の在処を
     #   検めてから走る ⇒ ★之を欠くと baseline が赤 = 変異前から落ちて検出力を測れぬ★
@@ -3507,7 +3507,7 @@ mutations:
     mutate: |
       python3 - <<'PY'
       import pathlib
-      p = pathlib.Path("scripts/switch_cli.sh")
+      p = pathlib.Path("lib/switch_record.sh")
       s = p.read_text(encoding="utf-8")
       old = 'if ! printf'
       n = s.count(old)
@@ -3518,6 +3518,51 @@ mutations:
       bats tests/unit/test_idle_revive_switch_note.bats --filter "T-SW-008"
     expect: nonzero
     red_needle: not ok 1 T-SW-008
+    timeout: 300
+  - id: MUT-1387-SW4
+    desc: ★出陣 (shutsujin_departure.sh) の呼び口を 1 本 落とす変異★ = ★lib に函数が在っても出陣が呼ばねば【出陣で生まれた体】は永久に漏れる★ = cmd_1387 で埋めた当の漏れ口が黙って戻る形。★起動点 5 つ (将軍/家老/足軽 決戦/足軽 平時/軍師) を数で縛る★
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - shutsujin_departure.sh
+    - tests/unit/test_idle_revive_switch_note.bats
+    - scripts/idle_revive_scan.py
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("shutsujin_departure.sh")
+      s = p.read_text(encoding="utf-8")
+      old = '        record_switch_ts "$_gi" "$_gunshi_cli_type"'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, '        true; : "$_gunshi_cli_type"', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_idle_revive_switch_note.bats --filter "T-SW-010"
+    expect: nonzero
+    red_needle: not ok 1 T-SW-010
+    timeout: 300
+  - id: MUT-1387-SW5
+    desc: ★出陣で生まれた体を【切替】と名乗る変異★ = ★出陣の朝に「直前に切替が在った」と書けば、読む者は【在りもせぬ切替】を探す★ = 門が己の見た物を誤って名乗る形 (真因を渡す筈の札が、真因を隠す札に化ける)
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_switch_note.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'what = "出陣 (初回起動)" if event == "boot" else "切替"'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, 'what = "切替"', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_idle_revive_switch_note.bats --filter "T-SW-009"
+    expect: nonzero
+    red_needle: not ok 1 T-SW-009
     timeout: 300
   - id: MUT-1387-BG1
     desc: ★予算を固定 15.0s へ戻す変異★ = ★育つ台帳と固定の予算★の族 (2026-07-27 の commit で選抜 55 件・実測 20.95s が 15.0s を超え、★牙は 1 本も鈍っておらぬのに 21 件が未検分で UNDETERMINED になった★)。★初版の試験は印字の言葉だけを見ており本変異を素通りさせた = 見本を「床と導出が食い違う盤面 (選抜 20 件)」へ作り直して捕えた★

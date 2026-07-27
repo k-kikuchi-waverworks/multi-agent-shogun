@@ -23,7 +23,9 @@
 #   T-SW-005 毎 scan 源を名乗る (抑止 0 の scan でも) = 添え札が出ぬ理由が log 単独で割れる
 #   T-SW-006 壊れた行は捨てるが★黙って捨てぬ★ (SWITCH_BAD_LINES)
 #   T-SW-007 ★★本物の固着は今も撃たれる★★ = 切替の記録が直前に在っても revive は鳴る
-#   T-SW-008 ★書き手の側★ = switch_cli.sh の record_switch_ts が現に 1 行 落とす
+#   T-SW-008 ★書き手の側★ = lib/switch_record.sh の record_switch_ts が現に 1 行 落とす
+#   T-SW-009 ★出陣で生まれた体を【切替】と名乗らぬ★ (旧い 4 欄の行は切替のまま)
+#   T-SW-010 ★出陣 script が現に呼んでおる★ = 起動点 5 つ すべてに呼び口が在る
 #
 # ★T-SW-002 / T-SW-007 が要である理由★= 本層の最大の危険は ★添えるつもりで
 #   判定を緩めること★ である。他の 6 本は「札が出るか」しか見ておらぬ ⇒
@@ -36,7 +38,8 @@
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
     export SCAN_PY="${SCAN_PY_OVERRIDE:-$PROJECT_ROOT/scripts/idle_revive_scan.py}"
-    export SWITCH_SH="${SWITCH_SH_OVERRIDE:-$PROJECT_ROOT/scripts/switch_cli.sh}"
+    export SWITCH_SH="${SWITCH_SH_OVERRIDE:-$PROJECT_ROOT/lib/switch_record.sh}"
+    export SHUTSUJIN_SH="${SHUTSUJIN_SH_OVERRIDE:-$PROJECT_ROOT/shutsujin_departure.sh}"
     # ★.venv が無い盤面でも走れる形にする (cmd_1408 の族への手当)★:
     #   変異 runner は ★paths に挙げた file だけ★ を scratch へ写して走らす =
     #   ★.venv は付いて来ぬ★ ⇒ .venv 決め打ちでは ★変異の有無に依らず常に赤★ =
@@ -91,12 +94,14 @@ _write_pane_states() {
     done
 }
 
-# $1=agent $2=何秒前に切替が在ったか
+# $1=agent $2=何秒前に生まれたか $3=事由 (既定 switch・省けば【欄そのものを書かぬ】= 旧い行の形)
 _write_switch_record() {
-    local agent="$1" ago="$2" epoch
+    local agent="$1" ago="$2" event="${3:-}" epoch line
     epoch=$(( $(date '+%s') - ago ))
-    printf '%s\t%s\t%s\t%s\n' "$epoch" "$(date -d "@${epoch}" '+%Y-%m-%dT%H:%M:%S')" \
-        "$agent" "claude/claude-opus-5" >> "$Q/state/switch_history.tsv"
+    line="$(printf '%s\t%s\t%s\t%s' "$epoch" "$(date -d "@${epoch}" '+%Y-%m-%dT%H:%M:%S')" \
+        "$agent" "claude/claude-opus-5")"
+    [ -n "$event" ] && line="$(printf '%s\t%s' "$line" "$event")"
+    printf '%s\n' "$line" >> "$Q/state/switch_history.tsv"
 }
 
 # ★負の主張は helper を通せ★ (cmd_1401): bats の `! cmd` は set -e から免除ゆえ
@@ -310,29 +315,69 @@ PY
 }
 
 # ---------------------------------------------------------------------------
-# T-SW-008 ★書き手の側★ = switch_cli.sh の record_switch_ts が現に 1 行 落とす。
+# T-SW-008 ★書き手の側★ = lib/switch_record.sh の record_switch_ts が現に 1 行 落とす。
 # ★読み手だけを試験すれば「誰も書かぬ file を読む番人」が全部緑になる★ =
-#   本日 全軍で狩ってきた「登録した ≠ 壊せば落ちる」の、二層に跨る顔。
-# ★production の本文を其のまま抜き出して走らせる★ (複写を試験せぬ)。
+#   本日 狩ってきた「登録した ≠ 壊せば落ちる」の、二層に跨る顔。
+# ★production の本文を其のまま source して走らせる★ (複写を試験せぬ)。
 # ---------------------------------------------------------------------------
-@test "T-SW-008: switch_cli.sh's recorder actually appends one machine-readable line" {
-    local fn="$TEST_TMPDIR/fn.sh"
-    awk '/^record_switch_ts\(\) \{/,/^\}/' "$SWITCH_SH" > "$fn"
-    # ★抜き出せなんだら赤★ (名を替えたら気付く形にする = 黙って 0 行を走らせぬ)
-    [ "$(wc -l < "$fn")" -ge 5 ]
-    grep -q 'printf' "$fn"
-
+@test "T-SW-008: the shared recorder actually appends one machine-readable line" {
     run bash -c "
         set -euo pipefail
         SWITCH_HISTORY_FILE='$Q/state/switch_history.tsv'
-        log() { echo \"LOG: \$*\"; }
-        source '$fn'
+        source '$SWITCH_SH'
         record_switch_ts ashigaru91 claude claude-opus-5
     "
     [ "$status" -eq 0 ]
     [ "$(wc -l < "$Q/state/switch_history.tsv")" -eq 1 ]
-    # ★epoch(数) TAB iso TAB agent TAB cli/model★ = 番人が読む形
-    run awk -F'\t' 'NF>=4 && $1 ~ /^[0-9]+$/ && $3 == "ashigaru91" {print "SHAPE_OK"}' \
+    # ★epoch(数) TAB iso TAB agent TAB cli/model TAB 事由★ = 番人が読む形
+    run awk -F'\t' 'NF>=5 && $1 ~ /^[0-9]+$/ && $3 == "ashigaru91" && $5 == "switch" {print "SHAPE_OK"}' \
         "$Q/state/switch_history.tsv"
     echo "$output" | grep -q "SHAPE_OK"
+}
+
+# ---------------------------------------------------------------------------
+# T-SW-009 ★出陣で生まれた体を【切替】と名乗らぬ★ (家老 17:31 の裁(甲))
+#   ★出陣の朝に「直前に切替が在った」と書けば、読む者は★在りもせぬ切替を探す★。
+#   ★事由の欄が無い旧い行は【切替】と読む★= 本欄が生まれる前の行は悉く切替であったゆえ。
+# ---------------------------------------------------------------------------
+@test "T-SW-009: a boot record is named 出陣, not 切替 (and legacy 4-column rows stay 切替)" {
+    _write_stuck_task ashigaru91
+    _write_pane_states ashigaru91:idle
+    _write_switch_record ashigaru91 395 boot
+
+    FAKE_PROC_AGE=390 run _run_main_py
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -qE "SWITCH=[0-9.]+m_ago_EXPLAINS"
+    FAKE_PROC_AGE=400 run _run_main_py
+    FAKE_PROC_AGE=410 run _run_main_py
+    grep -q "直前に出陣 (初回起動)が在った" "$INBOX_STUB_RECORD"
+    _refute_file "$INBOX_STUB_RECORD" "直前に切替が在った"
+
+    # ★事由の欄を持たぬ旧い行は【切替】のまま★
+    rm -f "$Q/state/switch_history.tsv" "$Q/state/clear_log.yaml" "$INBOX_STUB_RECORD"
+    _write_switch_record ashigaru91 395
+    FAKE_PROC_AGE=390 run _run_main_py
+    FAKE_PROC_AGE=400 run _run_main_py
+    FAKE_PROC_AGE=410 run _run_main_py
+    grep -q "直前に切替が在った" "$INBOX_STUB_RECORD"
+}
+
+# ---------------------------------------------------------------------------
+# T-SW-010 ★出陣 script が【現に呼んでおる】★ (紙 → 契約 → 現物 の現物側)
+#   ★lib に函数が在っても、出陣が呼ばねば出陣で生まれた体は永久に漏れる★ =
+#   ★之が cmd_1387 で埋めた当の漏れ口である★。
+#   ★数で縛る★= 起動点は 5 つ (将軍 / 家老 / 足軽 決戦 / 足軽 平時 / 軍師) ⇒
+#   ★呼び口が減れば赤★ (どれか一族が黙って漏れ戻るのを捕える)。
+# ---------------------------------------------------------------------------
+@test "T-SW-010: the departure script sources the recorder AND calls it at every launch site" {
+    grep -q 'source "$SCRIPT_DIR/lib/switch_record.sh"' "$SHUTSUJIN_SH"
+    # ★fail-open の代物が在る★= 源が無くとも出陣を止めぬ (家老 17:31 の枷②)
+    grep -qE 'record_switch_ts\(\) \{ return 0; \}' "$SHUTSUJIN_SH"
+    # ★起動点ごとの呼び口★= boot と名乗って呼ぶ行が 5 本
+    local n
+    n="$(grep -c 'record_switch_ts .* "boot"' "$SHUTSUJIN_SH")"
+    [ "$n" -eq 5 ]
+    # ★呼び口は必ず Enter (起動) の後に在る★= 生年より前に刻を落とさぬ
+    run bash -c "grep -n 'send-keys.*Enter\|record_switch_ts .* \"boot\"' '$SHUTSUJIN_SH' | grep -A1 'Enter' | grep -c 'record_switch_ts'"
+    [ "$output" -ge 5 ]
 }

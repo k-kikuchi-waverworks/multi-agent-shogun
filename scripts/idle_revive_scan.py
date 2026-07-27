@@ -1967,9 +1967,13 @@ def load_switch_history(state_dir: Path):
         if not agent:
             bad += 1
             continue
+        # ★第 5 欄 = 事由 (switch=切替 / boot=出陣)★ (cmd_1387・家老 17:31 の裁(甲))。
+        #   ★欠けておれば switch と読む★= 本欄が生まれる前の行は悉く切替であったゆえ
+        #   (★「無い」を「別の物」と読ませぬ = 古い行を黙って化けさせぬ★)。
+        event = parts[4].strip() if len(parts) >= 5 and parts[4].strip() else "switch"
         # ★最後の 1 件を採る★= 追記のみゆえ後の行が新しい。
-        if agent not in hist or ts > hist[agent]:
-            hist[agent] = ts
+        if agent not in hist or ts > hist[agent][0]:
+            hist[agent] = (ts, event)
     return hist, "ok", bad
 
 
@@ -1987,24 +1991,28 @@ def switch_annotation(hist, source, agent, now_ts, age_sec):
     if source == "unreadable":
         return ("SWITCH=unreadable",
                 "★切替の記録を読めなんだ = 齢の若さの出所は判じられぬ★")
-    ts = hist.get(agent)
+    rec = hist.get(agent)
+    ts, event = (rec if rec is not None else (None, None))
+    # ★事由で言葉を選ぶ★= ★出陣で生まれた体に「切替が在った」と名乗れば、読む者は
+    #   在りもせぬ切替を探す★ (門が己の見た物を正しく名乗る、の一部である)。
+    what = "出陣 (初回起動)" if event == "boot" else "切替"
     if ts is None:
         return ("SWITCH=none",
-                "★此の agent の切替の記録は無い (記録の源は生きておる) = "
-                "齢の若さは切替では説明せぬ★")
+                "★此の agent の生年の記録は無い (記録の源は生きておる) = "
+                "齢の若さは切替でも出陣でも説明せぬ★")
     since_min = round((now_ts - ts) / 60.0, 1)
     if age_sec is None:
         return (f"SWITCH={since_min}m_ago",
-                f"★直前に切替が在った ({since_min} 分前) = 而して齢を判じられぬゆえ "
+                f"★直前に{what}が在った ({since_min} 分前) = 而して齢を判じられぬゆえ "
                 f"突き合わせられぬ★")
     birth_ts = now_ts - age_sec
     if birth_ts >= ts - SWITCH_EXPLAINS_SLACK_SEC:
         return (f"SWITCH={since_min}m_ago_EXPLAINS",
-                f"★直前に切替が在った ({since_min} 分前) = ★process の誕生が其の切替と重なる★ ⇒ "
-                f"★齢の若さは【我らが撃った切替】に由来する公算が高い (crash-loop ではない)★ — "
+                f"★直前に{what}が在った ({since_min} 分前) = ★process の誕生が其れと重なる★ ⇒ "
+                f"★齢の若さは【我らが撃った{what}】に由来する公算が高い (crash-loop ではない)★ — "
                 f"★但し之は【真因の申し送り】であって【判定】ではない★= 抑止も警報も 1bit も動いておらぬ")
     return (f"SWITCH={since_min}m_ago_OLDER",
-            f"★切替は {since_min} 分前に在ったが、process は其れより古い★ ⇒ "
+            f"★{what}は {since_min} 分前に在ったが、process は其れより古い★ ⇒ "
             f"★此の齢の若さを切替では説明せぬ★")
 
 

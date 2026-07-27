@@ -55,28 +55,14 @@ log() {
 }
 
 # ─── 切替の刻を落とす (cmd_1387・家老 14:21 の命(1)) ───
-# ★何ゆえ要るか★= 番人 (idle_revive_scan.py) は「名乗る沈黙 > process の齢」を
-#   ★起き直り (crash-loop)★ と読む。★而して我らが撃った切替も全く同じ顔で映る★
-#   = 2026-07-27 14:12〜14:21 に ★三体 (ashigaru1/2/6) が同時に其の顔で鳴った★。
-# ★落とすのは【真因】であって【逃げ道】ではない★= 番人は本 file を
-#   ★名乗りへ添えるだけ★に使い、★判定には一切 使わぬ★
-#   (母数から外せば「切替を装えば抑止を逃れる」口が開くゆえ = 家老の裁)。
-# ★刻は【launch の刻】である★= process の誕生と突き合わせる為ゆえ、
-#   切替の【完了】でなく【新 CLI を起こした其の刻】を落とす。
-# ★追記のみ★= 最後の 1 件だけを持てば「切替が無い日に何通 鳴るか」を後から数えられぬ。
-record_switch_ts() {
-    local agent="$1" cli="$2" model="$3"
-    local epoch iso
-    epoch="$(date '+%s')"
-    iso="$(date '+%Y-%m-%dT%H:%M:%S')"
-    mkdir -p "$(dirname "$SWITCH_HISTORY_FILE")" 2>/dev/null || true
-    # ★書けずとも切替は止めぬ★= 欠けるのは名乗りだけであり、切替そのものは害を受けぬ。
-    #   ★而して黙って欠かせぬ★= 書けなんだ事は log が名指す (番人は真因を読めぬ旨)。
-    if ! printf '%s\t%s\t%s\t%s\n' "$epoch" "$iso" "$agent" "${cli}/${model}" \
-            >> "$SWITCH_HISTORY_FILE" 2>/dev/null; then
-        log "WARN: 切替の刻を落とせなんだ (${SWITCH_HISTORY_FILE}) — 番人は此の切替の真因を読めぬ"
-    fi
-}
+# ★書き手の本体は lib/switch_record.sh に在る★= ★出陣 (shutsujin_departure.sh) にも
+#   同じ物が要るゆえ源を 1 つに保つ★ (写せば形が黙って割れる = 本日の族)。
+# ★源が無くとも切替は止めぬ (fail-open)★= 欠けるのは名乗りだけである。
+if [ -f "${PROJECT_ROOT}/lib/switch_record.sh" ]; then
+    source "${PROJECT_ROOT}/lib/switch_record.sh"
+else
+    record_switch_ts() { log "WARN: lib/switch_record.sh が無い — 生年の記録を落とせぬ"; return 0; }
+fi
 
 # ─── Usage ───
 usage() {

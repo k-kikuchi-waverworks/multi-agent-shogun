@@ -62,6 +62,19 @@ else
     CLI_ADAPTER_LOADED=false
 fi
 
+# ★生年の記録 (cmd_1387・家老 17:31 の裁(甲))★
+#   ★何ゆえ出陣にも要るか★= 番人は「名乗る沈黙 > process の齢」を crash-loop と読む
+#   ⇒ ★出陣で生まれた体も、切替で生まれた体と全く同じ顔で映る★
+#   ⇒ ★出陣の朝、真因を渡す物が無ければ、番人の警報を読む者は己で pane を実査する外ない★。
+#   ★★fail-open である★★= ★記録は添え物であり、出陣を止めてはならぬ★
+#   (出陣が失敗すれば全軍が起きぬ = 本日 最も高い代償) ⇒ ★源が無ければ何もせぬ函数を置く★。
+if [ -f "$SCRIPT_DIR/lib/switch_record.sh" ]; then
+    PROJECT_ROOT="${PROJECT_ROOT:-$SCRIPT_DIR}"
+    source "$SCRIPT_DIR/lib/switch_record.sh"
+else
+    record_switch_ts() { return 0; }
+fi
+
 # 足軽IDリストと人数を動的に取得（settings.yaml から）
 if [ "$CLI_ADAPTER_LOADED" = true ]; then
     _ASHIGARU_IDS_STR=$(get_ashigaru_ids)
@@ -756,6 +769,7 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
     tmux set-option -p -t "shogun:main" @agent_cli "$_shogun_cli_type"
     tmux send-keys -t shogun:main "$_shogun_cmd"
     tmux send-keys -t shogun:main Enter
+    record_switch_ts "shogun" "$_shogun_cli_type" "$(get_agent_model "shogun" 2>/dev/null || echo "-")" "boot"
     opencode_startup_delay "$_shogun_cli_type"
     _shogun_display=$(get_model_display_name "shogun" 2>/dev/null || echo "Opus")
     tmux set-option -p -t "shogun:main" @model_name "$_shogun_display" 2>/dev/null || true
@@ -775,6 +789,7 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
     tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_karo_cli_type"
     tmux send-keys -t "multiagent:agents.${p}" "$_karo_cmd"
     tmux send-keys -t "multiagent:agents.${p}" Enter
+    record_switch_ts "karo" "$_karo_cli_type" "$(get_agent_model "karo" 2>/dev/null || echo "-")" "boot"
     opencode_startup_delay "$_karo_cli_type"
     _karo_display=$(get_model_display_name "karo" 2>/dev/null || echo "Sonnet")
     tmux set-option -p -t "multiagent:agents.${p}" @model_name "$_karo_display" 2>/dev/null || true
@@ -797,6 +812,7 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
             tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_ashi_cli_type"
             tmux send-keys -t "multiagent:agents.${p}" "$_ashi_cmd"
             tmux send-keys -t "multiagent:agents.${p}" Enter
+            record_switch_ts "ashigaru${i}" "$_ashi_cli_type" "$(get_agent_model "ashigaru${i}" 2>/dev/null || echo "-")" "boot"
             opencode_startup_delay "$_ashi_cli_type"
         done
         log_info "  └─ 足軽1-${_ASHIGARU_COUNT}（決戦の陣）、召喚完了"
@@ -813,6 +829,7 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
             tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_ashi_cli_type"
             tmux send-keys -t "multiagent:agents.${p}" "$_ashi_cmd"
             tmux send-keys -t "multiagent:agents.${p}" Enter
+            record_switch_ts "ashigaru${i}" "$_ashi_cli_type" "$(get_agent_model "ashigaru${i}" 2>/dev/null || echo "-")" "boot"
             opencode_startup_delay "$_ashi_cli_type"
         done
         log_info "  └─ 足軽1-${_ASHIGARU_COUNT}（平時の陣）、召喚完了"
@@ -838,6 +855,7 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
         tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_gunshi_cli_type"
         tmux send-keys -t "multiagent:agents.${p}" "$_gunshi_cmd"
         tmux send-keys -t "multiagent:agents.${p}" Enter
+        record_switch_ts "$_gi" "$_gunshi_cli_type" "$(get_agent_model "$_gi" 2>/dev/null || echo "-")" "boot"
         _gunshi_display=$(get_model_display_name "$_gi" 2>/dev/null || echo "Opus+T")
         tmux set-option -p -t "multiagent:agents.${p}" @model_name "$_gunshi_display" 2>/dev/null || true
         log_info "  └─ 軍師 ${_gi}（${_gunshi_display}）、召喚完了"

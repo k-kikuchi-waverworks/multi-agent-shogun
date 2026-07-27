@@ -60,7 +60,7 @@ if [ "$STOP_HOOK_ACTIVE" = "True" ]; then
     touch "$FLAG"
     # When stop_hook_active=True, the first block already delivered the inbox
     # message to the agent. Check if the agent processed it (UNREAD decreased).
-    UNREAD_COUNT=$(grep -c 'read: false' "$INBOX" 2>/dev/null || true)
+    UNREAD_COUNT=$(grep -cE '^  read: false' "$INBOX" 2>/dev/null || true)
     if [ "${UNREAD_COUNT:-0}" -gt 0 ]; then
         # Agent did not process the inbox yet. EXIT 0 here to avoid:
         #   (a) 55s inotifywait → timeout → "Stop hook error occurred"
@@ -80,7 +80,7 @@ if [ "$STOP_HOOK_ACTIVE" = "True" ]; then
             --timeout 55 \
             "${WATCH_TARGETS_ACTIVE[@]}" 2>/dev/null || true
     fi
-    UNREAD_COUNT=$(grep -c 'read: false' "$INBOX" 2>/dev/null || true)
+    UNREAD_COUNT=$(grep -cE '^  read: false' "$INBOX" 2>/dev/null || true)
     if [ "${UNREAD_COUNT:-0}" -eq 0 ]; then
         exit 0
     fi
@@ -123,7 +123,7 @@ if [ ! -f "$INBOX" ]; then
 fi
 
 # Count unread messages using grep (fast, no python dependency)
-UNREAD_COUNT=$(grep -c 'read: false' "$INBOX" 2>/dev/null || true)
+UNREAD_COUNT=$(grep -cE '^  read: false' "$INBOX" 2>/dev/null || true)
 
 FLAG="${IDLE_FLAG_DIR:-/tmp}/shogun_idle_${AGENT_ID}"
 if [ "${UNREAD_COUNT:-0}" -eq 0 ]; then
@@ -143,7 +143,7 @@ if [ "${UNREAD_COUNT:-0}" -eq 0 ]; then
         :
     fi
     # 待機後に再チェック
-    UNREAD_COUNT=$(grep -c 'read: false' "$INBOX" 2>/dev/null || true)
+    UNREAD_COUNT=$(grep -cE '^  read: false' "$INBOX" 2>/dev/null || true)
     if [ "${UNREAD_COUNT:-0}" -eq 0 ]; then
         exit 0
     fi

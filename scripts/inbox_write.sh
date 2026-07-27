@@ -163,7 +163,7 @@ case "$TARGET" in
                     [ -z "$_AGENT" ] && continue
                     _AGENT_INBOX="$SCRIPT_DIR/queue/inbox/${_AGENT}.yaml"
                     if [ -f "$_AGENT_INBOX" ]; then
-                        _COUNT=$(grep -c "read: false" "$_AGENT_INBOX" 2>/dev/null || true)
+                        _COUNT=$(grep -cE "^  read: false" "$_AGENT_INBOX" 2>/dev/null || true)
                         _COUNT=${_COUNT:-0}
                     else
                         _COUNT=0

@@ -62,6 +62,10 @@ plans/**/README.md
 !lib/ntfy_auth.sh
 !lib/agent_status.sh
 !lib/agent_registry.sh
+# cmd_1387 (2026-07-27): 体の生年を落とす書き手 (切替と出陣が同じ源を使う)
+#   ★之を白名簿へ入れ忘れると【fresh clone に無い】= 両呼び手とも fail-open ゆえ
+#   ★黙って記録が消える★ = 「在るが配られておらぬ」の族 (本日 gate が名指した当の形)。
+!lib/switch_record.sh
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md

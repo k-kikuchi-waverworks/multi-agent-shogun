@@ -37,8 +37,8 @@ for f in queue/inbox/*.yaml; do
   [[ -e "$f" ]] || continue
   name=$(basename "$f" .yaml)
   total=$(wc -l < "$f")
-  unread=$(grep -c "read: false" "$f" 2>/dev/null) || unread=0
-  rd=$(grep -c "read: true" "$f" 2>/dev/null) || rd=0
+  unread=$(grep -cE "^  read: false" "$f" 2>/dev/null) || unread=0
+  rd=$(grep -cE "^  read: true" "$f" 2>/dev/null) || rd=0
   flag=""; (( rd >= 30 )) && flag="  ⚠️ read済多 (保守的剪定候補)"
   printf "  %-28s %4d行 (未読:%-3s 既読:%-3s)%s\n" "$name" "$total" "$unread" "$rd" "$flag"
 done

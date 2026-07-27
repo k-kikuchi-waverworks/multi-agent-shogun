@@ -496,6 +496,12 @@ DECLARED = {
     # 判断の基準 (家老 08:18 の求めに応じて先に書く):
     #   ★その値を動かした時に「誰を起こすか / 誰へ警報を上げるか」が変わる物を契約とする。
     #     残す量や後始末の都合だけが変わる物は契約としない。★
+    #   ★併せて「畳まれないことで、起こす/鳴らすが止まる物」も契約とする★
+    #     (cmd_1466・軍師一号の名指しで足した一句)。
+    #     境目の1件 = OUTAGE_EXPIRE_HOURS。本体の註は之を「掃除屋 (通知せぬ)」と書いており、
+    #     上の2行だけを字面で読むと契約から外れる側に読める。★外れない。★
+    #     この台帳は /clear を抑えた相手を抱えており、episode が畳まれて初めて抑止が解ける。
+    #     ★畳む期限を動かせば、誰がいつ起こされるかが現に変わる。★
     # 足すまでの状態 = 20件のうち宣言されていたのは上の2件だけで、
     # 残り18件はどれも値を動かしてもテストが1本も赤くならなかった。
 
@@ -520,6 +526,8 @@ DECLARED = {
     "RESUME_GRACE_MIN": 3,                # 明ける予定を過ぎてからの余裕 (時計ずれと反映遅れを吸収)
     "FALLBACK_RESUME_MIN": 60,            # 明ける予定が読めない時、初回検知から何分で点検を促すか
     "MAX_RESETS_ETA_AHEAD_HOURS": 6,      # 明ける予定として受け付ける上限。これ超は古い掲示の翌日誤読と見る
+    # ★境目の1件★ = 本体の註は「掃除屋 (通知せぬ)」だが、★契約である★。
+    # 畳まれて初めて /clear の抑止が解けるので、期限を動かせば誰がいつ起こされるかが変わる。
     "OUTAGE_EXPIRE_HOURS": 24,            # 台帳の episode を畳む期限。畳まないと事故が永久に居座る
 
     # ── 「切替が説明する」と見なす窓 ──
@@ -527,10 +535,14 @@ DECLARED = {
 
     # ── 物差しそのもの ──
     # ★この1件だけ性質が違う。本試験が守れる範囲を実際より高く書かないため、ここに書く。★
-    # 180 は「我らが決めた値」ではなく「cron が現に */3 で走っている」という他所の事実の写しである。
-    # ゆえに ★cron の周期が変わっても、この宣言は緑のまま黙って偽になる★。
-    # 本試験が守れるのは「この file の側が黙って動く」ことだけである。
-    # (2026-07-28 実測: crontab は */3 で、写しは現に合っている)
+    # 180 は「我らが決めた値」ではなく「cron が */3 で走っている」という他所の事実の写しである。
+    # ★2026-07-28 08:5x 更新 (cmd_1466・軍師一号の指摘)★:
+    #   「機械では守れない」は狭かった。repo の中に追跡下の正本が在る =
+    #   scripts/idle_revive_scan.cron が */3 を持つ。T-AGE-021 が之と突き合わせる。
+    #   ★守れる範囲が「守れない」から「repo 側の食い違いなら守れる」へ進んだ。★
+    #   ★それでも守れない所★ = その .cron は「staged (未活性化)」と自称する雛形で、
+    #   生きた crontab とは現に1箇所 違う (生きた側に --stall-min 45 が付いている)。
+    #   ⇒ ★誰かが手で crontab を書き替えた場合は、今も見えない。★
     "DEFAULT_EXPECTED_INTERVAL_SEC": 180,
 }
 bad = []
@@ -852,14 +864,93 @@ if len(declared) < 10:
 if not found:
     raise SystemExit("本体から数値の定数を1件も拾えなかった = 読み口が死んでいる")
 
-# ── 契約ではないと明示する物 (足す時は理由を必ず書くこと) ──
+# ── 契約ではないと明示する物 = 名前 → 理由 の辞書 ──
+#
+# ★集合ではなく辞書である★ (cmd_1466・軍師一号の指摘で直した)。
+# 集合だった時は、新しい定数の名前をここへ書き足すだけで全部 緑に戻った。
+# 理由は註記として横に書けたが、機械は註記を1文字も見ていなかった。
+# ★緑へ戻す最も安い手が抜け道の側に在る形は、必ず使われる。★
+#
+# ★理由に何を書くかの基準 (1行)★:
+#   「その値を動かした時に【何が変わるか】を書き、且つ【誰を起こすか・誰へ警報を上げるか】は
+#     変わらないと言い切れること」。言い切れないなら契約であり、DECLARED へ足す物である。
+#
 NOT_A_CONTRACT = {
-    # 台帳に残す episode の本数の上限。古い順に落とすだけで、
-    # 誰を起こすか・誰へ警報を上げるかは1つも変わらない。残す量の話である。
-    "UPSTREAM_HISTORY_MAX",
+    "UPSTREAM_HISTORY_MAX":
+        "台帳に残す episode の本数の上限。古い順に落とすので残す量が変わるだけで、"
+        "誰を起こすか・誰へ警報を上げるかは1つも変わらない",
 }
 
-undeclared = sorted(set(found) - declared - NOT_A_CONTRACT)
+# ── 理由の側を検める ──
+# ★機械が守れるのは【理由の形】だけである。理由が本当かは守れない (条6)。★
+# 「特に無し」で通す道だけは塞ぐ。中身が嘘の理由は、これでも通る。
+# ★短い語を入れてはならない★ — 「なし」を入れたら「見なしの割合が変わる」という
+#   真っ当な理由が赤くなった (cmd_1466 実測)。★語は句として書く。★
+_BANNED = ("特に無し", "特になし", "とくになし", "理由なし", "理由は無し",
+           "未定", "暫定", "後で書く", "あとで書く", "todo", "n/a")
+for _name, _why in sorted(NOT_A_CONTRACT.items()):
+    if not isinstance(_why, str) or not _why.strip():
+        raise SystemExit(f"NOT_A_CONTRACT の {_name} に理由が無い。"
+                         "★名前だけで契約から外すことはできない★")
+    _w = _why.strip()
+    if len(_w) < 20:
+        raise SystemExit(f"NOT_A_CONTRACT の {_name} の理由が短すぎる ({len(_w)} 字)。"
+                         "動かした時に何が変わるかを書け")
+    _low = _w.lower()
+    for _b in _BANNED:
+        if _b in _low:
+            raise SystemExit(f"NOT_A_CONTRACT の {_name} の理由に「{_b}」が入っている。"
+                             "★理由の欄を埋めるだけの言葉では契約から外せない★")
+    if "変わ" not in _w:
+        raise SystemExit(f"NOT_A_CONTRACT の {_name} の理由が「何が変わるか」を述べていない。"
+                         "基準 = 動かした時に何が変わるかを書き、"
+                         "誰を起こすか・誰へ警報を上げるかは変わらないと言い切ること")
+
+# ── ★格下げを黙って通さない★ (cmd_1466・軍師一号が実測した重い方の抜け道) ──
+#
+# 名前だけを入れる抜け道 (上で塞いだ) は「新しい物を守り損ねる」だけである。
+# ★これは違う。既に守られている物の守りを、黙って外せる形である。★
+#   生きた契約 (例: DEFAULT_QUORUM_RATIO) を DECLARED から NOT_A_CONTRACT へ移すと、
+#   移した後は値を自由に動かせて、どの試験も赤くならない。
+#
+# ゆえに ★git の履歴を正本として★、直前の版の DECLARED と今の NOT_A_CONTRACT を突き合わせる。
+# 名簿を二重に持つと其方が古びるので、履歴を読む (今朝ずっと踏んでいる形を避ける)。
+#
+# ★本検めの射程 (条6)★:
+#   1. 見るのは HEAD の版だけである。★格下げと commit を同じ一手で済ませ、
+#      その間に一度も試験を走らせなければ、次の版からは見えない。★
+#      守るのは「commit する前に一度でも走らせた時」である。
+#   2. git が読めない場所では検められない。★その時は緑にせず赤にする★
+#      (検められなかったことを、検めて通ったことに混ぜないため)。
+import subprocess
+
+_repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(bats_file))))
+_rel = os.path.relpath(os.path.abspath(bats_file), _repo)
+_p = subprocess.run(["git", "-C", _repo, "show", f"HEAD:{_rel}"],
+                    capture_output=True, text=True)
+if _p.returncode != 0:
+    raise SystemExit(
+        "UNDETERMINED: 直前の版を git から読めなかったので、格下げを検められなかった。\n"
+        f"  git の言い分: {_p.stderr.strip()[:200]}\n"
+        "  ★検められなかったことを緑に混ぜないため、赤にしている★")
+_m_prev = re.search(r"^DECLARED = \{(.*?)^\}", _p.stdout, re.S | re.M)
+if not _m_prev:
+    raise SystemExit("UNDETERMINED: 直前の版から DECLARED を読み取れなかった。読み口を直せ")
+_prev_declared = set(re.findall(r'^\s*"([A-Z0-9_]+)"\s*:', _m_prev.group(1), re.M))
+if len(_prev_declared) < 10:
+    raise SystemExit(f"直前の版の宣言を {len(_prev_declared)} 件しか読めなかった = 読み口が死んでいる")
+
+_demoted = sorted(_prev_declared & set(NOT_A_CONTRACT))
+if _demoted:
+    raise SystemExit(
+        "★契約から格下げされた定数がある★ "
+        "(直前の版では DECLARED に在り、今は NOT_A_CONTRACT に在る):\n  "
+        + "\n  ".join(_demoted)
+        + "\n  ⇒ 守られていた物の守りを外す一手である。黙って通さない。"
+          "\n  ⇒ 本当に契約でないなら、何故 前の版で契約だったのかを稿へ書き、"
+          "家老の裁を経てから移せ")
+
+undeclared = sorted(set(found) - declared - set(NOT_A_CONTRACT))
 if undeclared:
     raise SystemExit(
         "契約として宣言されていない数値の定数がある "
@@ -873,4 +964,110 @@ print(f"OK every constant is accounted for: 本体 {len(found)} 件 / "
 PY
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "OK every constant is accounted for"
+}
+
+# ---------------------------------------------------------------------------
+# T-AGE-021 (cmd_1466・2026-07-28) — 外の事実の写しを、repo の中の正本と突き合わせる
+#
+# 経緯: cmd_1459 で拙者は DEFAULT_EXPECTED_INTERVAL_SEC (180) を
+# 「cron が */3 で走っているという他所の事実の写しゆえ、機械では守れない」と書いた。
+# ★軍師一号が、repo の中に追跡下の正本が在ることを見つけた★ = scripts/idle_revive_scan.cron。
+# ⇒ 「守れない」は狭かった。★repo 側の食い違いなら守れる。★
+#
+# ★本試験が守れない所 (条6・実際より高く書かないため先に書く)★:
+#   1. その .cron は「staged (未活性化)」と自称する雛形である。
+#      ★生きた crontab とは現に1箇所 違う (生きた側に --stall-min 45 が付いている)。★
+#   2. ゆえに守れるのは「repo が宣言する周期」までである。
+#      ★誰かが手で crontab を書き替えた場合は、今も見えない。★
+#   3. crontab を読みに行かないので、新しい clone でも走る (そこは意図どおりである)。
+#
+# ★判定の本体は、この関数1つだけに置く。★
+#   陰性側が同じ判定を書き写すと、★写しが赤くなるだけで、本体の口は一度も走らない★。
+#   六号が cmd_1450 で名指した形 (入力を差し替えて撃つ試験は、入力を読む口を試験しない) を、
+#   拙者は最初の版で自分で踏んでいた。陽性も陰性も、下の1つを呼ぶ。
+#   差し替えるのは ★見に行く先 (CRON_FILE_OVERRIDE) だけ★ である。
+# ---------------------------------------------------------------------------
+_cron_interval_check() {
+    "$PROJECT_ROOT/.venv/bin/python3" - <<'PY'
+import importlib.util, os, re
+
+target = os.environ["SCAN_PY"]
+cron_file = os.environ.get("CRON_FILE_OVERRIDE") or os.path.join(
+    os.environ["PROJECT_ROOT"], "scripts", "idle_revive_scan.cron")
+
+if not os.path.exists(cron_file):
+    raise SystemExit(f"UNDETERMINED: 突き合わせる正本が無い ({cron_file})。"
+                     "★検められなかったことを緑に混ぜないため赤にしている★")
+
+# ── .cron から、コメントでない実行行の周期を読む ──
+periods = []
+for line in open(cron_file, encoding="utf-8"):
+    s = line.strip()
+    if not s or s.startswith("#"):
+        continue
+    m = re.match(r"\*/(\d+)\s+\*\s+\*\s+\*\s+\*\s", s)
+    if m and "idle_revive_scan" in s:
+        periods.append(int(m.group(1)))
+
+# ★探し方が生きている証★ — 読み口が死ぬと「食い違いは無い」と黙って緑を返す。先に落とす。
+if not periods:
+    raise SystemExit("UNDETERMINED: .cron から実行行の周期を1件も読めなかった = 読み口が死んでいる")
+if len(set(periods)) != 1:
+    raise SystemExit(f"★.cron が周期を {sorted(set(periods))} と複数 名乗っている★。"
+                     "どれが正本か決まらないので赤にする")
+
+want_sec = periods[0] * 60
+
+spec = importlib.util.spec_from_file_location("irs", target)
+irs = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(irs)
+got = getattr(irs, "DEFAULT_EXPECTED_INTERVAL_SEC", None)
+
+if got != want_sec:
+    raise SystemExit(
+        f"★物差しが repo の cron と割れている★: "
+        f"DEFAULT_EXPECTED_INTERVAL_SEC = {got} / "
+        f"{os.path.basename(cron_file)} は */{periods[0]} = {want_sec} 秒\n"
+        "  ⇒ どちらかが古い。★どちらへも寄らず、割れを名乗る★")
+
+print(f"OK interval matches the tracked cron: */{periods[0]} = {want_sec} 秒 "
+      f"(この試験は生きた crontab を見ていない。手で書き替えられた分は見えない)")
+PY
+}
+
+@test "T-AGE-021: the interval constant matches the cron file tracked in this repo" {
+    run _cron_interval_check
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OK interval matches the tracked cron"
+}
+
+# T-AGE-021n (陰性側) — 突き合わせる相手が違えば、現に赤くなるか。
+# ★現物の .cron へは1バイトも書かず、見に行く先だけを差し替える。★
+# ★撃つのは T-AGE-021 と同じ関数である★ = 本体の口が現に走った上での赤である。
+@test "T-AGE-021n: the cron cross-check goes red when the cron file disagrees" {
+    local fake="$TEST_TMPDIR/fakecron"
+    mkdir -p "$fake"
+    # ★周期を */3 から */7 へ変えた雛形★ = 180 と割れる
+    printf '# staged\n*/7 * * * * /bin/bash /x/scripts/idle_revive_scan.sh # idle_revive_scan_cmd1154\n' \
+        > "$fake/idle_revive_scan.cron"
+
+    CRON_FILE_OVERRIDE="$fake/idle_revive_scan.cron" run _cron_interval_check
+    [ "$status" -ne 0 ]
+    echo "$output" | grep -q "物差しが repo の cron と割れている"
+    echo "$output" | grep -q "180"
+    echo "$output" | grep -q "420"
+}
+
+# T-AGE-021u (陰性側その2) — ★読み口が死んだ時に、黙って緑を返さないか。★
+# 相手の file は在るが実行行が1本も無い形である。
+# 「食い違いが無い」と「そもそも読めていない」は別物ゆえ、後者は UNDETERMINED として赤にする。
+@test "T-AGE-021u: a cron file it cannot parse is UNDETERMINED, never a silent pass" {
+    local fake="$TEST_TMPDIR/fakecron_dead"
+    mkdir -p "$fake"
+    printf '# staged (実行行なし)\n' > "$fake/idle_revive_scan.cron"
+
+    CRON_FILE_OVERRIDE="$fake/idle_revive_scan.cron" run _cron_interval_check
+    [ "$status" -ne 0 ]
+    echo "$output" | grep -q "UNDETERMINED"
+    echo "$output" | grep -q "読み口が死んでいる"
 }

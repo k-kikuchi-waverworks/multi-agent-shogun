@@ -424,12 +424,79 @@ if len(declared) < 2:
 if not found:
     raise SystemExit("本体から数値の定数を1件も拾えなかった = 読み口が死んでいる")
 
-# ── 契約ではないと明示する物 (足す時は理由を必ず書くこと) ──
-NOT_A_CONTRACT = set()   # 空の集合。{} と書くと dict になるので set() で書く
-# 今は1件も無い。契約でない数値の定数を足す時は、ここへ名前と理由を書く。
-# 例: NOT_A_CONTRACT.add("BUF_SIZE")  # 読み込みの塊の大きさ。振舞いを決めない
+# ── 契約ではないと明示する物 = 名前 → 理由 の辞書 ──
+#
+# ★集合ではなく辞書である★ (cmd_1466・軍師一号の指摘で直した)。
+# 集合だった時は、新しい定数の名前をここへ書き足すだけで全部 緑に戻った。
+# ★緑へ戻す最も安い手が抜け道の側に在る形は、必ず使われる。★
+#
+# ★理由に何を書くかの基準 (1行)★:
+#   「その値を動かした時に【何が変わるか】を書き、且つ【誰を起こすか・誰へ警報を上げるか】は
+#     変わらないと言い切れること」。言い切れないなら契約であり、DECLARED へ足す物である。
+#
+NOT_A_CONTRACT = {}   # 今は1件も無い。足す時は "名前": "理由" の形で書く。
+# 例: "BUF_SIZE": "読み込みの塊の大きさが変わるだけで、誰を起こすかは変わらない"
 
-undeclared = sorted(set(found) - declared - NOT_A_CONTRACT)
+# ── 理由の側を検める ──
+# ★機械が守れるのは【理由の形】だけである。理由が本当かは守れない (条6)。★
+# 「特に無し」で通す道だけは塞ぐ。中身が嘘の理由は、これでも通る。
+# ★短い語を入れてはならない★ — 「なし」を入れたら「見なしの割合が変わる」という
+#   真っ当な理由が赤くなった (cmd_1466 実測)。★語は句として書く。★
+_BANNED = ("特に無し", "特になし", "とくになし", "理由なし", "理由は無し",
+           "未定", "暫定", "後で書く", "あとで書く", "todo", "n/a")
+for _name, _why in sorted(NOT_A_CONTRACT.items()):
+    if not isinstance(_why, str) or not _why.strip():
+        raise SystemExit(f"NOT_A_CONTRACT の {_name} に理由が無い。"
+                         "★名前だけで契約から外すことはできない★")
+    _w = _why.strip()
+    if len(_w) < 20:
+        raise SystemExit(f"NOT_A_CONTRACT の {_name} の理由が短すぎる ({len(_w)} 字)。"
+                         "動かした時に何が変わるかを書け")
+    _low = _w.lower()
+    for _b in _BANNED:
+        if _b in _low:
+            raise SystemExit(f"NOT_A_CONTRACT の {_name} の理由に「{_b}」が入っている。"
+                             "★理由の欄を埋めるだけの言葉では契約から外せない★")
+    if "変わ" not in _w:
+        raise SystemExit(f"NOT_A_CONTRACT の {_name} の理由が「何が変わるか」を述べていない。"
+                         "基準 = 動かした時に何が変わるかを書き、"
+                         "誰を起こすか・誰へ警報を上げるかは変わらないと言い切ること")
+
+# ── ★格下げを黙って通さない★ (cmd_1466・軍師一号が実測した重い方の抜け道) ──
+# 名前だけを入れる抜け道は「新しい物を守り損ねる」だけだが、
+# ★生きた契約を DECLARED から NOT_A_CONTRACT へ移す形は、守られている物の守りを黙って外せる。★
+# ゆえに git の履歴を正本として、直前の版の DECLARED と今の NOT_A_CONTRACT を突き合わせる。
+# ★射程 (条6)★: HEAD の版しか見ない。格下げと commit を同じ一手で済ませ、その間に一度も
+#   試験を走らせなければ、次の版からは見えない。git が読めない時は緑にせず赤にする。
+import subprocess
+
+_repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(bats_file))))
+_rel = os.path.relpath(os.path.abspath(bats_file), _repo)
+_p = subprocess.run(["git", "-C", _repo, "show", f"HEAD:{_rel}"],
+                    capture_output=True, text=True)
+if _p.returncode != 0:
+    raise SystemExit(
+        "UNDETERMINED: 直前の版を git から読めなかったので、格下げを検められなかった。\n"
+        f"  git の言い分: {_p.stderr.strip()[:200]}\n"
+        "  ★検められなかったことを緑に混ぜないため、赤にしている★")
+_m_prev = re.search(r"^DECLARED = \{(.*?)^\}", _p.stdout, re.S | re.M)
+if not _m_prev:
+    raise SystemExit("UNDETERMINED: 直前の版から DECLARED を読み取れなかった。読み口を直せ")
+_prev_declared = set(re.findall(r'^\s*"([A-Z0-9_]+)"\s*:', _m_prev.group(1), re.M))
+if len(_prev_declared) < 2:
+    raise SystemExit(f"直前の版の宣言を {len(_prev_declared)} 件しか読めなかった = 読み口が死んでいる")
+
+_demoted = sorted(_prev_declared & set(NOT_A_CONTRACT))
+if _demoted:
+    raise SystemExit(
+        "★契約から格下げされた定数がある★ "
+        "(直前の版では DECLARED に在り、今は NOT_A_CONTRACT に在る):\n  "
+        + "\n  ".join(_demoted)
+        + "\n  ⇒ 守られていた物の守りを外す一手である。黙って通さない。"
+          "\n  ⇒ 本当に契約でないなら、何故 前の版で契約だったのかを稿へ書き、"
+          "家老の裁を経てから移せ")
+
+undeclared = sorted(set(found) - declared - set(NOT_A_CONTRACT))
 if undeclared:
     raise SystemExit(
         "契約として宣言されていない数値の定数がある "

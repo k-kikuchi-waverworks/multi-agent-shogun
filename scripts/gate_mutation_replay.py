@@ -758,10 +758,12 @@ def bundle_style_tests(entries, repo: Path) -> list[tuple[str, str]]:
         eid = str(e.get("id", "?"))
         hit = None
         for line in str(e.get("test", "")).splitlines():
-            toks = line.split()
             after_runner = False
-            for tok_raw in toks:
+            prev = ""
+            for tok_raw in line.split():
                 tok = tok_raw.strip("\"'`,();")
+                prev_was_flag = prev.startswith("-") and "=" not in prev
+                prev = tok
                 if not tok:
                     continue
                 if Path(tok).name in _BUNDLE_RUNNERS:
@@ -769,10 +771,17 @@ def bundle_style_tests(entries, repo: Path) -> list[tuple[str, str]]:
                     continue
                 if not after_runner or tok.startswith("-"):
                     continue
+                # 旗の値 (--filter T-SW-00[12] 等) は path ではない = 束と読まぬ
+                if prev_was_flag:
+                    continue
+                # ★path らしく見えぬ綴りは束と読まぬ★ = 2026-07-27 23:0x に現に踏んだ偽陽性。
+                #   bats の --filter に渡す `T-SW-00[12]` を「glob ゆえ束」と読んでおった。
+                if "/" not in tok and not (repo / tok).is_dir():
+                    continue
                 if any(ch in tok for ch in "*?["):
                     hit = tok
                     break
-                if tok.endswith("/") or ("/" in tok and (repo / tok).is_dir()):
+                if tok.endswith("/") or (repo / tok).is_dir():
                     hit = tok
                     break
             if hit:
@@ -2572,6 +2581,22 @@ def selftest() -> int:
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
         # rc=2 はこの fixture の性質 (silent な本体は検知規則に見えぬ = T25 と同じ)。
         # ここで縛るのは rc ではなく ★束と読まぬこと★ である。
+        # T74c (負例・現に踏んだ偽陽性から): bats の --filter に渡す綴りを束と読まぬ。
+        #   実物 = MUT-1387-SW1 の `bats --filter T-SW-00[12] <本体>`。
+        #   [ を glob と読んで「束」と名乗っておった (2026-07-27 23:0x 実測)。
+        repo74c = _mk_git_repo(T / "t74c", {ctl: _COV_CONTROL_BODY,
+                                            "tests/silent_body.py": _COV_SILENT_PY})
+        reg74c = T / "t74creg.yaml"
+        _write_reg(reg74c, [_cov_entry("MUT-COV-CTL", [ctl]),
+                            {"id": "MUT-COV-FILTER", "desc": "filter は path でない",
+                             "paths": ["tests/silent_body.py"], "mutate": "true",
+                             "test": "bats --filter T-SW-00[12] tests/silent_body.py"}])
+        rc74c, out74c = _invoke(["--coverage", "--registry", str(reg74c),
+                                 "--repo-root", str(repo74c)])
+        check("T74c ★旗の値 (filter) を束と読まぬ★ (現に踏んだ偽陽性)",
+              "[束/同伴]" not in out74c and "走らせる entry = 0 件" in out74c,
+              f"rc={rc74c} / [束/同伴] が出た: {'[束/同伴]' in out74c}")
+
         check("T74b ★名指しは束と読まぬ (常に鳴る門にせぬ)★",
               "[束/同伴]" not in out and "走らせる entry = 0 件" in out,
               f"rc={rc} / [束/同伴] が出た: {'[束/同伴]' in out}"

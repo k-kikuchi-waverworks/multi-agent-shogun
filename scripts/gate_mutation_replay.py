@@ -1724,6 +1724,8 @@ BATS_TEST_DECL_RE = re.compile(r"""^@test\s+(?:"([^"]*)"|'([^']*)')\s*\{""")
 NEG_EXCLUDE_PARTS = ("test_helper/bats-assert", "test_helper/bats-support")
 NEG_PRUNE_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv"}
 NEG_GATE_SCRIPT = "scripts/gate_bats_negation.py"
+# ★己の路を己で名乗る★ (cmd_1407) = ID の綴りの規則が此処に在ることを出力から辿れる形。
+NEG_GATE_SELF = "scripts/gate_mutation_replay.py"
 
 
 def bats_files(repo: Path) -> list[Path]:
@@ -1784,6 +1786,53 @@ def bats_negative_assertion_tests(repo: Path):
         if cur and cur["spellings"]:
             found.append(cur)
     return found, len(files)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ★ID として読めなかった試験名を名乗る (cmd_1407)★
+#
+# ★何を塞ぐか★= 段2 は台帳の red_needle を ★試験 ID★ で逆引きする。而して ID の綴りの
+#   規則 (BATS_TEST_ID_RE) は ★どこにも書かれておらぬ★ = 頭に置く・大文字と数字のみ・
+#   ハイフンを1つ以上含む。ゆえに「T0」「A1」「(B-N3) …」「日本語で始まる名」は
+#   ★ID が1つも取れぬ★。書き手は「台帳へ登録した」と思うたまま、其の試験は
+#   ★誰も証しておらぬ側★ に残り続ける。
+# ★六号 05:5x の名乗りを一点 訂正して受ける★= 「台帳に何を書いても永久に落ちる」ではない。
+#   段2 は ID が無ければ ★名の全文★ でも照合する (下の witnessed 判定の第二項)。
+#   ゆえに逃げ道は在る = ★@test の名を一字も違えず red_needle へ書く★。
+#   ★然れど其の逃げ道も、規則と同じく どこにも書かれておらぬ★ = ゆえに門が名乗る。
+# ★落とさぬ★= 数と現物を刷るのみ。rc は一切 動かさぬ (家老 22:24 の枷)。
+# ★行頭を動かさぬ★= 既存の行の綴りと位置はそのまま。★末尾へ足すだけ★ である
+#   (本 file の自試験 T63/T64 が段2 の出力の綴りを掴んでおるゆえ = 読み手を先に数えた)。
+# ─────────────────────────────────────────────────────────────────────────────
+def idless_test_lines(tests: list[dict], repo: Path, needles: str,
+                      verbose: bool = False) -> list[str]:
+    """ID が取れなかった試験名を名指す行を返す (空 list = 全部 ID が取れた)。"""
+    idless = [t for t in tests if not t.get("id")]
+    if not idless:
+        return []
+    by_name = [t for t in idless if t.get("name") and t["name"] in needles]
+    lines = [
+        f"  ── ★ID として読めなかった試験名 = {len(idless)} 本★ "
+        f"(分母 {len(tests)} 本中・うち ★名の全文★ で台帳が証しておるのは {len(by_name)} 本)",
+        f"     規則 (どこにも書かれておらぬゆえ門が名乗る) = {NEG_GATE_SELF}: "
+        f"BATS_TEST_ID_RE = {BATS_TEST_ID_RE.pattern}",
+        "       = ★名の【頭】に置く・大文字と数字のみ・ハイフンを1つ以上含む★ (例 T-QRM-001)",
+        "       ⇒ 「T0」「A1」「(B-N3) …」「日本語で始まる名」は ID が1つも取れぬ",
+        "     ★落としておらぬ★ = 之は「壊れておる」ではなく ★台帳が ID では名指せぬ★ の報せである",
+        "     処方は二つ: (a) 名の頭を T-XXX-001 の形にする  "
+        "(b) red_needle へ ★@test の名を一字も違えず★ 書く (段2 は名の全文でも照合する)",
+    ]
+    shown = idless if verbose else idless[:5]
+    for t in shown:
+        try:
+            rel = Path(t["file"]).relative_to(repo)
+        except ValueError:
+            rel = Path(t["file"])
+        lines.append(f"       {rel}:{t['line']}: {str(t['name'])[:70]}")
+    if len(idless) > len(shown):
+        lines.append(f"       … 他 {len(idless) - len(shown)} 本 "
+                     "(全数は --negative-assertions --verbose)")
+    return lines
 
 
 def stage1_blade_shape(repo: Path):
@@ -1879,8 +1928,9 @@ def stage2_blade_witness(registry: Path, repo: Path, verbose: bool = False,
     head = (f"負の主張を持つ試験 ★{len(tests)} 本★ (分母) 中 "
             f"★台帳が刃を証しておるのは {len(witnessed)} 本★ / "
             f"★誰も証しておらぬ {len(unwitnessed)} 本★")
+    idless = idless_test_lines(tests, repo, needles, verbose=verbose)
     if not unwitnessed:
-        return 0, [f"[段2] OK: {head}", f"  {scope}"]
+        return 0, [f"[段2] OK: {head}", f"  {scope}"] + idless
     lines = [f"[段2] UNDETERMINED: {head}",
              "  ⇒ ★未登録 = 「壊せば落ちる」を誰も見ておらぬ負の主張★ "
              "(★壊れておるという意味ではない★)"]
@@ -1900,6 +1950,8 @@ def stage2_blade_witness(registry: Path, repo: Path, verbose: bool = False,
                  "変異を config/mutation_registry.yaml へ登録せよ "
                  "(red_needle に試験 ID を書けば本層が名指しを読む)")
     lines.append(f"  {scope}")
+    # ★rc は動かさぬ★= ID が読めぬことは「壊れておる」ではない。末尾へ足すのみ (cmd_1407)。
+    lines += idless
     return 2, lines
 
 
@@ -3157,6 +3209,44 @@ def selftest() -> int:
         rc, out = _invoke(["--sanity", "--registry", str(neg_reg_bare),
                            "--repo-root", str(r57)])
         expect("T64 sanity 触っておらぬ=対象なしで通す", 0, rc, "1 file も触っておらぬ", out)
+
+        # ─────────────────────────────────────────────────────────────────
+        # T67: ★門が【己が要求する鍵の綴り】を名乗る★ (cmd_1407・六号 05:5x の実測より)
+        #   機序 = 段2 の逆引きは BATS_TEST_ID_RE (頭・大文字数字・ハイフン必須) に依る。
+        #   ゆえに「T0」形の名では ID が1つも取れず、書き手は台帳へ登録した積もりで
+        #   ★誰も証しておらぬ側★ に残り続ける。★而して其の規則はどこにも書かれておらぬ★。
+        #   ⇒ 門に名乗らせる。★落とさぬ★ = rc を一切 動かさぬ (T67c が其れを縛る)。
+        # ─────────────────────────────────────────────────────────────────
+        NEG_NOID = ('@test "T0 does not emit the banner" {\n'
+                    '  if grep -q banner out.txt; then return 1; fi\n}\n')
+        r67 = _mk_git_repo(T / "neg67", {"tests/a.bats": NEG_NOID})
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r67)])
+        expect("T67a ★ID が読めぬ試験名を数えて名指す★", 2, rc,
+               "ID として読めなかった試験名 = 1 本", out)
+        expect("T67a2 ★規則そのものを出力に出す★ (docs に頼らぬ)", 2, rc,
+               "ハイフンを1つ以上含む", out)
+
+        # T67b (負の対照): ID が取れる名ばかりなら ★一言も申さぬ★ = 常に鳴る門にせぬ
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_bare),
+                           "--repo-root", str(r57)])
+        check("T67b ★ID が取れる名では黙る★",
+              "ID として読めなかった試験名" not in out,
+              "ID が取れる名ばかりの木で名指しが出た = 常に鳴る門になっておる")
+
+        # T67c: ★逃げ道が現に効く★ = 台帳へ ★名の全文★ を書けば証は立つ。
+        #   六号の「台帳に何を書いても永久に落ちる」を一点 訂正する試験である。
+        #   ★併せて rc=0 を縛る★= 名指しを足しても ★判定は動いておらぬ★ の証。
+        neg_reg_byname = T / "negreg3.yaml"
+        _write_reg(neg_reg_byname, [dict(_entry("MUT-NEG-3", "true"),
+                                         red_needle="not ok 1 T0 does not emit the banner")])
+        rc, out = _invoke(["--negative-assertions", "--registry", str(neg_reg_byname),
+                           "--repo-root", str(r67)])
+        expect("T67c ★名の全文で台帳が証せば緑★ (rc は名指しに動かされぬ)", 0, rc,
+               "台帳が刃を証しておるのは 1 本", out)
+        check("T67c2 ★緑でも名指しは消えぬ★ (ID で名指せぬ事実は残る)",
+              "名の全文★ で台帳が証しておるのは 1 本" in out,
+              "緑の時に名指しが落ちておる = 書き手は綴りの穴に気付けぬ")
 
         # ─────────────────────────────────────────────────────────────────
         # T65: ★写しは【同じ瞬間】の物でなければならぬ★ (cmd_1387・2026-07-27)

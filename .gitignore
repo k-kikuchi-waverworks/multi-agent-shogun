@@ -279,6 +279,14 @@ scripts/seo_qc.sh
 #  = 実測で確かめた (git status に ?? として現れた = 追跡されうる状態に在る)。
 !scripts/gate_bats_negation.py
 
+# cmd_1399 (2026-07-27): 再帰 grep が未追跡 file を黙って落とす件を、その場で名乗らせる番人。
+# ★据える前に git check-ignore -v を撃ち、`.gitignore:7:*` に弾かれておることを実測してから
+#  此処へ書いた★ (本日 同型の 13 度目)。
+#   ★此度は皮肉が一段 深い★= 本 file が捕えようとしておる病は「未追跡ゆえ探索から消える」であり、
+#   ★書き忘れれば、其の病を捕える道具自身が未追跡のまま消える★ =
+#   .claude/settings.json の hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる。
+!scripts/grep_scope_warn.py
+
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)
 !scripts/idle_revive_scan.py

@@ -146,7 +146,59 @@ else
     rc9=2; out9="[gate-2 engine] UNDETERMINED: engine 台帳が見えぬ ($ENGINE_REG) = path 違い / disk 喪失の疑い。検分できておらぬは緑ではない"
     rc10=2; out10="[gate-2 engine coverage] UNDETERMINED: 同上"
 fi
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out6b" "$out7" "$out8" "$out9" "$out10"
+# ── ★aituber-project-ml 台帳延長 (cmd_1408)★ ────────────────────────────────
+# 木の点呼が 07-27 06:30 に掘り出した4本目 = ★牙 1 件を持つのに どの門も見ておらぬ木★。
+# ★牙の齢は【4 時間半】であった★ (三号実測) = 本朝 02:00 の backup sync commit で初めて
+#   追跡下へ入り、其の翌朝の点呼が拾うた ⇒ ★門が現に働いた証であって借財ではない★。
+# ★台帳は shogun 側に置く (web と同じ流儀)★ = ml は Windows 正本 (memory
+#   project_ml_windows_only_canonical) ゆえ ★ml へは 1 file も置かぬ★ (家老の裁定)。
+# ★「WSL からは撃てぬ」は実測で否とした★ = 本牙は GPU も 9100/9101 も librosa も要さぬ
+#   純 python の --selfcheck であり、WSL から変異を当てて赤 (T34) を 5 秒で見た・★F: へ 0 byte★。
+ML_ROOT="${GATE_ML_ROOT:-/mnt/f/aituber-project-ml}"
+ML_ROOT="$(readlink -f "$ML_ROOT" 2>/dev/null || echo "$ML_ROOT")"
+ML_REG="$SCRIPT_DIR/config/mutation_registry.ml.yaml"
+echo "[gate_nightly] ml 台帳 = $ML_REG (repo-root=$ML_ROOT)"
+attempted "$ML_ROOT"
+if [ -f "$ML_REG" ] && [ -d "$ML_ROOT" ]; then
+    out11="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --registry "$ML_REG" --repo-root "$ML_ROOT" 2>&1)"; rc11=$?
+    out12="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --coverage --registry "$ML_REG" --repo-root "$ML_ROOT" 2>&1)"; rc12=$?
+    watched "$ML_ROOT"
+else
+    # ★F: が見えぬ朝は【緑にせぬ】★ = ml は外付け disk 上ゆえ、見えぬ事は現に起こりうる。
+    rc11=2; out11="[gate-2 ml] UNDETERMINED: ml 台帳 ($ML_REG) か repo ($ML_ROOT) が見えぬ = path 違い / disk 未 mount の疑い。検分できておらぬは緑ではない"
+    rc12=2; out12="[gate-2 ml coverage] UNDETERMINED: 同上"
+fi
+# ── ★ml の登録検知だけ【理由を名指した免除】を当てる (cmd_1408・六号 2026-07-27 09:11 実測)★ ──
+# ★免除の理由★= 鳴っておるのは ml の側の欠けではなく ★runner の内側の二つの物差しが
+#   本 repo で互いに素★ ゆえ:
+#     ・候補側 (D1/D2/D3)   = selftest 印 ★かつ★ 変異 keyword を要す ⇒ p7 に当たり p5 に当たらぬ
+#     ・台帳側 (_TEST_BODY_RE) = def selftest / --selftest / def test_ / @test ⇒ p5 に当たり
+#       ★p7 には当たらぬ★ (綴りが def body_selftest ゆえ)
+#   ⇒ 対照 (p7) 以外に規則が見える物が 1 件も残らず「検出規則が死んでおる疑い」へ escalate する。
+#   ★規則は現に生きておる★ = 同じ走行で対照検分 (規則が p7 を捕える事) は通っておる。
+# ★何ゆえ門へ入れぬか★= 入れれば ★配線した其の日から毎朝 UNDETERMINED で鳴り、
+#   而も ml 側では誰も消せぬ★ = ★毎朝鳴って誰も消せぬ札 (免除より悪い形)★ になる
+#   (app replay を 0 件の間 撃たぬのと同じ筋・上の 81-99 行)。
+# ★★免除の射程を最小に切る★★= ★此の一つの理由 (対照以外 0 件の escalation) の時だけ★
+#   門を落とさぬ。★FAIL (rc=1) も、別の理由の UNDETERMINED も、今までどおり門を落とす★
+#   = 「ml coverage は当分 黙らせる」ではない。
+# ★期限つき★= until を過ぎれば免除は自動で失効し、其の朝から門を落とす (黙って延びる道は無い)。
+# ★処方の手番は runner の所有者 (足軽三号)★ = 二つの物差しを揃えれば免除ごと消える。
+ML_COV_WAIVER_UNTIL="${GATE_ML_COV_WAIVER_UNTIL:-2026-08-10}"
+ML_COV_WAIVER_SIG='検知規則が陽性対照'
+ml_cov_gate="$rc12"
+ml_cov_waived=0
+if [ "$rc12" -eq 2 ] && printf '%s' "$out12" | grep -qF "$ML_COV_WAIVER_SIG"; then
+    if [[ "$(date '+%Y-%m-%d')" < "$ML_COV_WAIVER_UNTIL" ]]; then
+        ml_cov_gate=0; ml_cov_waived=1
+        out12="$out12
+[gate-2 ml coverage] ★免除 (cmd_1408)★: 上の UNDETERMINED は ★runner の二つの物差しが本 repo で互いに素★ゆえ鳴っておる (規則は生きており対照検分は通っておる)。★門は落とさぬが緑でもない = 札は UNDETERMINED のまま残す★。until ${ML_COV_WAIVER_UNTIL}・処方の手番=足軽三号 (runner 所有者)・★此の理由の時だけ免除★"
+    else
+        out12="$out12
+[gate-2 ml coverage] ★免除の期限が切れた (until ${ML_COV_WAIVER_UNTIL})★: 二つの物差しが未だ揃うておらぬ = ★門を落とす★ (黙って延ばす道は無い)"
+    fi
+fi
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out6b" "$out7" "$out8" "$out9" "$out10" "$out11" "$out12"
 
 # hook 消失検知: pre-commit shim は .git/hooks 住まいゆえ環境再構築で黙って消える
 # (cmd_1342 で六号が指摘した弱点)。消えておれば commit 時の関所が不在 = 緑ではない。
@@ -251,7 +303,7 @@ if [ "$CENSUS_WIRING" = "1" ]; then
     # ★遷移は replay の【出力を読む】だけ = 試験を一度も走らせぬゆえ増える負担は 0 秒★
     #   (上で既に撃った 5 冊の replay 出力を其のまま渡す = 二度撃たぬ)。
     DRIFT_LOG="$(mktemp -t gate_replay_verdicts.XXXXXX)"
-    printf '%s\n%s\n%s\n%s\n%s\n' "$out2" "$out4" "$out6b" "$out7" "$out9" > "$DRIFT_LOG"
+    printf '%s\n%s\n%s\n%s\n%s\n%s\n' "$out2" "$out4" "$out6b" "$out7" "$out9" "$out11" > "$DRIFT_LOG"
     # ★簿の在処を差し替えられる口を1つ残す★= ★配線を検める者が【本番の簿を汚さずに】撃てるため★。
     #   ★既定は本番の簿 (queue/state/mutation_verdict_ledger.yaml)★ = 差し替えは明示した時のみ。
     drift_args=(--record "$DRIFT_LOG")
@@ -267,6 +319,16 @@ srt() { if [ "$CENSUS_WIRING" = "1" ] && [ "$CENSUS_STRICT" = "1" ]; then echo "
 regcensus_gate="$(srt "$regcensus_rc")"; fangdom_gate="$(srt "$fangdom_rc")"; drift_gate="$(srt "$drift_rc")"
 
 verdict() { case "$1" in 0) echo PASS;; 1) echo FAIL;; *) echo UNDETERMINED;; esac; }
+# ★免除した札を【緑に見せぬ】★= 門は落とさぬが、名乗りは UNDETERMINED のまま残し
+#   「免除ゆえ落としておらぬ」と其の場で申す (cmd_1408・六号)。
+#   ★之が無ければ ml 登録検知は PASS と刷られ、免除が緑に化ける★ (本朝ずっと狩ってきた形)。
+mlcov() {
+    if [ "$ml_cov_waived" = "1" ]; then
+        echo "$(verdict "$rc12")（★免除=門を落としておらぬ・until ${ML_COV_WAIVER_UNTIL}・手番=足軽三号★）"
+    else
+        verdict "$rc12"
+    fi
+}
 
 # ★切り詰めたなら【切り詰めたと言え】★ (cmd_1367 N1・軍師一号の差し戻し)
 #   本 script は所見を 3 箇所で head により畳んでおるが、いずれも ★入り切らなんだ分を
@@ -286,7 +348,7 @@ fold_lines() {
     return 0
 }
 
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$regcensus_gate" -ne 0 ] || [ "$fangdom_gate" -ne 0 ] || [ "$drift_gate" -ne 0 ]; then
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$rc11" -ne 0 ] || [ "$ml_cov_gate" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$regcensus_gate" -ne 0 ] || [ "$fangdom_gate" -ne 0 ] || [ "$drift_gate" -ne 0 ]; then
     # 警告は1行に畳む (inbox message の YAML 安全のため改行・コロン+空白を避ける)
     # 行連結は awk で行う (tr '\n' '・' は byte 置換ゆえ多byte文字の先頭1byteのみを埋め
     # 不正 UTF-8 を inbox へ混入させる — 2026-07-26 実測で発見した既存バグの是正)
@@ -297,7 +359,7 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     #   従前は gate-1/2 と backend/app の out しか畳んでおらず、★web/engine が非 PASS でも
     #   家老の警告には「UNDETERMINED」の verdict だけが出て【何が起きたか】が載らなんだ★
     #   (cmd_1367 N1 / cmd_1355b で二度直した「名指しできぬ警告」の同族。三度目ゆえ族として断つ)。
-    detail="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out7" "$out8" "$out9" "$out10" | grep -E '\[(IGNORED|UNTRACKED|MISSING|COUNT|EMPTY-DIR|UNREGISTERED|WAIVER-EXPIRED)\]|★NG★|UNDETERMINED|陽性対照' | grep -vE '^\s*ok\s' | fold_lines 8)"
+    detail="$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$out1" "$out2" "$out3" "$out4" "$out5" "$out6" "$out7" "$out8" "$out9" "$out10" "$out11" "$out12" | grep -E '\[(IGNORED|UNTRACKED|MISSING|COUNT|EMPTY-DIR|UNREGISTERED|WAIVER-EXPIRED)\]|★NG★|UNDETERMINED|陽性対照' | grep -vE '^\s*ok\s' | fold_lines 8)"
     hooknote=""
     [ "$hook_rc" -ne 0 ] && hooknote="★pre-commit shim不在=install_gate_hooks.sh で再据付せよ★ "
     wirenote=""
@@ -333,12 +395,12 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     if [ "$CENSUS_WIRING" = "1" ] && { [ "$regcensus_rc" -ne 0 ] || [ "$fangdom_rc" -ne 0 ] || [ "$drift_rc" -ne 0 ]; }; then
         census3note="★三本の口=台帳の点呼$(verdict "$regcensus_rc")／牙の域$(verdict "$fangdom_rc")／牙の遷移$(verdict "$drift_rc")$([ "$CENSUS_STRICT" = "1" ] && echo "（門へ入れておる）" || echo "（★報告のみ=本札は門を落としておらぬ★）")★ "
     fi
-    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/engine台帳(cmd_1376)=$(verdict "$rc9")/engine登録検知=$(verdict "$rc10")/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")/殿への通知路(cmd_1381)=$(verdict "$ntfy_rc")。${hooknote}${wirenote}${undistnote}${censusnote}${ntfynote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
+    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/engine台帳(cmd_1376)=$(verdict "$rc9")/engine登録検知=$(verdict "$rc10")/ml台帳(cmd_1408)=$(verdict "$rc11")/ml登録検知=$(mlcov)/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")/殿への通知路(cmd_1381)=$(verdict "$ntfy_rc")。${hooknote}${wirenote}${undistnote}${censusnote}${ntfynote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2
 fi
 
-echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") engine台帳=$(verdict "$rc9") engine登録検知=$(verdict "$rc10") hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") 通知路=$(verdict "$ntfy_rc") ──"
-if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$rc9" -eq 1 ] || [ "$rc10" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ] || [ "$ntfy_rc" -eq 1 ]; then exit 1; fi
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ]; then exit 2; fi
+echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") engine台帳=$(verdict "$rc9") engine登録検知=$(verdict "$rc10") ml台帳=$(verdict "$rc11") ml登録検知=$(mlcov) hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") 通知路=$(verdict "$ntfy_rc") ──"
+if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$rc9" -eq 1 ] || [ "$rc10" -eq 1 ] || [ "$rc11" -eq 1 ] || [ "$ml_cov_gate" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ] || [ "$ntfy_rc" -eq 1 ]; then exit 1; fi
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$rc11" -ne 0 ] || [ "$ml_cov_gate" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ]; then exit 2; fi
 exit 0

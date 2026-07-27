@@ -98,6 +98,14 @@ plans/**/README.md
 # cmd_1374 A-1 (2026-07-26): ★跨ぎ台帳★ (対象 repo が /mnt/c/Users 配下ゆえ台帳を shogun 側に置く形)。
 #   ★名指しを忘れると「手元では動くが clone には無い」で静かに落ちる★ = cmd_1367 の族ゆえ必ず書く。
 !config/mutation_registry.web.yaml
+# cmd_1408 (2026-07-27): ★跨ぎ台帳 その二★ = aituber-project-ml (F: の Windows 正本・ml へは 0 file)。
+#   ★六号 実測 09:0x★= 名指しを足すまで `git check-ignore` が .gitignore:7 の `*` で弾いておった
+#   = ★台帳を書いても追跡下へ入らず、fresh clone では毎朝 UNDETERMINED になる形★。
+#   ★併せて名乗る★= ★配布の門 (gate_undistributed_tooling.sh) は此の抜けを捕えぬ★
+#   = 使い捨ての clone で両側を撃って実測 (台帳を配らぬ木でも [PASS] rc=0・参照抽出の hit 0 件)
+#   = ★台帳 yaml は其の門の網の外に在る (web の台帳も同じく外)★ ⇒ 捕えるのは gate_nightly の
+#     `-f "$ML_REG"` の枝のみ (見えねば UNDETERMINED) ⇒ ★ゆえに此の 1 行を落とすな★。
+!config/mutation_registry.ml.yaml
 !config/artifact_manifests/
 !config/artifact_manifests/*.manifest
 

@@ -34,6 +34,18 @@
                                          # 既定は本 file 自身ゆえ、本 file を持たぬ repo の台帳
                                          # (cmd_1355 backend 延長) では必須になる
 
+★挿入点の掟 (cmd_1409 — 「登録した」と「登録されておる」は同じ物ではない)★:
+  ★entry は【mutations: list の末尾】へ挿せ = coverage_waivers: が在る冊では其の直前である★。
+  ★file の末尾へ継ぐな★ — 五号 08:15 実測: shogun 台帳の末尾へ継いだ entry は mutations: の
+  下に入らず ★最後の top-level key の値として黙って呑まれた★ (parse は通り・道具も何も申さず・
+  ★mutations の総数も動かぬ★)。★「正しく壊れた」ゆえ書いた当人にも見えぬ★。
+  ★冊の形で結果が変わる (六号 09:34 実測)★= mutations: が末尾の冊 (web/ml/engine) では通り、
+  末尾でない冊 (shogun/backend/app) では呑まれる ⇒ ★人の記憶に置いてはならぬ★。
+  ⇒ ★★挿した直後に機械へ数えさせよ★★:
+       python3 scripts/gate_registry_append.py --count config/mutation_registry.yaml
+     (pre-commit の gate-4 が同じ検分を自動で撃つ。呑まれは ★翌朝の replay にも見えぬ★ =
+      台帳に載っておらぬ牙は撃たれもせぬゆえ、commit の其の瞬間に名指す以外に口が無い)
+
 判定 (三値 — 0件/未判定を緑にせぬ):
   PASS         = baseline 緑 かつ 変異後に赤 (契約どおり・red_needle があれば名指しまで確認)
   FAIL         = ★変異後も緑 = 変異が静かに無効化された★ (名指しで報告) /
@@ -559,20 +571,34 @@ def ls_files(repo: Path):
 
 
 def registry_named_test_bodies(entries, repo: Path):
-    """台帳が名指しする tracked file のうち【test 本体】を {relpath: [entry id]} で返す。
+    """台帳が名指しする tracked file のうち【test 本体】を返す。
+
+    返り = ({relpath: {"ids": [entry id], "run": bool}}, error)
 
     ★綴りを一切見ぬ★ = paths / test / mutate の中の path らしき文字列を拾い、
     追跡下・COVERAGE_EXTS・test 本体の印を持つものだけを残す。
+
+    ★★run = 【台帳が現に走らせる/壊す物】か★★ (cmd_1408・三号 2026-07-27)
+      ・True  = test / mutate に現れる = ★赤くなる側の本体★ (entry が之を走らせて赤を見る)
+      ・False = ★paths にしか現れぬ【同伴】★ = 本体が import する依存等、
+        ★replay が写す為だけに並んでおる物★ (ml の cmd1349_p5_body_stats.py が現物)。
+    ★何ゆえ別けるか★= ★視野計の分母は「規則が見付ける【べき】変異試験」でなければならぬ★。
+      同伴を分母へ入れると、★台帳が走らせてもおらぬ file を「規則の盲」として数える★ =
+      ★★問いの違う二つの計器を同じ問いだと思う形★★ (家老 22:35 通達①)。
+      ★実測 (2026-07-27 09:32)★= 6 冊の盲 17 件は ★悉く run=True★ であり、
+      ★run=False は ml の 1 件のみ★ ⇒ ★分母を run へ絞っても盲は 1 件も失われぬ★
+      (失うのは「台帳が走らせておらぬ同伴を盲と呼んでおった」誤りだけである)。
     """
     tracked, err = ls_files(repo)
     if err:
         return None, err
     tset = set(tracked)
-    out: dict[str, list[str]] = {}
+    out: dict[str, dict] = {}
     for e in entries:
         eid = str(e.get("id", "?"))
-        blob = " ".join([str(e.get("test", "")), str(e.get("mutate", ""))]
-                        + [str(p) for p in (e.get("paths") or [])])
+        run_blob = " ".join([str(e.get("test", "")), str(e.get("mutate", ""))])
+        blob = " ".join([run_blob] + [str(p) for p in (e.get("paths") or [])])
+        run_rels = {m.group(0).lstrip("./") for m in _PATHLIKE_RE.finditer(run_blob)}
         for m in _PATHLIKE_RE.finditer(blob):
             rel = m.group(0).lstrip("./")
             if rel not in tset or Path(rel).suffix not in COVERAGE_EXTS:
@@ -585,9 +611,11 @@ def registry_named_test_bodies(entries, repo: Path):
                     continue
             except OSError as ex:
                 return None, f"読めぬ追跡 file: {rel} ({ex}) — 黙って飛ばさぬ (沈黙禁)"
-            out.setdefault(rel, [])
-            if eid not in out[rel]:
-                out[rel].append(eid)
+            rec = out.setdefault(rel, {"ids": [], "run": False})
+            if eid not in rec["ids"]:
+                rec["ids"].append(eid)
+            if rel in run_rels:
+                rec["run"] = True
     return out, None
 
 
@@ -1318,16 +1346,26 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
     if nerr:
         print(f"[gate-2 coverage] UNDETERMINED: {nerr}")
         return 2
-    blind = {rel: ids for rel, ids in named.items() if rel not in cands}
+    blind = {rel: rec["ids"] for rel, rec in named.items() if rel not in cands}
     for rel in sorted(blind):
+        # ★同伴は【消さぬ】= 名を出したまま、役を名乗らせる★ (黙って分母から落とすと
+        #   「見えておらぬ物が減った」と読まれる = 数を良くする動きになる)
+        tail = ("" if named[rel]["run"] else
+                " ★但し之は【同伴】である★ = paths にしか現れず、台帳が走らせてはおらぬ"
+                " (本体が import する依存等) ゆえ ★視野の分母には入れぬ★")
         print(f"  注   [RULE-BLIND]    {rel}: 台帳 {'/'.join(blind[rel])} が名指す変異試験だが"
               " ★検知規則 D1/D2/D3 には見えておらぬ★ (台帳が在るゆえ守られてはおる。"
-              "同じ形の【未登録】は検知できぬ = 検知規則の視野の外)")
+              "同じ形の【未登録】は検知できぬ = 検知規則の視野の外)" + tail)
     n_named, n_seen = len(named), len(named) - len(blind)
     # ★物差しの長さを先に言う★: 対照は必ず当たる fixture ゆえ分母から除く。
     #   除いた残りが 0 件なら【recall を測れておらぬ】= 「全部見えておる」ではない
     #   (分母0と全員健全を区別する — cmd_1364 の流儀を検知器自身へ当てたもの)
-    non_ctl = sorted(set(named) - {control})
+    # ★★併せて【同伴】も分母から除く (cmd_1408・三号)★★ =
+    #   ★台帳が走らせておらぬ file を「規則が見落とした」と数えるのは筋が違う★。
+    #   ★之を入れておった為、ml (非対照が同伴 1 件のみ) で
+    #    「検出規則が死んでおる疑い」へ誤って escalate しておった★ = 規則は現に生きておる。
+    run_named = {rel for rel, rec in named.items() if rec["run"]}
+    non_ctl = sorted(run_named - {control})
     seen_non_ctl = [rel for rel in non_ctl if rel in cands]
     if not non_ctl:
         vision = ("★視野は測れておらぬ★ = 台帳が名指す test 本体が対照のみ"
@@ -1935,8 +1973,17 @@ _COV_DECORATED_PY = (
 _COV_SILENT_PY = "def test_plain_contract():\n    assert True\n"
 
 
-def _cov_entry(eid: str, paths: list[str]):
-    return {"id": eid, "desc": eid, "paths": paths, "mutate": "true", "test": "true"}
+def _cov_entry(eid: str, paths: list[str], companion_only: bool = False):
+    """coverage 検分用の entry。
+
+    ★test が path を名指す★= ★実物の台帳が悉くそう書かれておる★ (2026-07-27 実測 =
+      6 冊の台帳が名指す test 本体 60 件は ★1 件も欠けず test/mutate に現れる★)。
+    ★companion_only=True★ = ★paths にしか現れぬ【同伴】★ を作る =
+      ★ml の cmd1349_p5_body_stats.py と同じ形★ (本体が import する依存)。
+    """
+    named = "" if companion_only else " " + " ".join(paths)
+    return {"id": eid, "desc": eid, "paths": paths,
+            "mutate": "true", "test": "true" + named}
 
 
 def _invoke(args: list[str], today: str | None = None) -> tuple[int, str]:
@@ -2221,6 +2268,25 @@ def selftest() -> int:
         _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl])])
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
         expect("T26 物差し不足=測れておらぬと明言 (緑を装わぬ)", 0, rc, "視野は測れておらぬ", out)
+
+        # ── ★T73 (cmd_1408・三号 2026-07-27)★ = ★【同伴】を規則の盲と数えるな★ ────────
+        #   ★実事故★= ml を門の下へ入れた朝、登録検知が rc=2 で
+        #   「検出規則が死んでおる疑い」を出した。★然るに規則は現に生きておった★ =
+        #   非対照の唯一の要素が ★cmd1349_p5_body_stats.py = p7 が import する同伴★ であり、
+        #   ★台帳は之を走らせてはおらぬ★ (test は p7 の --selfcheck を撃つ)。
+        #   ⇒ ★走らせてもおらぬ file を「規則が見落とした」と数えて規則の死を疑うておった★。
+        #   ★T25 との対★= T25 は【走らせる物】が見えぬ時に鳴る (規則の死の疑いは正しい)。
+        #   本試験は【同伴】しか無い時に ★鳴らぬ★ ことを縛る = 誤検知の側から物差しを固める。
+        repo = _mk_git_repo(T / "t73", {ctl: _COV_CONTROL_BODY,
+                                        "tests/silent_body.py": _COV_SILENT_PY})
+        reg = T / "t73reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-COMPANION", ["tests/silent_body.py"],
+                                    companion_only=True)])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T73 ★同伴のみ=規則の死を疑わぬ★ (誤 escalate せぬ)", 0, rc,
+               "視野は測れておらぬ", out)
+        expect("T73b ★同伴は消さず役を名乗る★ (黙って分母から落とさぬ)", 0, rc, "★但し之は【同伴】である★", out)
 
         # T22: 実在 ID の言及は幽霊扱いせぬ (誤検知抑止の負例)
         repo = _mk_git_repo(T / "t22", {ctl: _COV_CONTROL_BODY,

@@ -12,6 +12,11 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/shell_expansion_guard.py\"",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/process_signal_guard.py\"",
+            "timeout": 10
           }
         ]
       }
@@ -61,8 +66,6 @@
       "Bash(rm -rf ~*)",
       "Bash(sudo *)",
       "Bash(su *)",
-      "Bash(kill *)",
-      "Bash(killall *)",
       "Bash(git push --force*)",
       "Bash(git push -f *)",
       "Bash(git reset --hard*)",

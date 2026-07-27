@@ -169,6 +169,13 @@ scripts/seo_qc.sh
 # cmd_1255 (2026-07-11): 台帳parse自己検証gate (ledger_guard watcher + 手動検証CLI)
 !scripts/ledger_guard.sh
 !scripts/ledger_validate.py
+# cmd_1339 (2026-07-26): ledger_guard の旧 instance を無停止で入れ替える道具 (足軽一号)。
+# cmd_1436 (2026-07-28): .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
+#   ★配らぬと死ぬのは「呼び出し」ではなく「案内」である★ =
+#   process_signal_guard.py の拒みの便が本 script を ★殺す力を構造化した先例★ として名指しており、
+#   拒まれた者は其の便を読んで本 script を開きに行く。配らねば fresh clone では其の path が存在せぬ。
+#   ★而も静かに存在せぬ★ = 呼び出しではないゆえ何も落ちず、案内だけが宛先を失う。
+!scripts/legacy_guard_swap.sh
 # cmd_1333 (2026-07-25): cmd採番の排他払い出しgate (番号衝突根絶)
 !scripts/cmd_id_alloc.sh
 # cmd_1352 (2026-07-26): 沈黙する落とし穴gate (gate-1=commit捕捉 / gate-2=変異台帳再走。

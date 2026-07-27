@@ -198,6 +198,10 @@ scripts/seo_qc.sh
 #   ⇒ 割る commit と同じ commit で次の 2 行 (web 台帳を割るなら 4 行) を足すこと:
 #     !config/mutation_registry.d/  /  !config/mutation_registry.d/*.yaml
 !scripts/ledger_id_census.py
+# cmd_1330 (2026-07-27): 本日できた作法 (ps 由来の時刻に測定時刻を併記する等) を検める道具。
+# 判定で落とさず名指すだけの道具なので、配られなければ存在価値がない。
+# .gitignore:7 の * に黙って弾かれていた (git check-ignore で実測・17:38)。同型はこれで 12 度目。
+!scripts/customs_lint.py
 # cmd_1363 (2026-07-26): 「道具へ渡す前に shell が食う」関所 (PreToolUse hook)。
 # ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
 #   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。

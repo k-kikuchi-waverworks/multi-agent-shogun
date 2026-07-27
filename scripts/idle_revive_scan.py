@@ -224,9 +224,26 @@ UPSTREAM_FAILURE_PATTERNS = (
     # ★週次上限で沈黙した agent は番人の目に【ただの固着】と映り /clear が撃たれる★
     # (cmd_1355 の実害と同型)。★3 体以上が同時に当たれば停電型 quorum が救うが、
     #  1〜2 体だけが当たった時は救いが無い★ — 8 体が別々に枠を食う今夜は現に起こりうる。
-    # ★推測ではない★= 一次資料 2 本 (dashboard.md:462 = 家老が 9 pane 走査で書き写した行 /
-    # queue/reports/ashigaru4_report.yaml:2778)。★但し実 pane の byte 凍結ではない★ —
-    # 次に其の banner を見た者は capture-pane で fixture へ凍結せよ (session limit と同じ形へ)。
+    # 根拠 (推測ではない)。ただし根拠の強さは下のとおりで、実際より高く書かない。
+    #   残っている物 = commit 40cdde0 "fix(cmd_1401): 週次上限の族が網に無かった"。
+    #     この commit が pattern と、下の selftest U10 の banner 文字列そのものを入れた。
+    #     文字列は selftest 側に literal で焼いてあるので、git に残り続ける。
+    #   残っていない物 = 最初にこの banner を見て報告した2つの記録
+    #     (家老が9 pane を見て書き写した dashboard の行 / 足軽四号の report YAML)。
+    #     どちらも .gitignore で追跡外なので、上書きされた時点で git からも復元できない。
+    #     2026-07-28 に確認: この literal を含む commit は 40cdde0 の1本だけで、
+    #     dashboard と report YAML の側には1つも無い。
+    #   ⇒ 元の観測そのものは、もう誰も読み返せない。ここは弱い側として名乗っておく。
+    #
+    # 直した経緯 (cmd_1450)。元は上の2つを、ファイル名のうしろにコロンと行番号を付けた形で
+    # 指していた。指し先はどちらも上書きされる帳面で、report YAML は今 142行しかない
+    # (指していた行番号は 2778 で、とうに範囲外になっていた)。
+    # 行番号を直しても、次の上書きでまた壊れる。壊れるのは行番号ではなく指す先の性質による。
+    # ⇒ 行番号を捨て、git に残る commit を指す形へ替えた。
+    #
+    # 本物の pane を byte 単位で凍らせた物は今も無い。
+    # 次にこの banner を見た者は capture-pane で fixture へ凍結すること
+    # (tests/fixtures/upstream_session_limit_pane.txt と同じ形)。
     # ★"weekly limit" の 2 語だけを採る★= 折返しを跨がぬ短句の掟どおり。長い方
     # ("You've hit your weekly limit") は此の短句に含まれるゆえ二重には置かぬ。
     "weekly limit",             # You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)
@@ -1445,7 +1462,9 @@ def selftest_upstream():
     # ── U10: ★週次上限の族 (cmd_1401)★ ──
     # ★2026-07-27 01:5x の実測★= 此の literal は網を【一つも】通らず None が返り、
     # ★週次上限で沈黙した agent へ /clear が撃たれる形★であった (cmd_1355 の実害と同型)。
-    # 一次資料 = dashboard.md:462 / queue/reports/ashigaru4_report.yaml:2778 (★pane の凍結ではない★)。
+    # 根拠 = commit 40cdde0 (cmd_1401)。下の banner 文字列がその commit で入った物で、
+    # git に残る。最初の観測を書いた dashboard と report YAML は追跡外なので復元できない
+    # (詳しくは UPSTREAM_FAILURE_PATTERNS の "weekly limit" の註)。本物の pane の凍結ではない。
     weekly = "You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)"
     # U10a: ★抑止が効くこと★ = 本任の芯 (期限の精度は二の次)。
     if detect_upstream_failure(weekly) is None:

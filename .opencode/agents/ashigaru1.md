@@ -547,7 +547,8 @@ Lord: command → Shogun: write YAML → inbox_write → Karo: decompose → inb
 Status is defined per YAML file type. **Keep it minimal. Simple is best.**
 
 Fixed status set (do not add casually):
-- `queue/shogun_to_karo.yaml`: `pending`, `in_progress`, `done`, `cancelled`
+- `queue/shogun_to_karo.yaml`: `pending`, `in_progress`, `deferred`, `done`,
+  `superseded`, `archived`, `dispatched`, `cancelled` (8 values — schema v2 vocabulary)
 - `queue/tasks/ashigaruN.yaml`: `assigned`, `blocked`, `done`, `failed`
 - `queue/tasks/pending.yaml`: `pending_blocked`
 - `queue/ntfy_inbox.yaml`: `pending`, `processed`
@@ -578,12 +579,25 @@ Meanings and allowed/forbidden actions (short):
   - Allowed: staying in the active file (it is not finished)
   - Forbidden: treating it as `done` — it has not been validated
 
+- `dispatched`: handed to an executor and being worked (non-terminal, like `in_progress`)
+  - Allowed: staying in the active file until the work lands
+  - Forbidden: leaving it here after the work lands — move it to a terminal status
+
+- `superseded`: replaced by a later cmd; this one will not be finished as written
+  - Allowed: read-only (history). Terminal.
+  - Forbidden: continuing work under this cmd (the successor cmd owns it)
+
+- `archived`: settled and retired as a record
+  - Allowed: read-only (history). Terminal.
+  - Forbidden: reopening (use a new cmd instead)
+
 ### Archive Rule
 
 The active queue file (`queue/shogun_to_karo.yaml`) must only contain
-`pending`, `in_progress` and `deferred` entries. All other statuses are archived.
+non-terminal entries: `pending`, `in_progress`, `deferred`, `dispatched`.
+All terminal statuses are archived.
 
-When a cmd reaches a terminal status (`done`, `cancelled`),
+When a cmd reaches a terminal status (`done`, `superseded`, `cancelled`, `archived`),
 Karo must move the entire YAML entry to `queue/archive/shogun_to_karo_<timestamp>.yaml`
 (the generational archive that actually exists — 16 generations as of 2026-07-28 07:24).
 `queue/shogun_to_karo_archive.yaml` (singular, at the queue root) has never existed.
@@ -593,18 +607,26 @@ Karo must move the entire YAML entry to `queue/archive/shogun_to_karo_<timestamp
 | pending | YES | Keep |
 | in_progress | YES | Keep |
 | deferred | YES | Keep (not finished — it resumes in place) |
+| dispatched | YES | Keep (handed out, still being worked) |
 | done | NO | Move to archive |
+| superseded | NO | Move to archive |
 | cancelled | NO | Move to archive |
+| archived | NO | Move to archive |
 
 **Canonical statuses (exhaustive list — do NOT invent others)**:
 - `pending` — not started
 - `in_progress` — acknowledged, being worked
+- `dispatched` — handed to an executor, being worked
 - `deferred` — postponed, may resume later
-- `done` — complete (covers former "completed", "superseded", "active")
+- `done` — complete (covers former "completed", "active")
+- `superseded` — replaced by a later cmd
 - `cancelled` — intentionally stopped, will not resume
+- `archived` — settled and retired as a record
 
-Any other status value (e.g., `completed`, `active`, `superseded`) is
-forbidden. If found during archive, normalize to the canonical set above.
+This is the same 8-value vocabulary as the slim entry schema v2 in the Karo
+instructions, and the same set the allocator script accepts. Any other status
+value (e.g., `completed`, `active`, `resolved`) is forbidden. If found during
+archive, normalize to the canonical set above.
 
 **Karo rule (ack fast)**:
 - The moment Karo starts processing a cmd (after reading it), update that cmd status:

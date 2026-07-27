@@ -3723,6 +3723,75 @@ mutations:
     red_needle: not ok 1 T-FB-001
     timeout: 300
 
+  - id: MUT-1387-QR1
+    desc: 引用の印（ref 前置き）の見分けを外す変異。引用の言及が「此の木の申告」として幽霊に数え直され、他の木の実例を引いた註 13 件が毎朝の数へ戻る
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+      - scripts/gate_mutation_replay.py
+      - tests/unit/test_registry_quote_ref.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'if line[max(0, st - len(QUOTE_PREFIX)):st] == QUOTE_PREFIX:'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'if False:', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_quote_ref.bats --filter "T-QR-001"
+    expect: nonzero
+    red_needle: not ok 1 T-QR-001
+    timeout: 300
+
+  - id: MUT-1387-QR2
+    desc: 引用を「黙って」除く変異。件数を表示しなくなる。黙って捨てれば、書き方を間違えた申告まで一緒に消え、読む者は引用が無かったのか数えていないのかを分けられない
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+      - scripts/gate_mutation_replay.py
+      - tests/unit/test_registry_quote_ref.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'print(f"  [引用] ref: 付きの言及を {len(quotes)} 件 別に数えた"'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'print(f"  [黙] {len(quotes)}"', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_quote_ref.bats --filter "T-QR-001"
+    expect: nonzero
+    red_needle: not ok 1 T-QR-001
+    timeout: 300
+
+  - id: MUT-1387-QR3
+    desc: 引用の見分けを広げすぎる変異（全ての言及を引用扱い）。「鳴ったら引用の印を付ければ黙る」逃げ道と同じ形になり、本物の幽霊が黙って消える。除外は狭い側へ倒すという契約を反対側から縛る
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+      - scripts/gate_mutation_replay.py
+      - tests/unit/test_registry_quote_ref.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'if line[max(0, st - len(QUOTE_PREFIX)):st] == QUOTE_PREFIX:'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'if True:', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_quote_ref.bats --filter "T-QR-002"
+    expect: nonzero
+    red_needle: not ok 1 T-QR-002
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

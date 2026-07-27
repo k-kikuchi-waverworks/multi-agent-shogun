@@ -3,7 +3,8 @@
 
 ★何故 別に script を立てたか★ =
 拙者 (足軽三号) が cmd_1386 の測定で使うた id 正規表現は、
-`MUT-1330-R3-M1〜M5` を **1 件へ潰しておった** (id を `MUT-1330-R3` までしか読まなんだ)。
+`ref:MUT-1330-R3-M1〜M5` を **1 件へ潰しておった** (id を `ref:MUT-1330-R3` までしか読まなんだ)。
+(ref: = 他の木 (backend) の実例を引いておるだけの印。cmd_1387・家老 18:10 の裁2)
 = ★枷1「id を 1 本も失わぬ」を破ったのは案ではなく拙者の物差しであった★。
 
 手2 (実際の分割) では **同じ物差しで 178/178 を突合する**。
@@ -38,7 +39,7 @@ ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*(?:-[A-Za-z0-9]+)+")
 FAMILY_RE = re.compile(r"^MUT-([0-9]+[A-Za-z]*)-")
 
 # ★壊れた旧物差し (対照専用・実務では使わぬ)★ =
-#   枝を 1 つしか読まぬゆえ MUT-1330-R3-M1〜M5 が全て "MUT-1330-R3" へ潰れる。
+#   枝を 1 つしか読まぬゆえ ref:MUT-1330-R3-M1〜M5 が全て "ref:MUT-1330-R3" へ潰れる。
 BROKEN_ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*-[A-Za-z0-9]+")
 
 
@@ -143,16 +144,22 @@ def compare(old: Path, new: Path) -> int:
 # selftest — ★対照つき★
 #   「緑が何も証明しておらぬ」を避ける = ★壊れた物差しを当てて【落ちること】まで見る★
 # ────────────────────────────────────────────────────────────────
+# ★見本の id は予約帯 (MUT-9999-*) を使う★ (cmd_1387・家老 18:10 の裁1)
+#   何故か = 実在の id をそのまま見本に置くと、幽霊 ID 検分が「此の木の申告」と数える。
+#   実測 = 本 file だけで 11 件を幽霊 A に数えさせておった。見本が本物の顔をしておった形である。
+#   予約帯は台帳に載せられぬ (載せようとすれば schema が拒む) ゆえ、見本と本物が綴りで分かれる。
+#   ★枝の形は保つ★ = R3-M1〜M5 (枝つき) と 9999E (英字つき cmd) が本検の要ゆえ、
+#   綴りだけ替えて試験の意味は 1 bit も変えておらぬ。
 FIXTURE = """
 mutations:
-  - id: MUT-1330-R3-M1
-  - id: MUT-1330-R3-M2
-  - id: MUT-1330-R3-M3
-  - id: MUT-1330-R3-M4
-  - id: MUT-1330-R3-M5
-  - id: MUT-1369E-001
-  - id: MUT-1381-105
-  - id: MUT-1352-W2-001
+  - id: MUT-9999-R3-M1
+  - id: MUT-9999-R3-M2
+  - id: MUT-9999-R3-M3
+  - id: MUT-9999-R3-M4
+  - id: MUT-9999-R3-M5
+  - id: MUT-9999E-001
+  - id: MUT-9999-105
+  - id: MUT-9999-W2-001
 """
 
 
@@ -172,25 +179,25 @@ def selftest() -> int:
 
     found = ID_RE.findall(FIXTURE)
     # T1 ★本件の穴そのもの★: 枝つき 5 本が 5 本のまま読めるか
-    expect("T1 MUT-1330-R3-M1〜M5 が 5 本として読める (1 本へ潰れぬ)",
-           5, len({i for i in found if i.startswith("MUT-1330-R3-")}))
+    expect("T1 枝つき見本 5 本が 5 本として読める (1 本へ潰れぬ)",
+           5, len({i for i in found if i.startswith("MUT-9999-R3-")}))
     # T2 ★対照 = 壊れた旧物差しを当てる★: 1 本へ潰れることを見る
-    broken = {i for i in BROKEN_ID_RE.findall(FIXTURE) if i.startswith("MUT-1330-R3")}
+    broken = {i for i in BROKEN_ID_RE.findall(FIXTURE) if i.startswith("MUT-9999-R3")}
     expect("T2 ★対照★ 壊れた旧物差しは 1 本へ潰れる (= 本検が差を見分ける証)",
-           {"MUT-1330-R3"}, broken)
+           {"MUT-9999-R3"}, broken)
     # T3 ★是正後と旧物差しが違う答えを返す★ = 検が変異に反応する (壊せば落ちる)
     expect("T3 是正後 ≠ 旧物差し (物差しの変異が検に届く)",
            True, set(found) != set(BROKEN_ID_RE.findall(FIXTURE)))
     # T4 全 id が fullmatch する
     expect("T4 fixture の全 id を物差しが読み切る", 8, len(found))
     # T5 族の読み
-    expect("T5 族: MUT-1330-R3-M1 → 1330", "1330", family_of("MUT-1330-R3-M1"))
-    expect("T6 族: MUT-1369E-001 → 1369E (英字つき cmd)", "1369E", family_of("MUT-1369E-001"))
+    expect("T5 族: 枝つき見本 → 9999", "9999", family_of("MUT-9999-R3-M1"))
+    expect("T6 族: 英字つき cmd の見本 → 9999E", "9999E", family_of("MUT-9999E-001"))
     # T7 長い綴りの途中を拾わぬ
-    expect("T7 XMUT-1330-001 を拾わぬ (綴りの途中を拾わぬ)",
-           [], ID_RE.findall("XMUT-1330-001"))
+    expect("T7 XMUT-9999-001 を拾わぬ (綴りの途中を拾わぬ)",
+           [], ID_RE.findall("XMUT-9999-001"))
     # T8 枝の無い id は族 shard に載せられぬ = 読めぬこと自体を検知
-    expect("T8 枝の無い MUT-1330 は id として読まぬ", [], ID_RE.findall(" MUT-1330 "))
+    expect("T8 枝の無い MUT-9999 は id として読まぬ", [], ID_RE.findall(" MUT-9999 "))
     # T9 ★真空 PASS 禁★: 在らぬ台帳は FAIL
     _ids, err = ids_from_ledger(Path("/nonexistent/mutation_registry.yaml"))
     expect("T9 在らぬ台帳は FAIL (真空 PASS 禁)", True, err is not None)

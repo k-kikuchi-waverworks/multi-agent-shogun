@@ -29,7 +29,9 @@ setup_file() {
 setup() {
     export TEST_TMPDIR="$(mktemp -d "$BATS_TMPDIR/fixband.XXXXXX")"
     export FIXTURE_ID="MUT-$(printf '9999')-SAMPLE"
-    export REAL_ID="MUT-1387-REALSAMPLE"
+    # 帯の外の見本。★literal で書かぬ★ = 書けば本 file 自身が幽霊を 1 件 増やす。
+    # 帯の内側 (上の行) と同じ理由だが、こちらは 18:2x まで literal のままであった (六号の落ち)。
+    export REAL_ID="MUT-1387-$(printf 'REALSAMPLE')"
     # 検分される側の小さな repo (git 追跡下でなければ scan の対象にならない)
     export FIX_REPO="$TEST_TMPDIR/repo"
     mkdir -p "$FIX_REPO/tests" "$FIX_REPO/scripts"
@@ -94,7 +96,7 @@ EOF
 
 # ---------------------------------------------------------------------------
 # T-FB-004: 英字つきの cmd 番号の見本も帯に入る。
-#   実在例 MUT-1369E-001 のような形を見本で再現する試験があるため。
+#   実在例 ref:MUT-1369E-001 のような形を見本で再現する試験があるため。
 #   帯の要は「9999 という実在しない cmd 番号」であって、英字の有無ではない。
 # ---------------------------------------------------------------------------
 @test "T-FB-004: the band also covers letter-suffixed cmd numbers (9999E), which fixtures need" {
@@ -125,7 +127,7 @@ spec = importlib.util.spec_from_file_location("r", sys.argv[1])
 r = importlib.util.module_from_spec(spec); spec.loader.exec_module(r)
 base = {"desc": "x", "paths": ["a"], "mutate": "x", "test": "x"}
 bad = r.validate_entry(dict(base, id="MUT-" + "9999-REAL"))
-ok = r.validate_entry(dict(base, id="MUT-1387-OK"))
+ok = r.validate_entry(dict(base, id="MUT-1387-" + "OKSAMPLE"))
 print("BAD=", bad)
 print("OK=", ok)
 assert bad and "予約帯" in bad, f"予約帯の id が通ってしまう: {bad!r}"

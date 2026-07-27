@@ -306,7 +306,7 @@ def _diff_shape(a_root: Path, b_root: Path):
 
         # ★行の【移動】は 1 箇所と数える (cmd_1382 差し戻しの実測で判った偽陽性)★:
         #   ある所から消えた綴りが、余所へそのまま現れておるなら ★1 つの編集★ である。
-        #   実例 = backend MUT-1350-M1 (五号) = 2 つの sed で ★行を移す★ 変異ゆえ
+        #   実例 = backend ref:MUT-1350-M1 (五号) = 2 つの sed で ★行を移す★ 変異ゆえ
         #   「消す塊」と「入れる塊」の 2 つに割れ、★初版は之を 2 箇所着弾と誤って鳴らした★。
         #   ※ 限界 (名乗っておく): 突き合わせは ★同一 file の中★ のみ。file を跨ぐ移動は
         #     今も 2 と数える (跨ぐ移動を偶然の一致と見分ける術を持たぬゆえ、多く数える側へ倒す)。
@@ -464,7 +464,7 @@ def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: i
         #                潰し損ねた側を当て直しが再び撃つ。
         #   ★いずれも「また変わった」が候補の残存を意味せぬ★ ゆえ、当てずに退く。
         #   ★何箇所へ挿入/移動したかは 物差しA/B が既に数えておる★ゆえ穴にはならぬ。
-        #   実例 (配線前の全数計数で捕えた偽陽性) = backend MUT-1350-M1 (移動) /
+        #   実例 (配線前の全数計数で捕えた偽陽性) = backend ref:MUT-1350-M1 (移動) /
         #   M2 (追記) / M4 (挿入) = いずれも五号の正しい牙であった。
         return None
 
@@ -481,7 +481,7 @@ def check_anchor_uniqueness(e, pristine: Path, mut: Path, work: Path, timeout: i
         #   (純粋な挿入・追記型の変異。difflib では i1==i2 ゆえ潰す行が無い)。
         #   ⇒ ★この盤面は pristine と同じゆえ、当て直せば当然また挿入される★ =
         #   ★「また変わった」は候補が残っておる証にならぬ★。此の検分は【当てはまらぬ】。
-        #   実例 = backend MUT-1350-M2 (追記型) / M4 (挿入型) = 五号。
+        #   実例 = backend ref:MUT-1350-M2 (追記型) / M4 (挿入型) = 五号。
         #   ★初版は之を「候補が残っておる」と誤って鳴らした★ (配線前の全数計数が捕えた)。
         #   挿入型の非一意は ★物差しA/B が【何箇所へ挿入したか】として既に数えておる★ゆえ
         #   此処を素通しても穴にはならぬ。
@@ -553,6 +553,22 @@ REGISTRY_ID_RE_DISCARDED = re.compile(r"MUT-\d{3,4}-[A-Za-z0-9]+")
 # 英字つきの cmd 番号 (実在例 = 1369E) を見本で再現する試験があるので、帯にも英字を許す。
 # 帯の要は「9999 という実在しない cmd 番号」であって、英字の有無ではない。
 FIXTURE_ID_BAND_RE = re.compile(r"^MUT-9999[A-Za-z]*-")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 引用の印 ref: (cmd_1387・2026-07-27 家老 18:10 の裁2)
+#
+# 何が起きていたか: 註の中で他の木の変異テストを実例として挙げると
+#   (例: 「実例 = backend の ref:MUT-1350-M1 = 2 つの sed で行を移す変異ゆえ」)、
+#   幽霊 ID 検分がそれを「この木の申告」として数えていた。実測 = 幽霊 A 22 件のうち 11 件。
+# なぜ登録でも削除でも駄目か:
+#   登録すれば実体のない変異テストが 11 本増える。註から消せば「なぜこの造りにしたか」の
+#   経緯が痩せる。どちらも「数を減らすために中身を悪くする」形である。
+# 対処: 書き方で分ける。他の木の実例を引く時は id の前に ref: を付ける。
+#   検分は素の id を「申告」、ref: 付きを「引用」として ★別に数え、件数を必ず名乗る★
+#   (黙って捨てれば、書き方を間違えた申告まで一緒に消える)。
+# なぜ前置きか: バッククォートで囲む形は採らない。「囲めば通る」は engine 側で踏んだ穴と
+#   同じ族である。ref: は前置きゆえ grep で確実に拾え、人が読んでも引用と分かる。
+QUOTE_PREFIX = "ref:"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # gate-2 付帯4: ★視野計★ (--coverage に相乗り・cmd_1370)
@@ -1156,16 +1172,20 @@ def scan_mutation_test_candidates(repo: Path):
 def scan_registry_id_refs(repo: Path):
     """tracked COVERAGE_EXTS file 中の台帳 ID 完全形言及を返す。
 
-    返り = ([(rel, line_no, id)], [(rel, line_no, 旧読み, 新読み or None)], error)
-      第2 = ★物差しの影★ (cmd_1408) = 同じ位置を ★捨てた綴り★ と ★今の綴り★ が別々に読む所。
+    返り = ([(rel, line_no, id)], [(rel, line_no, id)], [(rel, line_no, 旧読み, 新読み or None)], error)
+      第1 = ★申告★ = 素の id 言及 (幽霊検分の対象)
+      第2 = ★引用★ (cmd_1387) = ref: を前置した id = 他の木の実例を挙げておるだけの物。
+            ★幽霊に数えぬが、黙って捨てもせぬ★ = 件数は coverage が必ず名乗る。
+      第3 = ★物差しの影★ (cmd_1408) = 同じ位置を ★捨てた綴り★ と ★今の綴り★ が別々に読む所。
             ★判定には一切使わぬ★ = 数えて名乗る為だけの器 (是正が黙って巻き戻る/新しい綴りの
             形が現れる、の二つを門が己の口で言える形にしておく)。
     幽霊 ID 検分 (四号 M9 型) の材料。読めぬ追跡 file は沈黙せず error (coverage scan と同じ掟)。
     """
     tracked, err = ls_files(repo)
     if err:
-        return None, None, err
+        return None, None, None, err
     refs: list[tuple[str, int, str]] = []
+    quotes: list[tuple[str, int, str]] = []
     shadows: list[tuple[str, int, str, str | None]] = []
     for rel in tracked:
         if Path(rel).suffix not in COVERAGE_EXTS:
@@ -1176,15 +1196,19 @@ def scan_registry_id_refs(repo: Path):
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
-            return None, None, f"読めぬ追跡 file: {rel} ({e}) — 黙って飛ばさぬ (沈黙禁)"
+            return None, None, None, f"読めぬ追跡 file: {rel} ({e}) — 黙って飛ばさぬ (沈黙禁)"
         for i, line in enumerate(text.splitlines(), 1):
             now = {m.start(): m.group(0) for m in REGISTRY_ID_RE.finditer(line)}
             for st, mid in sorted(now.items()):
-                refs.append((rel, i, mid))
+                # cmd_1387: ref: を前置した物は【他の木の実例の引用】= 此の木の申告ではない
+                if line[max(0, st - len(QUOTE_PREFIX)):st] == QUOTE_PREFIX:
+                    quotes.append((rel, i, mid))
+                else:
+                    refs.append((rel, i, mid))
             for m in REGISTRY_ID_RE_DISCARDED.finditer(line):
                 if now.get(m.start()) != m.group(0):
                     shadows.append((rel, i, m.group(0), now.get(m.start())))
-    return refs, shadows, None
+    return refs, quotes, shadows, None
 
 
 def peer_registry_paths(own: Path) -> list[tuple[str, Path]]:
@@ -1329,7 +1353,7 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
     for wp in sorted(set(wmap) - set(cands)):
         print(f"  注   免除の空撃ち   {wp} (候補に居らぬ = file 削除/規則変更済か。waiver を掃除せよ)")
     # 幽霊 ID 検分 (付帯3・四号 M9 型): docstring の申告と台帳の実在の食い違いを名指し
-    refs, shadows, rerr = scan_registry_id_refs(repo)
+    refs, quotes, shadows, rerr = scan_registry_id_refs(repo)
     if rerr:
         print(f"[gate-2 coverage] UNDETERMINED: {rerr}")
         return 2
@@ -1342,6 +1366,11 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
     print(f"  [予約帯] 見本用 MUT-9999-* を {len(fixture_refs)} 件 除いた"
           f" (file {len(fixture_files)} 本: {', '.join(fixture_files) if fixture_files else 'なし'})"
           f" — selftest の見本ゆえ台帳には載らぬ。登録しようとすれば schema が拒む (cmd_1387)")
+    # cmd_1387: ref: を前置した引用 (他の木の実例) を別に数える。0 件でも必ず名乗る。
+    quote_files = sorted({rel for rel, _, _ in quotes})
+    print(f"  [引用] ref: 付きの言及を {len(quotes)} 件 別に数えた"
+          f" (file {len(quote_files)} 本: {', '.join(quote_files) if quote_files else 'なし'})"
+          f" — 他の木の実例を挙げておるだけゆえ此の木の申告に数えぬ (cmd_1387)")
     # ── ★出所の別 (cmd_1408)★ = 「幽霊 N 件」の一語を A / C / C? の三語へ割る ──
     #   ★verdict は動かさぬ★ = A も C も従来どおり FAIL の中に数える (門を静かにする為に
     #   数を消す形は禁 — 家老下命)。★割るのは【誰の手番か】を画面から読ませる為である★:
@@ -1429,7 +1458,7 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
     if unregistered or ghosts or expired:
         print(f"[gate-2 coverage] FAIL: 候補 {len(cands)} 件中 ★台帳に無い変異test"
               f" {len(unregistered)} 件★ / ★期限切れ免除 {len(expired)} 件★"
-              f" / ID言及 {len(refs)} 件中 ★幽霊 {len(ghosts)} 件"
+              f" / ID申告 {len(refs)} 件 (別に引用 {len(quotes)} 件) 中 ★幽霊 {len(ghosts)} 件"
               f" (A 別台帳に実在 {n_a} / C 真に未登録 {n_c} / C? 判別不能 {n_unk})★"
               f" (視野: {vision})")
         print("  処方: 「赤を一度確認した」変異を config/mutation_registry.yaml へ登録せよ")
@@ -1446,7 +1475,7 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
     n_reg = len(cands) - n_waived
     print(f"[gate-2 coverage] PASS: ★規則に見えた★候補 {len(cands)} 件 ="
           f" ★登録 {n_reg} 件 / 免除 {n_waived} 件 (うち★無期限 {n_open_ended} 件★)★"
-          f" — 免除は可視・期限切れ 0 件・ID言及 {len(refs)} 件に幽霊なし"
+          f" — 免除は可視・期限切れ 0 件・ID申告 {len(refs)} 件 (別に引用 {len(quotes)} 件) に幽霊なし"
           f" (照合先 = 別台帳 {len(peer_read)} 件・読めなんだ {len(peer_unread)} 件)"
           f" — ★但し視野は全域でない: {vision}★")
     return 0
@@ -2434,6 +2463,37 @@ def selftest() -> int:
                                  "mutate": "x", "test": "x"})
         check("T76b 予約帯でない id は従来どおり通る", why_ok is None, f"→ {why_ok!r}")
 
+        # ── cmd_1387: 引用の印 ref: (家老 18:10 の裁2) ────────────────────────────
+        #   註が他の木の実例を挙げておるだけの物を「此の木の申告」と数えぬ。
+        #   ★三つで 1 組にする★ = ①引用は幽霊に数えぬ ②件数を必ず名乗る
+        #   ③★ref: の無い同じ id は従来どおり鳴る★ (③が無ければ「全部を引用にすれば黙る」
+        #   逃げ道を作った事になり、向きが逆の同じ病になる)。
+        quoted_id = "MUT-" + "8805-001"
+        peer_reg_q = T / "t77peer.yaml"
+        _write_reg(peer_reg_q, [_cov_entry(quoted_id, ["other_tree/test.bats"])])
+        repo = _mk_git_repo(T / "t77", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats":
+                                            _COV_ROGUE_BATS + f"# 実例 = 別の木の ref:{quoted_id}\n"})
+        reg = T / "t77reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-ROGUE", ["tests/rogue_mutation.bats"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
+                           "--peer-registry", str(peer_reg_q)])
+        expect("T77 ref: 付きは引用ゆえ幽霊に数えぬ", 0, rc, "幽霊なし", out)
+        check("T77b 引用の件数を必ず名乗る (黙って捨てぬ)",
+              "[引用] ref: 付きの言及を 1 件 別に数えた" in out,
+              f"引用の件数が出ておらぬ: {out[:400]}")
+        # T77c ★負例★: 同じ id を ref: 無しで書けば従来どおり幽霊 (A) として鳴る
+        repo = _mk_git_repo(T / "t77c", {ctl: _COV_CONTROL_BODY,
+                                         "tests/rogue_mutation.bats":
+                                             _COV_ROGUE_BATS + f"# 実射で確認済: {quoted_id}\n"})
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
+                           "--peer-registry", str(peer_reg_q)])
+        expect("T77c ★負例★ ref: 無しは従来どおり幽霊として鳴る", 1, rc, "[GHOST-ID/A]", out)
+        check("T77d 引用 0 件でも件数を名乗る",
+              "[引用] ref: 付きの言及を 0 件 別に数えた" in out,
+              f"引用 0 件の名乗りが無い: {out[:400]}")
+
         # T72: ★綴りの途中を拾わぬ★ = 捨てた綴りの二つ目の破れ (先読みが無い) の負例。
         #   ★捨てた綴りなら鳴り、今の物差しなら鳴らぬ★ = 誤検知の側からも物差しを縛る。
         stray = "MUT-" + "8804-001"
@@ -2697,19 +2757,19 @@ def selftest() -> int:
         NEG_GUARD = "'^x=1$' tool.sh && ! grep -q MUT_MARK"
 
         # T51 (負例): ★追記型★ (printf >>) — 伏せる行が無いゆえ検分は当てはまらぬ。
-        #   実例 = backend MUT-1350-M2 (五号)。初版は「候補が残っておる」と誤って鳴らした。
+        #   実例 = backend ref:MUT-1350-M2 (五号)。初版は「候補が残っておる」と誤って鳴らした。
         rc, out = _anchor_run("append", ONE, "printf '\\nMUT_MARK\\n' >> tool.sh\n",
                               guard=NEG_GUARD)
         expect("T51 ★追記型は鳴らぬ (負例)★", 0, rc, "PASS", out)
 
         # T52 (負例): ★挿入型★ (sed 's/x/&\\n…/') — 同上 (difflib では i1==i2)。
-        #   実例 = backend MUT-1350-M4 (五号)。
+        #   実例 = backend ref:MUT-1350-M4 (五号)。
         rc, out = _anchor_run("insert", ONE, "sed -i 's/^x=1$/&\\nMUT_MARK/' tool.sh\n",
                               guard=NEG_GUARD)
         expect("T52 ★挿入型は鳴らぬ (負例)★", 0, rc, "PASS", out)
 
         # T53 (負例): ★行の移動は 1 箇所と数える★ — 消える塊と現れる塊に割れるが 1 つの編集。
-        #   実例 = backend MUT-1350-M1 (五号) = 2 つの sed で行を移す変異。
+        #   実例 = backend ref:MUT-1350-M1 (五号) = 2 つの sed で行を移す変異。
         MOVE_BODY = "#!/bin/bash\nAAA\nBBB\nCCC\nx=1\n"
         MOVE_MUT = ("sed -i '/^BBB$/d' tool.sh\n"
                     "sed -i 's/^CCC$/CCC\\nBBB/' tool.sh\n")
@@ -2722,7 +2782,7 @@ def selftest() -> int:
         #   ★同 size の変異を同じ mtime のまま書けば、古い .pyc が有効と判ぜられ
         #     【変異前の code が走る】= 変異は当たったのに test は緑★。
         #   ★束縛入替 (列の順を入れ替える等) は size 差が 0 byte ゆえ最も当たり易い★
-        #   (実例 = backend MUT-1384-M10/M11)。
+        #   (実例 = backend ref:MUT-1384-M10/M11)。
         #   ★本 case は .pyc を paths へ名指しで持ち込み、mutate が mtime を戻す★ =
         #   ★purge_pycache を外せば変異後も緑 = runner は FAIL を返す★ ⇒
         #   ★之が処置を縛る負例である (処置が現に効いておることの証明)★。

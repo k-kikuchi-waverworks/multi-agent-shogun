@@ -93,6 +93,28 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# T-FB-004: 英字つきの cmd 番号の見本も帯に入る。
+#   実在例 MUT-1369E-001 のような形を見本で再現する試験があるため。
+#   帯の要は「9999 という実在しない cmd 番号」であって、英字の有無ではない。
+# ---------------------------------------------------------------------------
+@test "T-FB-004: the band also covers letter-suffixed cmd numbers (9999E), which fixtures need" {
+    local letter_id
+    letter_id="MUT-$(printf '9999')E-001"
+    cat > "$FIX_REPO/tests/note.py" <<EOF
+# 見本として引く: ${letter_id}
+EOF
+    (cd "$FIX_REPO" && git add -A && git -c user.email=t@t -c user.name=t commit -qm y) >/dev/null 2>&1
+    run python3 "$REPLAY_PY" --coverage --registry "$TEST_TMPDIR/reg.yaml" --repo-root "$FIX_REPO"
+    local ghosts
+    ghosts="$(echo "$output" | grep 'GHOST-ID' || true)"
+    if echo "$ghosts" | grep -q "$letter_id"; then
+        echo "英字つきの見本 id が幽霊として名指された: $ghosts" >&2
+        return 1
+    fi
+    echo "$output" | grep -q "見本用 MUT-9999-\* を 1 件 除いた"
+}
+
+# ---------------------------------------------------------------------------
 # T-FB-003: 逆向きの守り。予約帯の id を台帳へ登録しようとしたら schema が拒む。
 #   これが無いと「登録されているのに検分から見えない本物」が作れてしまう。
 # ---------------------------------------------------------------------------

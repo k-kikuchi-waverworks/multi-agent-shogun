@@ -3676,6 +3676,53 @@ mutations:
     red_needle: not ok 1 T-FB-002
     timeout: 300
 
+  - id: MUT-1387-FB4
+    desc: 予約帯から英字つきの cmd 番号 (9999E) を外す変異。実在例 MUT-1369E-001 のような形を見本で再現する試験が帯に入らなくなり、見本が幽霊として数え直される。帯の要は「9999 という実在しない cmd 番号」であって英字の有無ではない
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/gate_mutation_replay.py
+    - tests/unit/test_registry_fixture_band.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'FIXTURE_ID_BAND_RE = re.compile(r"^MUT-9999[A-Za-z]*-")'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'FIXTURE_ID_BAND_RE = re.compile(r"^MUT-9999-")', 1),
+                   encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_fixture_band.bats --filter "T-FB-004"
+    expect: nonzero
+    red_needle: not ok 1 T-FB-004
+    timeout: 300
+
+  - id: MUT-1387-FB5
+    desc: 除外そのものを外す変異 (軍師一号 17:5x が撃った形をそのまま登録)。予約帯の id が再び幽霊として数え直され、見本 15 件が毎朝の数へ戻る。テストは噛むが台帳に無ければ毎回は撃たれないため登録する
+    origin: cmd_1387
+    suspected_by: gunshi1
+    paths:
+    - scripts/gate_mutation_replay.py
+    - tests/unit/test_registry_fixture_band.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'if mid not in known and not FIXTURE_ID_BAND_RE.match(mid)'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'if mid not in known', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_fixture_band.bats --filter "T-FB-001"
+    expect: nonzero
+    red_needle: not ok 1 T-FB-001
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

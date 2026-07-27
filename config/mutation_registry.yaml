@@ -4158,6 +4158,136 @@ mutations:
     red_needle: not ok 1 T-GSW-006
     timeout: 300
 
+  # ══════════════════════════════════════════════════════════════════════
+  # cmd_1414 — 関所を「表に載らぬ道具」まで広げた件の陰性側 3 本 (2026-07-28)
+  #  ★原案 = 足軽三号★ (tests/unit/test_shell_guard_scope.bats:34-36 の頭書に置いた案)。
+  #  ★代筆 = 足軽四号★ (台帳の単独の書き手ゆえ。三号は台帳へ 1 byte も書いておらぬ)。
+  #  ★suspected_by は三号のまま★ = 己の疑いでない物を己の名で載せぬ。
+  #  ★★四号は案を呑む前に己の手で 3 本とも撃った (07:11:40〜07:12:01)★★ =
+  #    3 本とも PASS。★併せて赤の理由も己で開いた★ = 落ちる所は
+  #    101→:131 / 102→:148 / 103→:162 = いずれも ★① 陽性の主張 (門の働きそのもの)★ であり、
+  #    ★MUTATION-DID-NOT-APPLY でも MUTATION-TOO-BROAD でもない★ (条5 = 赤の理由を分けよ)。
+  # ══════════════════════════════════════════════════════════════════════
+  - id: MUT-1414-S1
+    origin: cmd_1414
+    suspected_by: ashigaru3
+    desc: |
+      R5 (表に載らぬ .sh / .py の道具も既定で見る枝) を殺す = scan_unregistered が
+      常に空を返す形にすると、T-SGS-101 が赤くなるべき。
+      折っても緑なら ★将軍が 07-27 01:21 に現に踏まれた型★ (cmd_id_alloc.sh の
+      --evidence に紛れた $2 が黙って空へ落ち、台帳に「00」だけが残った) を関所が
+      再び見逃す。★判定の力は元より在り、当てる先が無かっただけ★という cmd_1414 の
+      芯そのものが黙って戻る。
+    paths: [scripts/shell_expansion_guard.py, tests/unit/test_shell_guard_scope.bats]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/shell_expansion_guard.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    findings: list[dict] = []\n    offset = 0\n"
+      assert s.count(old) == 1, "MUT-1414-S1: 錨が一意でない (実装が動いた = UNVERIFIABLE)"
+      new = "    findings: list[dict] = []\n    return findings  # MUTREG-S1\n    offset = 0\n"
+      open(p, "w", encoding="utf-8").write(s.replace(old, new, 1))
+      PY
+    test: |
+      bats --filter '^T-SGS-101' tests/unit/test_shell_guard_scope.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SGS-101"  # 実測 2026-07-28 07:11:47 (四号): :131 の ① で落ちる
+
+  - id: MUT-1414-S2
+    origin: cmd_1414
+    suspected_by: ashigaru3
+    desc: |
+      R2-a の免除 (この引数の展開が全て「定義済の名前つき変数」なら R2 を当てぬ) を
+      常に真へ倒すと、T-SGS-102 が赤くなるべき。
+      折っても緑なら ★免除が、免除の理由より広くなる★ = 定義の無い連番 ($i が
+      loop の外に在る形) まで通り、関所が黙る。cmd_1398 で四号が踏んだ
+      「本文が shell を通らぬ」から「此の行は通らぬ」へ滑る形の、免除側の顔である。
+    paths: [scripts/shell_expansion_guard.py, tests/unit/test_shell_guard_scope.bats]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/shell_expansion_guard.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    spans = _EXPANSION_RE.findall(raw_unsafe)\n"
+      assert s.count(old) == 1, "MUT-1414-S2: 錨が一意でない (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(old, "    return True  # MUTREG-S2\n" + old, 1))
+      PY
+    test: |
+      bats --filter '^T-SGS-102' tests/unit/test_shell_guard_scope.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SGS-102"  # 実測 2026-07-28 07:11:53 (四号): :148 の ① で落ちる
+
+  - id: MUT-1414-S3
+    origin: cmd_1414
+    suspected_by: ashigaru3
+    desc: |
+      R4 (引用符なし heredoc の判定) の据え置き = 「表の道具が居る時だけ見る」を外し、
+      全ての command へ広げると、T-SGS-103 が赤くなるべき。
+      ★之は【検出力】でなく【誤検知】の側を守る牙である★ = 広げれば関わりの無い
+      heredoc まで止まり、止められた者は迂回を覚え、以後 関所そのものが死ぬ (条C)。
+      折っても緑なら「広げても害が無い」と読まれ、次の者が現に広げる。
+    paths: [scripts/shell_expansion_guard.py, tests/unit/test_shell_guard_scope.bats]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/shell_expansion_guard.py"
+      s = open(p, encoding="utf-8").read()
+      old = "    if any(\n"
+      assert s.count(old) == 1, "MUT-1414-S3: 錨が一意でない (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(old, "    if True or any(  # MUTREG-S3\n", 1))
+      PY
+    test: |
+      bats --filter '^T-SGS-103' tests/unit/test_shell_guard_scope.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SGS-103"  # 実測 2026-07-28 07:12:01 (四号): :162 の ① で落ちる
+
+  # ══════════════════════════════════════════════════════════════════════
+  # cmd_1451 (2) — 段2 (負の主張の刃) が名指した未登録 1 件の始末 (2026-07-28)
+  #  ★出所は人の疑いでなく門である★ = gate_mutation_replay.py 段2 が
+  #    tests/unit/test_build_system.bats:398 を「誰も刃を証しておらぬ負の主張」として
+  #    名指した (四号が cmd_1451 で当該 file を stage したゆえ pre-commit で鳴った)。
+  #  ★suspected_by は四号★ = 門が名指した後、登録に値すると判じたのは四号である。
+  #  ★★此の試験は ID が読めぬ★★ (名の頭が T-XXX-001 の形でない) ゆえ、
+  #    段2 は ★@test の名の全文★ で照合する。red_needle に名を一字も違えず置いてある。
+  # ══════════════════════════════════════════════════════════════════════
+  - id: MUT-1451-001
+    origin: cmd_1451
+    suspected_by: ashigaru4
+    desc: |
+      OpenCode の役ごとの許しの母体 (config/opencode-permissions.yaml の
+      common.edit_deny) から `queue/inbox/*.yaml` の 1 行を落とすと、
+      test_build_system.bats:398 が赤くなるべき。
+      折っても緑なら ★生成された .opencode/agents/*.md が inbox の直の書き替えを
+      許す★ = 錠を取って書く道具 (inbox_write.sh) を通さぬ道が黙って開く。
+      此の contract を見ておる試験は木に此の 1 本きりである。
+
+      ★★paths に CLAUDE.md が入っておる理由を隠さず書く (四号が現に踏んだ形)★★
+      初版の paths は CLAUDE.md を欠いており、★変異を当てても試験は緑のままであった★。
+      因は「守りが要らぬ」ではない = ★build が AGENTS.md の生成で rc=1 で落ち、
+      generate_opencode_agents が一度も走らず、.opencode/agents/ が 1 本も出来ず、
+      試験が【見る物 0 本】で緑になっておった★ (setup_file は build の落ちを `|| true` で飲む)。
+      ⇒ ★緑の理由が「検めて通った」でなく「何も見なかった」であった★ (条5)。
+      ★併せて名乗る = 此の穴は台帳の側だけでなく試験の側にも残っておる★ =
+      生成物が 1 本も無い時、此の試験は今も母数 0 で緑になる。本任の射程の外ゆえ
+      家老へ 1 行 報せて残す (直すなら @test へ母数の検めを 1 行 足す形)。
+    paths: [scripts/build_instructions.sh, config/opencode-permissions.yaml,
+            instructions, tests/unit/test_build_system.bats, CLAUDE.md]
+    mutate: |
+      python3 - <<'PY'
+      p = "config/opencode-permissions.yaml"
+      s = open(p, encoding="utf-8").read()
+      old = "    - queue/inbox/*.yaml\n"
+      assert s.count(old) == 1, "MUT-1451-001: 錨が一意でない (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(s.replace(old, "", 1))
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats --filter "inbox edits are denied for every role" tests/unit/test_build_system.bats
+    expect: nonzero
+    # ★実測 2026-07-28 07:10:24 (四号)★= 変異後 exit 1 + 名指し確認。
+    #   母数 = 生成された .opencode/agents/*.md は 10 本 (砂場で己で数えた)。
+    red_needle: "opencode-agent: inbox edits are denied for every role [R6]"
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

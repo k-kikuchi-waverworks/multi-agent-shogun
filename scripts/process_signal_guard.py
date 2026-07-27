@@ -95,6 +95,17 @@ SIGNAL_SENDERS = {
     "taskkill.exe",
 }
 
+# ★二語で殺す物★ (cmd_1411 裁(2)・家老 10:26 の命で射程へ足した)
+#   ★実績は 0 件★ (72,655 command を command 位置で数えた) ★而して害が重い★ =
+#   ★pane を殺せば其処に居る agent の process ごと死ぬ★ ⇒ ★実績の薄さは通す理由にならぬ★。
+#   ★無害な形を持たぬ★ = signal 0 に当たる物が tmux の kill-pane には無い ⇒ 常に拒む。
+#   ★kill-server / kill-session は deny の 2 行が今も持つ★ (本案は其の 2 行に触れぬ) ゆえ此処には載せぬ。
+#   ★canary★= 数え方が生きておることは tmux kill-server を 6 件 拾えた事で示した。
+TWO_WORD_KILLERS = {
+    ("tmux", "kill-pane"),
+    ("tmux", "kill-window"),
+}
+
 # ★通り抜けの語★ = 之ら自身は殺さぬが、後ろの語へ力を渡す。
 #   ⇒ ★頭から剥がして、真の command を見に行く★。
 #   実測: `env kill -0 $$` は旧禁が拒み、`echo $$ | xargs kill -0` も拒んだ =
@@ -395,7 +406,19 @@ def analyze(command: str) -> dict:
         if not words:
             continue
         head, args = _resolve_head(words)
-        if head is None or head not in SIGNAL_SENDERS:
+        if head is None:
+            continue
+
+        # ★二語で殺す物 (tmux kill-pane / kill-window)★ — 無害な形を持たぬゆえ常に拒む
+        if args and (head, args[0]) in TWO_WORD_KILLERS:
+            findings.append(Finding(
+                tool=f"{head} {args[0]}",
+                reason=("R1: ★pane を殺せば其処に居る agent の process ごと死ぬ★ "
+                        "(signal 0 に当たる無害な形が無い)"),
+                excerpt=" ".join(words)[:80]))
+            continue
+
+        if head not in SIGNAL_SENDERS:
             continue
 
         # R3: signal を送らぬ副機能
@@ -499,7 +522,18 @@ _CASES: list[tuple[str, str, str]] = [
     ("git commit -m 'fix: kill を禁ずる'", "ALLOW", "★commit message の中の字★"),
     ("bash scripts/legacy_guard_swap.sh --dry-run",
                                          "ALLOW", "★構造化された script は通す (射程外)★"),
-    ("tmux kill-pane -t x",              "ALLOW", "★v1 の射程外 — 下の【見て見ぬ振りをせぬ】に明記★"),
+    # ── ★裁(2) = tmux の pane 殺し (家老 10:26 の命で射程へ足した)★ ──
+    ("tmux kill-pane -t multiagent:0.3", "DENY",  "★pane を殺せば agent ごと死ぬ★"),
+    ("tmux kill-window -t x",            "DENY",  "★同上 (window)★"),
+    ("cd /tmp\ntmux kill-pane -t x",     "DENY",  "★改行の後段でも★"),
+    # ★通す側を先に数え上げてから塞ぐ (枷(6))★= agent が日々使う tmux は巻き込まぬ
+    ("tmux display-message -t \"$TMUX_PANE\" -p '#{@agent_id}'",
+                                         "ALLOW", "★自己識別 — 全 agent が毎回撃つ★"),
+    ("tmux capture-pane -t multiagent:0.0 -p | tail -20",
+                                         "ALLOW", "★家老の pane 確認★"),
+    ("tmux list-panes -a -F '#{pane_id}'", "ALLOW", "一覧"),
+    ("tmux send-keys -t x 'echo hi' Enter", "ALLOW", "★別の禁の所管 (本 guard の射程外)★"),
+    ("tmux has-session -t multiagent",   "ALLOW", "存否を問うだけ"),
     ("ls -la",                           "ALLOW", "無関係"),
     ("cat <<'EOF'\nkill -9 1\nEOF",      "ALLOW", "★heredoc 本文 = data★"),
     ("bash scripts/x.sh <<'EOF'\npkill -f foo\nEOF",

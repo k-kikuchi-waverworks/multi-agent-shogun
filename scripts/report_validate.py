@@ -616,6 +616,166 @@ def _stem_inside_table() -> tuple[str | None, str]:
 _MULTIDOC = _HEALTHY + "---\ncmd_9002_example:\n  status: done\n"
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# ★差し替えを一切せぬ試験 (cmd_1450 乙)★ — 門への【配線】を現物の盤で撃つ
+#
+# ★何ゆえ要るか (軍師一号 2026-07-28 06:52 の検分・二号が 06:5x に再現)★
+#   B3 は current_task を ★直に★ 呼んで撃ち、W5 系は task_lookup を ★差し替えて★ 撃つ。
+#   ゆえに ★warn_text が current_task を現に呼び、其れが現物の帳面を現に読む★ 経路は
+#   一度も走っておらぬ。実測 = 次の二つの変異が ★selftest 全緑のまま生き残った★:
+#     (B) warn_text の中の (task_lookup or current_task) を常に None を返す物へ替える
+#     (C) current_task の既定の在処を queue/tasks 以外へ向ける
+#   ★出力は 1 byte も動かなんだ★ (N3 の数さえ動かぬ = 現物 9 本が今 R5 を鳴らさぬゆえ)。
+#
+# ★形★= 報告の本文は【文字列として】渡す = ★queue/reports/ へ 0 byte★。
+#        帳面は【読むだけ】= ★queue/tasks/ へ 0 byte★ (条C)。
+#        task_lookup も path_exists も ★渡さぬ★ = 既定の配線がそのまま走る。
+#
+# ★黙る時は緑にせぬ★= 現物の盤が anchor を持たねば ★UNDETERMINED★ と名乗る。
+#   SKIP=FAIL の規ゆえ「撃てなんだ物」を緑に混ぜぬ。而して ★UNDETERMINED 単体では
+#   赤にせぬ★ = 他人の帳面が直れば赤くなる門は外される (条C「外されにくさ」)。
+#   ★一つも determined が無い時だけ赤にする★ = 其の時は配線が現に試験されておらぬ。
+# ══════════════════════════════════════════════════════════════════════════
+LIVE_PROBE_ID = "subtask_zz_live_wiring_probe"  # ★どの帳面にも無い id★
+
+
+def _live_report_text(task_id: str, timestamp: str) -> str:
+    """現物の盤へ撃つ報告の本文。★file には書かぬ (文字列のまま warn_text へ渡す)★。"""
+    return f"task_id: {task_id}\nstatus: done\ntimestamp: '{timestamp}'\n"
+
+
+def live_ledgers() -> tuple[list[tuple], int]:
+    """現物の queue/tasks/ から anchor に使える帳面を集める。(帳面 list, 現に在る yaml の数)。
+
+    ★current_task を差し替えずに呼ぶ★= 之が撃ちたい当の配線である。
+    ★己の帳面は外す (条C)★= target_path が ★此の file 自身★ を指す帳面は、
+      今 此の門を書いておる者の物ゆえ、書いておる間に動く。anchor にせぬ。
+    """
+    base = _SCRIPTS_DIR.parent / "queue" / "tasks"
+    me = pathlib.Path(__file__).resolve()
+    if not base.is_dir():
+        return [], 0
+    files = sorted(base.glob("*.yaml"))
+    out = []
+    for p in files:
+        stem = f"{p.stem}_report"
+        tid, upd, prev, tgt = current_task(stem)
+        if not (tid and isinstance(upd, str) and reader_can_parse_time(upd)):
+            continue
+        if tgt and looks_like_path(tgt):
+            try:
+                if (_SCRIPTS_DIR.parent / tgt).resolve() == me:
+                    continue  # ★己を母数から外す★
+            except OSError:
+                pass
+        out.append((stem, tid, upd, prev, tgt))
+    return out, len(files)
+
+
+def live_wiring() -> tuple[bool, list[str]]:
+    """★差し替えを一切せぬ試験★。返り = (赤でないか, 印字する行)。"""
+    lines: list[str] = []
+    ok = True
+    determined = 0
+
+    ledgers, n_files = live_ledgers()
+    lines.append(f"  ── L0 現物の帳面 {n_files} 本のうち anchor に使えるもの = {len(ledgers)} 本 "
+                 f"(★差し替えなし・読むだけ★)")
+    if not ledgers:
+        if n_files == 0:
+            lines.append("  ??  L0 UNDETERMINED 現物の帳面が 1 本も無い = 配線を撃てぬ")
+            return ok, lines
+        ok = False
+        lines.append(f"  NG  L0 ★帳面が {n_files} 本 在るのに 1 本も読めておらぬ★ = "
+                     "current_task が現物の queue/tasks/ を読めておらぬ公算が高い (変異 C の顔)")
+        return ok, lines
+
+    stem, tid, upd, _prev, _tgt = ledgers[0]
+
+    # ── L1 = R5c の配線 (陽性)。★どの帳面にも無い id で完遂を名乗れば鳴る筈★ ──
+    got = warn_text(_live_report_text(LIVE_PROBE_ID, upd), stem)
+    if any("[R5c]" in g for g in got):
+        determined += 1
+        lines.append(f"  ok  L1 現物の帳面 ({stem}) を現に読み、R5c が鳴った "
+                     f"= ★warn_text → current_task → queue/tasks/ の配線が生きておる★")
+    else:
+        ok = False
+        lines.append(f"  NG  L1 ★配線が死んでおる★ {stem} の現任 = {tid!r} と食い違う完遂を "
+                     f"撃ったが R5c が鳴らなんだ (出た警告={[g.split(chr(10))[0] for g in got] or '無し'})")
+
+    # ── L1n = 負の対照。★現物の id をそのまま名乗れば黙る筈★ ──
+    got_n = warn_text(_live_report_text(tid, upd), stem)
+    if not any("[R5c]" in g for g in got_n):
+        determined += 1
+        lines.append(f"  ok  L1n 現物の id ({tid}) を名乗れば R5c は黙る (負の対照)")
+    else:
+        ok = False
+        lines.append(f"  NG  L1n 現物の id を名乗ったのに R5c が鳴った = ★常に鳴る門になっておる★")
+
+    # ── L2 = R5d の配線。★帳面の target_path と現物の在否を、門とは別の手で照らす★ ──
+    #   期待は repo_path_exists ではなく ★素の pathlib★ で立てる = 其の口が壊れても気付く。
+    root = _SCRIPTS_DIR.parent
+    fire_cases, silent_cases, mismatched = 0, 0, []
+    n_fire_expected, n_silent_expected = 0, 0
+    for st, t_id, t_upd, _pv, tgt in ledgers:
+        if not (tgt and looks_like_path(tgt)):
+            continue
+        want_fire = not (root / tgt.strip()).exists()
+        if want_fire:
+            n_fire_expected += 1
+        else:
+            n_silent_expected += 1
+        fired = any("[R5d]" in g for g in warn_text(_live_report_text(t_id, t_upd), st))
+        if fired != want_fire:
+            mismatched.append((st, tgt, want_fire, fired))
+        elif want_fire:
+            fire_cases += 1
+        else:
+            silent_cases += 1
+    if mismatched:
+        ok = False
+        for st, tgt, want_fire, fired in mismatched:
+            lines.append(f"  NG  L2 {st}: 現物 {'無し' if want_fire else '在り'} なのに R5d は "
+                         f"{'鳴った' if fired else '鳴らなんだ'} (target_path={tgt!r})")
+    #   ★UNDETERMINED と NG を混ぜぬ★= 「撃てる盤が無い」と「撃ったが違った」は別物である。
+    if fire_cases:
+        determined += 1
+        lines.append(f"  ok  L2 帳面の指す先に物が無い帳面 {fire_cases} 本で R5d が現に鳴った")
+    elif n_fire_expected == 0:
+        lines.append("  ??  L2 UNDETERMINED ★現物の盤に「帳面の指す先が無い」帳面が今 1 本も無い★ "
+                     "= 陽性側を撃てておらぬ (盤が変われば撃てる)")
+    if silent_cases:
+        determined += 1
+        lines.append(f"  ok  L2n 帳面の指す先に物が在る帳面 {silent_cases} 本で R5d は黙った (負の対照)")
+    elif n_silent_expected == 0:
+        lines.append("  ??  L2n UNDETERMINED 現物の盤に「指す先が在る」帳面が今 1 本も無い")
+
+    # ── L3 = R5d2 の配線。★路として読めぬ target_path を持つ帳面で撃つ★ ──
+    unreadable = [(st, t_id, t_upd, tgt) for st, t_id, t_upd, _pv, tgt in ledgers
+                  if tgt is not None and not looks_like_path(tgt)]
+    if not unreadable:
+        lines.append("  ??  L3 UNDETERMINED ★路として読めぬ target_path を持つ帳面が今 無い★ "
+                     "= R5d2 の配線を現物では撃てておらぬ (七号の帳面が直れば此処へ来る)")
+    else:
+        bad = [st for st, t_id, t_upd, _t in unreadable
+               if not any("[R5d2]" in g for g in warn_text(_live_report_text(t_id, t_upd), st))]
+        if bad:
+            ok = False
+            lines.append(f"  NG  L3 路として読めぬ target_path を持つ帳面 {bad} で R5d2 が鳴らなんだ")
+        else:
+            determined += 1
+            lines.append(f"  ok  L3 路として読めぬ target_path の帳面 {len(unreadable)} 本で "
+                         f"R5d2 が現に鳴った ({[t for _s, _i, _u, t in unreadable][0][:40]}…)")
+
+    if determined == 0:
+        ok = False
+        lines.append("  NG  L4 ★determined が 1 つも無い★ = 現物の盤では配線を一度も撃てておらぬ。"
+                     "★之を緑と読むな★")
+    else:
+        lines.append(f"  ── L4 determined = {determined} 方向 (UNDETERMINED は緑に数えておらぬ)")
+    return ok, lines
+
+
 # (名, 本文, stem, 期待する赤の needle。None = 緑であるべき)
 def _cases() -> list[tuple[str, str, str | None, str | None]]:
     out_stem, _ = _stem_outside_table()
@@ -718,6 +878,15 @@ def selftest() -> int:
         else:
             ok = False
             print(f"  NG  B3n target_path が無いのに {got2[3]!r} を返した")
+
+    # ★L 系 (cmd_1450 乙) = 差し替えを一切せぬ試験★
+    #   B3 は current_task を直に撃ち、W5 系は task_lookup を差し替えて撃つ。
+    #   ★どちらも「warn_text が現物の帳面を現に読む」経路は走らせておらぬ★ ゆえ、
+    #   変異 (B)(C) が全緑のまま生き残った (2026-07-28 07:0x 二号が再現)。
+    live_ok, live_lines = live_wiring()
+    ok = ok and live_ok
+    for _line in live_lines:
+        print(_line)
 
     for name, text, stem, needle in _cases():
         if stem is None:

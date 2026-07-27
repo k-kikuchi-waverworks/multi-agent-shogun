@@ -48,22 +48,129 @@ restore_all() {
 #   ■ ★実測★= 本 harness を 2 度 走らせ、本番 log に 2 行 積まれておるのを見つけた
 #     (01:45:56 / 01:46:44 「★C1 忘れっぽい試験★」)。
 #   ■ ★処し方 = 予防でなく【封じ込め】★= C1 は本物の path を検めてこそ意味が在るゆえ
-#     書込そのものは止められぬ ⇒ ★byte 完全な複製から戻す★ (script を戻すのと同じ作法)。
-#     ★之は【記録の書き換え】ではない★= ★本 harness が 60 秒前に己で作った物を、己で畳んでおる★。
+#     書込そのものは止められぬ ⇒ ★己が書いた行だけを消す★ (下の cmd_1400 追補を見よ)。
+#
+# ★★cmd_1400 追補 (2026-07-27 13:3x 足軽四号・家老 13:27 の裁) — 戻し方を改めた★★
+#   ■ ★旧の形★= ★開始時の複製から file 丸ごと書き戻す★ (cp "$LOGBK" …)。
+#   ■ ★旧の名乗り★= 「之は記録の書き換えではない = 己が 60 秒前に作った物を己で畳んでおる」
+#     ⇒ ★★其の名乗りが真なのは【走っておる間 誰も本番へ書かぬ】時に限る★★ =
+#       ★★条件つきの真を、無条件の真として名乗っておった★★。
+#     ⇒ ★走行中に家老が ntfy を撃たれれば、其の一行は復元で【黙って消える】★ =
+#       ★★己の掃除が他者の記録を消す★★ = 本日ずっと狩ってきた族の、本 harness における顔。
+#   ■ ★13:24 の実射で踏まなんだのは【家老が窓を約された】ゆえ★ =
+#     ★★踏まなんだのは盤面のおかげであり、守りのおかげではない★★ ⇒ 盤面に頼るのをやめる。
+#   ■ ★新の形 = 【前置きは触れぬ・末尾の追記のうち己の印を持つ行だけ消す】★:
+#       (1) ★前置き (baseline の全行) が 1 byte でも動いておれば、何もせず名乗る★ = ★消すより残す★
+#       (2) ★追記のうち【己の印】に厳密一致する行だけを落とす★
+#       (3) ★★印に当たらぬ追記 (＝他者が窓の中で書いた行) は残し、其の旨と sha256 を名乗る★★
+#       (4) ★消した本数と各行の sha256 を必ず出す★ = ★黙って減らさぬ (C3 と同じ作法)★
+#   ■ ★sha256 の射程を正直に切る★= ★C3 は【予め知った行】の sha256 で照合できるが、
+#     本件の行は【走行中に生まれ、時刻が入る】ゆえ予めの hash を持てぬ★
+#     ⇒ ★★照合は「時刻以外を全て固定した厳密な形」で行い、sha256 は【消した証跡】として出す★★
+#     = ★sha256 が matcher でない事を隠さぬ★ (隠せば「照合しておる」と読まれる = 本日の族)。
 LOGBK="$WORK/ntfy_send.log.orig"
 [ -f "$REPO/logs/ntfy_send.log" ] && cp "$REPO/logs/ntfy_send.log" "$LOGBK"
+# ★己の印★= MUT-1400-209 の下で C1 が書く行 = 時刻以外は 1 byte も動かぬ
+HARNESS_LINE_RE='^\[[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\+[0-9]{2}:[0-9]{2}\] HTTP=200 curl_rc=0 title=★C1 忘れっぽい試験★$'
+
+# _restore_log_surgical <log> <backup> <印の正規>
+#   ★引数で受けるのは【己に牙を立てられる形】にする為である★ (--selftest-restore が本物の path を撃たぬ)
+_restore_log_surgical() {
+  HL_LOG="$1" HL_BK="$2" HL_RE="$3" python3 - <<'PY'
+import hashlib, os, re, sys
+
+log = os.environ["HL_LOG"]; bk = os.environ["HL_BK"]
+pat = re.compile(os.environ["HL_RE"])
+
+def lines(p):
+    with open(p, "rb") as f:
+        b = f.read()
+    return b.split(b"\n")[:-1] if b.endswith(b"\n") else b.split(b"\n")
+
+base, cur = lines(bk), lines(log)
+
+# (1) ★前置きが動いておれば何もせぬ★ = ★消すより残す (不可逆ゆえ安全側へ倒す)★
+if cur[:len(base)] != base:
+    print("★★本番 log の【前置き】が動いておる ⇒ 何も消さぬ★★ (原本は %s に在る)" % bk, file=sys.stderr)
+    sys.exit(3)
+
+added = cur[len(base):]
+if not added:
+    sys.exit(0)   # ★何も足されておらぬ = 触れる要が無い★
+
+mine    = [l for l in added if pat.match(l.decode("utf-8", "replace"))]
+foreign = [l for l in added if not pat.match(l.decode("utf-8", "replace"))]
+
+# (4) ★消す物は必ず名乗る (黙って減らさぬ)★
+for l in mine:
+    print("※ ★己が書いた 1 行を消す★ sha256=%s" % hashlib.sha256(l).hexdigest()[:16])
+# (3) ★他者の行は残す★= ★之が本改修の芯である★
+for l in foreign:
+    print("※ ★★他者が窓の中で書いた 1 行 = 残す★★ sha256=%s | %s"
+          % (hashlib.sha256(l).hexdigest()[:16], l.decode("utf-8", "replace")[:60]))
+
+out = base + foreign
+with open(log, "wb") as f:
+    f.write(b"".join(x + b"\n" for x in out))
+print("※ ★戻した★ 己の行 %d 消し / 他者の行 %d 残し / 前置き %d 行は無傷"
+      % (len(mine), len(foreign), len(base)))
+PY
+}
+
 restore_prod_log() {
   [ -f "$LOGBK" ] || return 0
-  if ! cmp -s "$LOGBK" "$REPO/logs/ntfy_send.log"; then
-    local n
-    n=$(( $(wc -l < "$REPO/logs/ntfy_send.log") - $(wc -l < "$LOGBK") ))
-    echo "※ ★本 harness が本番 log へ $n 行 書いた (MUT-1400-209 が guard を外した下で C1 が走るゆえ)★ → 戻す"
-    cp "$LOGBK" "$REPO/logs/ntfy_send.log"
-    cmp -s "$LOGBK" "$REPO/logs/ntfy_send.log" \
-      && echo "※ ★本番 log を byte 完全に戻した★" \
-      || echo "★★本番 log を戻せなんだ★★ 原本は $LOGBK に在る" >&2
-  fi
+  cmp -s "$LOGBK" "$REPO/logs/ntfy_send.log" && return 0
+  _restore_log_surgical "$REPO/logs/ntfy_send.log" "$LOGBK" "$HARNESS_LINE_RE" \
+    || echo "★★本番 log を戻せなんだ (前置きが動いた等)★★ 原本は $LOGBK に在る" >&2
 }
+
+# ─────────── ★牙に牙を立てる★ = 戻し方そのものの自己試験 ───────────
+# ★何ゆえ要るか★= ★本改修は【他者の記録を消さぬ】という【不在の保証】である★=
+#   ★不在は普段の走りでは見えぬ (他者が書かねば旧の形でも同じ答が出る)★
+#   ⇒ ★★他者の行を人工に作って撃たねば、直った事も壊れた事も判らぬ★★。
+if [ "${1:-}" = "--selftest-restore" ]; then
+  T="$(mktemp -d)"; fail=0
+  _ck() { [ "$1" = "$2" ] || { echo "★NG★ $3 (期待=[$1] 実=[$2])"; fail=1; }; }
+  _mk() { printf '%s\n' "$@" ; }
+
+  # (i) ★己の行だけが足された時 = 消す★
+  _mk '[2026-07-27T00:00:00+09:00] HTTP=200 curl_rc=0 title=seed' > "$T/bk"
+  cp "$T/bk" "$T/log"
+  _mk '[2026-07-27T13:30:00+09:00] HTTP=200 curl_rc=0 title=★C1 忘れっぽい試験★' >> "$T/log"
+  _restore_log_surgical "$T/log" "$T/bk" "$HARNESS_LINE_RE" >/dev/null
+  _ck "$(cat "$T/bk")" "$(cat "$T/log")" "(i) 己の行を消して母数へ戻る"
+
+  # (ii) ★★他者の行が混じった時 = 残す (本改修の芯・旧の形は之を消しておった)★★
+  cp "$T/bk" "$T/log"
+  _mk '[2026-07-27T13:30:00+09:00] HTTP=200 curl_rc=0 title=★C1 忘れっぽい試験★' \
+      '[2026-07-27T13:30:05+09:00] HTTP=200 curl_rc=0 title=🚨 家老が窓の中で撃った急報' >> "$T/log"
+  _restore_log_surgical "$T/log" "$T/bk" "$HARNESS_LINE_RE" >/dev/null
+  _ck "2" "$(wc -l < "$T/log")" "(ii) 他者の行が残り、己の行だけ消える"
+  grep -q '家老が窓の中で撃った急報' "$T/log" || { echo "★NG★ (ii) 他者の行を消しておる"; fail=1; }
+  grep -q 'C1 忘れっぽい試験' "$T/log" && { echo "★NG★ (ii) 己の行が残っておる"; fail=1; }
+
+  # (iii) ★前置きが動いておれば何もせぬ (消すより残す)★
+  #   ★★此の検は一度 空虚であった (2026-07-27 13:3x 実測)★★ =
+  #     ★前置きを変えるだけでは【追記 0 行】ゆえ、検めを外しても早仕舞いで同じ答が出た★
+  #     ⇒ ★★前置きの改竄と追記を【同時に】置かねば、検めの有無が答に出ぬ★★
+  #     = ★「変異させても落ちぬ検」を己の手で作っておった形ゆえ、記して残す★。
+  cp "$T/bk" "$T/log"
+  _mk '書き換えられた前置き' \
+      '[2026-07-27T13:30:00+09:00] HTTP=200 curl_rc=0 title=★C1 忘れっぽい試験★' > "$T/log"
+  _restore_log_surgical "$T/log" "$T/bk" "$HARNESS_LINE_RE" >/dev/null 2>&1
+  _ck "2" "$(wc -l < "$T/log")" "(iii) 前置きが動いた時は 1 行も触れぬ"
+  grep -q '書き換えられた前置き' "$T/log" || { echo "★NG★ (iii) 前置きを消しておる"; fail=1; }
+
+  # (iv) ★1 byte でも違えば己の行と見做さぬ (印は厳密である事の証)★
+  cp "$T/bk" "$T/log"
+  _mk '[2026-07-27T13:30:00+09:00] HTTP=500 curl_rc=0 title=★C1 忘れっぽい試験★' >> "$T/log"
+  _restore_log_surgical "$T/log" "$T/bk" "$HARNESS_LINE_RE" >/dev/null
+  _ck "2" "$(wc -l < "$T/log")" "(iv) HTTP が違う行は【他者】として残す"
+
+  rm -rf "$T"
+  [ "$fail" -eq 0 ] && echo "ok   --selftest-restore 4 本 緑 (己の行のみ消し・他者は残し・前置き改竄は不触・印は厳密)"
+  exit "$fail"
+fi
 
 trap 'restore_all; restore_prod_log' EXIT
 

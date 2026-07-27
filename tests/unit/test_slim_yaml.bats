@@ -91,7 +91,7 @@ PY
 # 此の試験は 2026-07-28 まで paused を終端・blocked を非終端として釘付けにしておった
 # (どちらも 8 値に無い綴りである) = 試験が誤りを固定する側に回っておった形。
 @test "archives the four terminal ledger statuses and keeps the four non-terminal ones" {
-    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_done\n  status: done\n- id: cmd_superseded\n  status: superseded\n- id: cmd_cancelled\n  status: cancelled\n- id: cmd_archived\n  status: archived\n- id: cmd_pending\n  status: pending\n- id: cmd_in_progress\n  status: in_progress\n- id: cmd_deferred\n  status: deferred\n- id: cmd_dispatched\n  status: dispatched\n'
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_done\n  status: done\n  evidence: closed\n- id: cmd_superseded\n  status: superseded\n  evidence: closed\n- id: cmd_cancelled\n  status: cancelled\n  evidence: closed\n- id: cmd_archived\n  status: archived\n  evidence: closed\n- id: cmd_pending\n  status: pending\n- id: cmd_in_progress\n  status: in_progress\n- id: cmd_deferred\n  status: deferred\n- id: cmd_dispatched\n  status: dispatched\n'
 
     run run_slim karo
     assert_success
@@ -241,4 +241,54 @@ data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 ids = [item["id"] for item in data["inbox"]]
 assert ids == ["pending-old", "processed-old"], ids
 PY
+}
+
+# cmd_1463 裁(1): 剪定の条件 = 正本 instructions/karo.md:1855
+# 「終端 status かつ evidence 欄に close 根拠があること」を満たすエントリのみ剪定可。
+# これが無いと、家老が slim を撃った瞬間に evidence の空な45件 (2026-07-28 08:0x 実測) が
+# 黙って archive へ移る。
+@test "terminal command without evidence is kept and named while one with evidence is archived" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_with_evidence\n  status: done\n  evidence: "B1 done (a975a27)"\n- id: cmd_no_evidence\n  status: superseded\n- id: cmd_empty_evidence\n  status: archived\n  evidence: ""\n- id: cmd_active\n  status: in_progress\n'
+
+    run run_slim karo
+    assert_success
+    assert_output --partial "terminal but evidence is empty: 2 kept"
+    assert_output --partial "cmd_no_evidence"
+    assert_output --partial "cmd_empty_evidence"
+
+    "$TEST_PYTHON" - "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" <<'PY'
+import sys, yaml
+data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+ids = [item["id"] for item in data["queue"]]
+assert ids == ["cmd_no_evidence", "cmd_empty_evidence", "cmd_active"], ids
+PY
+    "$TEST_PYTHON" - "$(find "$SHOGUN_QUEUE_DIR/archive" -name 'shogun_to_karo_*.yaml')" <<'PY'
+import sys, yaml
+data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+ids = [item["id"] for item in data["queue"]]
+assert ids == ["cmd_with_evidence"], ids
+PY
+}
+
+# 空白だけの evidence を「有り」と読むと、条件は書式だけを見る抜け道になる。
+@test "evidence made of whitespace only counts as empty" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_blank\n  status: done\n  evidence: "   "\n'
+
+    run run_slim karo
+    assert_success
+    assert_output --partial "terminal but evidence is empty: 1 kept"
+    "$TEST_PYTHON" - "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" <<'PY'
+import sys, yaml
+data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+assert [i["id"] for i in data["queue"]] == ["cmd_blank"]
+PY
+}
+
+# 非終端のエントリは evidence が無くても名指されない (条件は終端にだけ掛かる)。
+@test "non-terminal command without evidence is not named by the evidence check" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_x\n  status: in_progress\n- id: cmd_y\n  status: deferred\n'
+
+    run run_slim karo
+    assert_success
+    refute_output --partial "terminal but evidence is empty"
 }

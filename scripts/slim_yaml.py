@@ -401,6 +401,21 @@ def slim_inbox(agent_id, dry_run=False):
     return True
 
 
+def has_close_evidence(cmd):
+    """剪定の条件 = 正本 instructions/karo.md:1855 (cmd_1463 で実装)。
+
+    正本の文 = 「終端 status かつ evidence 欄に close 根拠があること」を満たす entry のみ剪定可。
+
+    ★機械が見ておるのは【欄が空でないこと】だけである★ =
+    書かれた文が本当に close の根拠になっておるかは、機械には判じられぬ。
+    ゆえに此の関門が防ぐのは「evidence 欄が空のまま黙って archive へ移る」形であって、
+    「中身の薄い evidence」ではない。★緑の射程を狭く名乗る (条6)★。
+    """
+    if not isinstance(cmd, dict):
+        return False
+    return bool(str(cmd.get('evidence') or '').strip())
+
+
 def slim_shugun_to_karo(dry_run=False):
     """Archive done/cancelled commands from shogun_to_karo.yaml."""
     queue_dir = get_queue_dir()
@@ -427,13 +442,26 @@ def slim_shugun_to_karo(dry_run=False):
     # Separate active and archived commands
     active = []
     archived = []
+    held = []
 
     for cmd in queue:
         status = get_item_status(cmd) or 'unknown'
-        if status in CMD_TERMINAL_STATUSES:
+        if status not in CMD_TERMINAL_STATUSES:
+            active.append(cmd)
+            continue
+        if has_close_evidence(cmd):
             archived.append(cmd)
         else:
+            # 剪定の条件を満たさぬゆえ移さぬ。黙って残さず名指す (cmd_1463)。
+            held.append(cmd)
             active.append(cmd)
+
+    if held:
+        ids = [str(cmd.get('id', '<missing-id>')) for cmd in held]
+        print_inventory(
+            f"terminal but evidence is empty: {len(held)} kept in the active file "
+            f"(karo.md:1855 の剪定条件を満たさぬ。家老が evidence を埋めるまで移さぬ) — "
+            + ", ".join(ids))
 
     # If nothing to archive, return success without writing
     if not archived:

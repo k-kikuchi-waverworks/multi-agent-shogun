@@ -298,7 +298,15 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
 
 
 def scan_qc_dispatch(inbox_dir: Path, threshold_min: int, now=None):
-    """10 分規律 (karo.md L1319) を撃つ検め — cmd_1454。
+    """10 分規律を撃つ検め — cmd_1454。
+
+    ★規の出所は【節の名】で指す。行番号で指さぬ★ (家老 07:04・四号の見立て・cmd_1450 で直した)。
+      instructions/karo.md の
+      「#### 🚨 MANDATORY: Ash Report Receipt → Karo MUST Dispatch QC Task Explicitly」の節。
+    ★何ゆえ★= 元は "karo.md L1319" と書いておったが、案B の合流で当の規は :1376 へ動き、
+      :1319 は今 全く別の節 (Gunshi Limitations) である。
+      ★指し先は生きた顔をしたまま、指す先だけが別物に化けた★ = 本朝ずっと狩っておる族そのもの。
+      節名なら行が動いても付いて回る (2026-07-28 実測 = 此の名は karo.md に 1 件のみ = 一意)。
 
     見る物 = 軍師の inbox に居る【足軽の報告】で、未読のまま threshold_min を超えた物。
 
@@ -502,7 +510,8 @@ def main(argv=None):
                          "Primarily for tests.")
     ap.add_argument("--qc-threshold-min", type=int, default=QC_DEFAULT_THRESHOLD_MIN,
                     help=f"10 分規律の閾値 (default {QC_DEFAULT_THRESHOLD_MIN})。"
-                         f"karo.md L1319 の ≤10 min に合わせてある。")
+                         f"karo.md「MANDATORY: Ash Report Receipt → Karo MUST Dispatch QC "
+                         f"Task Explicitly」の節の ≤10 min に合わせてある (★行番号で指さぬ★)。")
     ap.add_argument("--no-qc-scan", action="store_true",
                     help="10 分規律の検めを走らせぬ (帳簿漏れ scan だけを撃つ時)。")
     ap.add_argument("--cooldown-min", type=int, default=DEFAULT_COOLDOWN_MIN,

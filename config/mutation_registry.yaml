@@ -4435,6 +4435,56 @@ mutations:
     # 実測 2026-07-28: blocked を抜くと1本だけ赤くなる (他11本は緑のまま)。
     red_needle: "blocked task file is kept as active and not reported as non-canonical"
 
+
+  - id: MUT-1463-003
+    origin: cmd_1463
+    suspected_by: ashigaru6
+    desc: |
+      剪定の条件 (正本 instructions/karo.md:1855 =「終端 status かつ evidence 欄に
+      close 根拠があること」) は、終端のエントリにだけ掛かる。非終端にも掛けると
+      「まだ終わっていないので evidence がまだ無い」エントリまで名指してしまい、
+      毎回鳴る警告になる。毎回鳴る警告は読まれなくなるので、守りとしては死ぬ。
+      この変異は終端の判定を潰して全エントリを条件に通す。すると非終端の
+      エントリが名指され、それを禁じているテストが赤くなる。
+    paths: [scripts/slim_yaml.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      s = open(p, encoding="utf-8", newline="").read()
+      old = "        if status not in CMD_TERMINAL_STATUSES:"
+      assert s.count(old) == 1, f"MUT-1463-003: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8", newline="").write(s.replace(old, "        if False:", 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    # 実測 2026-07-28: 2本赤くなる (13番と15番)。needle は15番の側に置いた。
+    red_needle: "non-terminal command without evidence is not named by the evidence check"
+
+  - id: MUT-1463-004
+    origin: cmd_1463
+    suspected_by: ashigaru6
+    desc: |
+      剪定の条件そのものを外す変異。has_close_evidence が常に真を返すようにすると、
+      evidence 欄が空のエントリも archive へ移る。
+      実測 (2026-07-28 08:1x・実台帳の dry-run) = 条件を外すと117件が通り、
+      条件を入れると72件。45件が止まる。この45件は正本の条件を満たしていない。
+      この変異が緑のまま生き残ると、家老が slim を撃った瞬間に45件が黙って移る。
+    paths: [scripts/slim_yaml.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      s = open(p, encoding="utf-8", newline="").read()
+      old = "    return bool(str(cmd.get('evidence') or '').strip())"
+      assert s.count(old) == 1, f"MUT-1463-004: anchor が一意でない (hit={s.count(old)})"
+      open(p, "w", encoding="utf-8", newline="").write(s.replace(old, "    return True", 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    # 実測 2026-07-28: 2本赤くなる (13番と14番)。
+    red_needle: "terminal command without evidence is kept and named while one with evidence is archived"
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

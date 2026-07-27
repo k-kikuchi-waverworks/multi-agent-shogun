@@ -4542,6 +4542,37 @@ mutations:
     # 実測 2026-07-28: 2本赤くなる (13番と14番)。
     red_needle: "terminal command without evidence is kept and named while one with evidence is archived"
 
+
+  - id: MUT-1463-005
+    origin: cmd_1463
+    suspected_by: ashigaru6
+    desc: |
+      タスクファイルの archived は「退いた持ち場の記録」であって「終わったタスク」ではない
+      (正本 = instructions/common/task_flow.md の「タスクファイルの終端 / 非終端」の表)。
+      これを終端に入れると、queue/tasks/ に現に在る archived の4本
+      (karo.yaml / ashigaru7.yaml / gunshi_a.yaml / gunshi_b.yaml・2026-07-28 実測) が
+      ファイルごと archive へ移り、idle の置き札に化ける。
+      家老は /clear からの復帰時に queue/ から状態を建て直す立場なので、
+      自分のタスクファイルが消えるのが一番痛い。しかも家老は毎サイクル自分の手で
+      この道具を撃つ立場である。
+      この変異は archived を終端の集合へ足す。すると4本が動かないことを守っている
+      テストが赤くなる。
+    paths: [scripts/slim_yaml.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      s = open(p, encoding="utf-8", newline="").read()
+      old = "TASK_TERMINAL_STATUSES = {'done', 'failed', 'cancelled'}"
+      assert s.count(old) == 1, f"MUT-1463-005: anchor が一意でない (hit={s.count(old)})"
+      new = "TASK_TERMINAL_STATUSES = {'done', 'failed', 'cancelled', 'archived'}"
+      open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    # 実測 2026-07-28: 1本だけ赤くなる (他14本は緑のまま)。
+    red_needle: "task file with status archived is left alone and not named"
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

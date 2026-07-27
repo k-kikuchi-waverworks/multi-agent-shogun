@@ -27,7 +27,7 @@ FROM="${4:-}"
 #   本文に ` も $(…) も $VAR も書けて、原文どおり届く
 #   EOF
 #   bash scripts/inbox_write.sh karo --body-file=/path/to/body.txt type from
-# ★shell 側の入口は scripts/hooks/shell_expansion_guard.py が見張る (危うい形を止める)★
+# ★shell 側の入口は scripts/shell_expansion_guard.py が見張る (危うい形を止める)★
 #   bash scripts/inbox_write.sh karo --content-file /path/body.txt type from
 # ★綴りは scripts/shell_expansion_guard.py の BODY_SENTINELS と【必ず一致させよ】★
 #   (食い違えば「関所は逃げ道と認めたのに道具は受け取らぬ」= 逃げ場の無い関所になる。
@@ -400,7 +400,7 @@ except Exception as e:
         #   変わる) と同じ family の穴が verify 自身に在った形ゆえ、id ではなく
         #   ★content を byte 単位で突合する★。不正 UTF-8 / YAML round-trip 事故もここで落ちる。
         #   ※ shell に食われる口はここでは捕まらぬ (道具に届く前に原文が失われるゆえ) —
-        #     それは scripts/hooks/shell_expansion_guard.py の領分である。
+        #     それは scripts/shell_expansion_guard.py の領分である。
         if [ $STATUS -eq 0 ]; then
             # ★`if ! cmd` で受けるな★: then 節の $? は【否定の結果 (=0)】であって
             #   python の終了値ではない = 3 (決定的不一致) を取り落とす。

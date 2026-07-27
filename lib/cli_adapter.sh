@@ -371,8 +371,12 @@ get_instruction_file() {
 
     case "$cli_type" in
         claude)  echo "instructions/${role}.md" ;;
-        codex)   echo "instructions/codex-${role}.md" ;;
-        copilot) echo ".github/copilot-instructions-${role}.md" ;;
+        # ★codex / copilot は 0693d08 (誕生時) から generated/ を指し損ねておった★
+        #   = 生成器 (scripts/build_instructions.sh) は初手から instructions/generated/ へ出しており、
+        #     自動読込 file (AGENTS.md / .github/copilot-instructions.md) も generated/ を指す。
+        #   ⇒ 路が移った歴史の名残ではなく、書き落としである (cmd_1440 で悉皆走査・該当 0 を実測)。
+        codex)   echo "instructions/generated/codex-${role}.md" ;;
+        copilot) echo "instructions/generated/copilot-${role}.md" ;;
         kimi)    echo "instructions/generated/kimi-${role}.md" ;;
         opencode) echo "instructions/generated/opencode-${role}.md" ;;
         cursor)  echo "instructions/generated/cursor-${role}.md" ;;

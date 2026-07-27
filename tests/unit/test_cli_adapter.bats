@@ -551,16 +551,16 @@ YAML
     [ "$result" = "instructions/ashigaru.md" ]
 }
 
-@test "get_instruction_file: ashigaru5 + codex → instructions/codex-ashigaru.md" {
+@test "get_instruction_file: ashigaru5 + codex → instructions/generated/codex-ashigaru.md" {
     load_adapter_with "${TEST_TMP}/settings_mixed.yaml"
     result=$(get_instruction_file "ashigaru5")
-    [ "$result" = "instructions/codex-ashigaru.md" ]
+    [ "$result" = "instructions/generated/codex-ashigaru.md" ]
 }
 
-@test "get_instruction_file: ashigaru7 + copilot → .github/copilot-instructions-ashigaru.md" {
+@test "get_instruction_file: ashigaru7 + copilot → instructions/generated/copilot-ashigaru.md" {
     load_adapter_with "${TEST_TMP}/settings_mixed.yaml"
     result=$(get_instruction_file "ashigaru7")
-    [ "$result" = ".github/copilot-instructions-ashigaru.md" ]
+    [ "$result" = "instructions/generated/copilot-ashigaru.md" ]
 }
 
 @test "get_instruction_file: ashigaru3 + kimi → instructions/generated/kimi-ashigaru.md" {
@@ -578,13 +578,13 @@ YAML
 @test "get_instruction_file: cli_type引数で明示指定 (codex)" {
     load_adapter_with "${TEST_TMP}/settings_none.yaml"
     result=$(get_instruction_file "shogun" "codex")
-    [ "$result" = "instructions/codex-shogun.md" ]
+    [ "$result" = "instructions/generated/codex-shogun.md" ]
 }
 
 @test "get_instruction_file: cli_type引数で明示指定 (copilot)" {
     load_adapter_with "${TEST_TMP}/settings_none.yaml"
     result=$(get_instruction_file "karo" "copilot")
-    [ "$result" = ".github/copilot-instructions-karo.md" ]
+    [ "$result" = "instructions/generated/copilot-karo.md" ]
 }
 
 @test "get_instruction_file: 全CLI × 全role組み合わせ" {
@@ -594,17 +594,41 @@ YAML
     [ "$(get_instruction_file karo claude)" = "instructions/karo.md" ]
     [ "$(get_instruction_file ashigaru1 claude)" = "instructions/ashigaru.md" ]
     # codex
-    [ "$(get_instruction_file shogun codex)" = "instructions/codex-shogun.md" ]
-    [ "$(get_instruction_file karo codex)" = "instructions/codex-karo.md" ]
-    [ "$(get_instruction_file ashigaru3 codex)" = "instructions/codex-ashigaru.md" ]
+    [ "$(get_instruction_file shogun codex)" = "instructions/generated/codex-shogun.md" ]
+    [ "$(get_instruction_file karo codex)" = "instructions/generated/codex-karo.md" ]
+    [ "$(get_instruction_file ashigaru3 codex)" = "instructions/generated/codex-ashigaru.md" ]
     # copilot
-    [ "$(get_instruction_file shogun copilot)" = ".github/copilot-instructions-shogun.md" ]
-    [ "$(get_instruction_file karo copilot)" = ".github/copilot-instructions-karo.md" ]
-    [ "$(get_instruction_file ashigaru5 copilot)" = ".github/copilot-instructions-ashigaru.md" ]
+    [ "$(get_instruction_file shogun copilot)" = "instructions/generated/copilot-shogun.md" ]
+    [ "$(get_instruction_file karo copilot)" = "instructions/generated/copilot-karo.md" ]
+    [ "$(get_instruction_file ashigaru5 copilot)" = "instructions/generated/copilot-ashigaru.md" ]
     # kimi
     [ "$(get_instruction_file shogun kimi)" = "instructions/generated/kimi-shogun.md" ]
     [ "$(get_instruction_file karo kimi)" = "instructions/generated/kimi-karo.md" ]
     [ "$(get_instruction_file ashigaru7 kimi)" = "instructions/generated/kimi-ashigaru.md" ]
+}
+
+# ★cmd_1440★ 綴りの一致だけを見る試験は、路が最初から死んでおる形を捕えられぬ。
+#   現に codex 4 本 / copilot 4 本が 0693d08 (誕生時) から実在せぬ路を指しており、
+#   上の「全CLI × 全role」試験は其の死んだ綴りを釘付けにして 5 箇月 緑であった。
+#   ⇒ 返る路に現物が在るかを、全 CLI × 全 role で撃つ。
+@test "get_instruction_file: 返る路に現物が在る (全CLI × 全role・cmd_1440)" {
+    load_adapter_with "${TEST_TMP}/settings_none.yaml"
+    local missing=()
+    local total=0
+    for role in shogun karo gunshi ashigaru1; do
+        for cli in claude codex copilot kimi opencode cursor antigravity; do
+            local p
+            p=$(get_instruction_file "$role" "$cli")
+            total=$((total + 1))
+            [ -n "$p" ] || missing+=("${role}/${cli}: 空を返した")
+            [ -e "${PROJECT_ROOT}/${p}" ] || missing+=("${role}/${cli}: ${p}")
+        done
+    done
+    # 母数を必ず刷る (0 件が「無かった」か「見ておらぬ」かを分けるため)
+    echo "走査 ${total} 路 / 現物を欠く ${#missing[@]} 路"
+    printf '%s\n' "${missing[@]+"${missing[@]}"}"
+    [ "$total" -eq 28 ]
+    [ "${#missing[@]}" -eq 0 ]
 }
 
 @test "get_instruction_file: 不明なagent_id → 空文字 + return 1" {

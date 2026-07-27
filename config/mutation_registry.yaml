@@ -4446,7 +4446,11 @@ mutations:
           名指されること (assert_output)。
       非終端の集合から1値を抜くと、その値を持つ entry が「知らない値」に化けて
       (1) が破れる。
-    paths: [scripts/slim_yaml.py]
+    # cmd_1462: paths には ★試験が走るのに要る物を全部★ 挙げる。
+    #   門は paths だけを砂場へ写して走らせるので、足りないと baseline が赤になり
+    #   UNDETERMINED (検出力を測れぬ) で終わる。
+    #   ★2026-07-28 08:4x の実測 = 5 件とも試験 file が抜けており、門から一度も走れていなかった★
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, tests/unit/test_slim_yaml.bats, tests/test_helper]
     mutate: |
       python3 - <<'PY'
       p = "scripts/slim_yaml.py"
@@ -4476,20 +4480,35 @@ mutations:
       (= 家老の状態が消える)。
       このテストは blocked が非終端として扱われ、かつ非正規とも表示されないことを
       守る。タスクファイル側の非終端の集合から blocked を抜くと破れる。
-    paths: [scripts/slim_yaml.py]
+    # cmd_1462: paths には ★試験が走るのに要る物を全部★ 挙げる。
+    #   門は paths だけを砂場へ写して走らせるので、足りないと baseline が赤になり
+    #   UNDETERMINED (検出力を測れぬ) で終わる。
+    #   ★2026-07-28 08:4x の実測 = 5 件とも試験 file が抜けており、門から一度も走れていなかった★
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, tests/unit/test_slim_yaml.bats, tests/test_helper]
     mutate: |
       python3 - <<'PY'
       p = "scripts/slim_yaml.py"
       s = open(p, encoding="utf-8", newline="").read()
-      old = "TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'blocked', 'pending_blocked'}"
+      # anchor を 1 行に収まる形へ直した (cmd_1462・2026-07-28 08:5x)。
+      # 折れた経緯: 六号の 0fb4704 (08:16:28) が status 語彙へ in_progress と archived を
+      #   足した際、1 行だった宣言が 2 行に折れ、旧 anchor が当たらなくなった (hit=0)。
+      # ★scripts/slim_yaml.py は 594 行すべて CRLF である★
+      #   行を跨ぐ anchor は \r\n を含まねば当たらない。六号は LF の綴りで書いて hit=0 を踏んでいる。
+      #   1 行に収まる anchor を選んでいるのはこの理由である。
+      old = "{'idle', 'assigned', 'blocked', 'in_progress',"
       assert s.count(old) == 1, f"MUT-1463-002: anchor が一意でない (hit={s.count(old)})"
-      new = "TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'pending_blocked'}"
+      new = "{'idle', 'assigned', 'in_progress',"
       open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
       PY
     test: |
       bats tests/unit/test_slim_yaml.bats
     expect: nonzero
     # 実測 2026-07-28: blocked を抜くと1本だけ赤くなる (他11本は緑のまま)。
+    # ★四号が自分で撃って確かめた (2026-07-28 08:5x)★
+    #   六号は「変異させれば現に赤くなるか」は撃っていないと自ら書いていた
+    #   (撃つには稼働中の slim_yaml.py を一時 書き替える要があるため)。
+    #   四号が手で当てて実測 = 15 本中 1 本だけ赤 (下の red_needle と一致)。
+    #   当てた後に CR 数が 594 のまま (改行を壊していない) ことも確かめ、元へ戻した。
     red_needle: "blocked task file is kept as active and not reported as non-canonical"
 
 
@@ -4503,7 +4522,11 @@ mutations:
       毎回鳴る警告になる。毎回鳴る警告は読まれなくなるので、守りとしては死ぬ。
       この変異は終端の判定を潰して全エントリを条件に通す。すると非終端の
       エントリが名指され、それを禁じているテストが赤くなる。
-    paths: [scripts/slim_yaml.py]
+    # cmd_1462: paths には ★試験が走るのに要る物を全部★ 挙げる。
+    #   門は paths だけを砂場へ写して走らせるので、足りないと baseline が赤になり
+    #   UNDETERMINED (検出力を測れぬ) で終わる。
+    #   ★2026-07-28 08:4x の実測 = 5 件とも試験 file が抜けており、門から一度も走れていなかった★
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, tests/unit/test_slim_yaml.bats, tests/test_helper]
     mutate: |
       python3 - <<'PY'
       p = "scripts/slim_yaml.py"
@@ -4527,7 +4550,11 @@ mutations:
       実測 (2026-07-28 08:1x・実台帳の dry-run) = 条件を外すと117件が通り、
       条件を入れると72件。45件が止まる。この45件は正本の条件を満たしていない。
       この変異が緑のまま生き残ると、家老が slim を撃った瞬間に45件が黙って移る。
-    paths: [scripts/slim_yaml.py]
+    # cmd_1462: paths には ★試験が走るのに要る物を全部★ 挙げる。
+    #   門は paths だけを砂場へ写して走らせるので、足りないと baseline が赤になり
+    #   UNDETERMINED (検出力を測れぬ) で終わる。
+    #   ★2026-07-28 08:4x の実測 = 5 件とも試験 file が抜けており、門から一度も走れていなかった★
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, tests/unit/test_slim_yaml.bats, tests/test_helper]
     mutate: |
       python3 - <<'PY'
       p = "scripts/slim_yaml.py"
@@ -4557,7 +4584,11 @@ mutations:
       この道具を撃つ立場である。
       この変異は archived を終端の集合へ足す。すると4本が動かないことを守っている
       テストが赤くなる。
-    paths: [scripts/slim_yaml.py]
+    # cmd_1462: paths には ★試験が走るのに要る物を全部★ 挙げる。
+    #   門は paths だけを砂場へ写して走らせるので、足りないと baseline が赤になり
+    #   UNDETERMINED (検出力を測れぬ) で終わる。
+    #   ★2026-07-28 08:4x の実測 = 5 件とも試験 file が抜けており、門から一度も走れていなかった★
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, tests/unit/test_slim_yaml.bats, tests/test_helper]
     mutate: |
       python3 - <<'PY'
       p = "scripts/slim_yaml.py"

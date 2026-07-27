@@ -4369,6 +4369,72 @@ mutations:
 #  ★次に此処へ手を入れる者へ★= 上の 2 つを牙にできたなら、此の註を消して entry へ移せ。
 # ══════════════════════════════════════════════════════════════════════════
 
+
+  # cmd_1463 — slim_yaml.py の status 語彙。負の主張を持つテスト2本を台帳に載せる。
+  # 門 (gate_mutation_replay --negative-assertions) が「refute_output の主張を誰も
+  # 証明していない」と名指したので登録した。どちらも登録前に赤を実測している。
+  - id: MUT-1463-001
+    origin: cmd_1463
+    suspected_by: ashigaru6
+    desc: |
+      台帳(shogun_to_karo.yaml)の status は正本で8値と決まっている
+      (instructions/common/task_flow.md:14-15、instructions/karo.md:1803、
+      scripts/cmd_id_alloc.sh:237 が綴りまで同一)。slim_yaml.py がこの8値の一部を
+      知らないと、正本どおりに書かれたエントリを「non-canonical」と表示する。
+      2026-07-28 の直す前は現にそうなっており、実台帳250件のうち105件が
+      正しく書かれているのに非正規と表示されていた。
+      このテストは陽性と陰性を1本の中で対にしている =
+      (1) 8値どおりの entry が名指されないこと (refute_output)
+      (2) 8値にない綴り (実台帳に現にいた superseded_by_17_30_correction) は
+          名指されること (assert_output)。
+      非終端の集合から1値を抜くと、その値を持つ entry が「知らない値」に化けて
+      (1) が破れる。
+    paths: [scripts/slim_yaml.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      s = open(p, encoding="utf-8", newline="").read()
+      old = "CMD_ACTIVE_STATUSES = {'pending', 'in_progress', 'deferred', 'dispatched'}"
+      assert s.count(old) == 1, f"MUT-1463-001: anchor が一意でない (hit={s.count(old)})"
+      new = "CMD_ACTIVE_STATUSES = {'pending', 'in_progress', 'dispatched'}"
+      open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    # 実測 2026-07-28: deferred を抜くと1本だけ赤くなる (他11本は緑のまま)。
+    red_needle: "canonical ledger statuses are not reported as non-canonical but an unknown spelling still is"
+
+  - id: MUT-1463-002
+    origin: cmd_1463
+    suspected_by: ashigaru6
+    desc: |
+      タスクファイル(queue/tasks/ashigaruN.yaml)の status は台帳とは別の語彙である
+      (task_flow.md:9「Status is defined per YAML file type」/ :100-123 =
+      assigned / blocked / done / failed)。blocked は「まだ始めるな」という
+      非終端の値であり、台帳の8値にはそもそも無い。
+      この2つの語彙を1組に混ぜると事故が起きる。実例 = 台帳の8値をそのまま
+      タスクファイルに当てると status: archived のファイル (karo.yaml など4本) が
+      終端と判定され、ファイルごと archive へ移って idle の空札に化ける
+      (= 家老の状態が消える)。
+      このテストは blocked が非終端として扱われ、かつ非正規とも表示されないことを
+      守る。タスクファイル側の非終端の集合から blocked を抜くと破れる。
+    paths: [scripts/slim_yaml.py]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      s = open(p, encoding="utf-8", newline="").read()
+      old = "TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'blocked', 'pending_blocked'}"
+      assert s.count(old) == 1, f"MUT-1463-002: anchor が一意でない (hit={s.count(old)})"
+      new = "TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'pending_blocked'}"
+      open(p, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    # 実測 2026-07-28: blocked を抜くと1本だけ赤くなる (他11本は緑のまま)。
+    red_needle: "blocked task file is kept as active and not reported as non-canonical"
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

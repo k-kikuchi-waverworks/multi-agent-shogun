@@ -222,9 +222,9 @@ Trigger phrases: 「タスク追加」「〇〇やらないと」「〇〇する
 
 Processing:
 1. Parse natural language → extract title, category, due, priority, tags
-2. Category: match against aliases in `config/saytask_categories.yaml`
+2. Category: free-form label chosen by the Shogun (e.g. `client-acme`). **There is no master/alias list** — reuse an existing label when one fits
 3. Due date: convert relative ("今日", "来週金曜") → absolute (YYYY-MM-DD)
-4. Auto-assign next ID from `saytask/counter.yaml`
+4. Assign an ID: `VF-` prefix + sequential number or short slug. **There is no counter file** — read the existing `id:` values in `saytask/tasks.yaml` and pick an unused one
 5. Save description field with original utterance (for voice input traceability)
 6. **Echo-back** the parsed result for Lord's confirmation:
    ```

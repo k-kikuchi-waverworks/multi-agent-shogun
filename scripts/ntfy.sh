@@ -114,6 +114,64 @@ _log_title() {
 #   ⇒ ★`|| _curl_rc=$?` で【落ちても進む】のは此の代入 1 箇所のみ★。set -e は外さぬ。
 #   ⇒ ★rc は呼び手から見て 1 つも変わらぬ★ = curl 死は従前どおり curl の rc で落ちる。
 #   ⇒ ★成功時の log 行は従前と byte 一致★ = curl_rc は【非0 の時だけ】足す。
+# ══ cmd_1419 (2026-07-27 足軽四号) — 「誰が撃ったか」と「何を撃ったか」をログに残す ══
+#
+# 起きたこと: 14:28:34 と 14:28:42 に同じ題が8秒差で2本 飛び、殿のスマホが2回 鳴った。
+#   このスクリプトに再送の口は無い（curl は1発）。よって呼び手が二度 撃ったことになる。
+#   ところが従来のログ行は HTTP と curl_rc と題しか残さないため、
+#   ★誰が二度 撃ったかはログから永久に分からない★。
+#   問題は二重送信そのものより、二度 撃って誰も気付かない形が残っていることである。
+#
+# 足したもの2つ:
+#   caller = 呼び手の印。tmux の agent id が取れればそれを使い、取れなければ親プロセス（pid/名）。
+#   fp     = 題と本文の指紋（sha256 の頭8桁）。★本文そのものは書かない★
+#            = 個人情報と行長の問題があるため。指紋なら「同じ本文か」だけが分かる。
+#
+# 重複が来た時の扱い: ★送信は止めず、印を残して警告する★（dup_age= と stderr）。
+#   理由: このスクリプトは呼び手の意図を持たないため、抑止すると「意図した再送・訂正」まで
+#   無言で消してしまう。本件の核心は「気付けない」ことなので、見えるようにする方を採る。
+_CALLER=""
+if [ -n "${TMUX_PANE:-}" ] && command -v tmux >/dev/null 2>&1; then
+  _CALLER=$(tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}' 2>/dev/null || true)
+fi
+if [ -z "$_CALLER" ]; then
+  # 取れない場合は親プロセス。★「取れなかった」と「不明な誰か」を混ぜない★ため ppid: を冠する。
+  _PPID=$(ps -o ppid= -p $$ 2>/dev/null | tr -d ' ' || true)
+  _PCOMM=$(ps -o comm= -p "${_PPID:-0}" 2>/dev/null | tr -d ' ' || true)
+  _CALLER="ppid:${_PPID:-unknown}${_PCOMM:+/$_PCOMM}"
+fi
+# 空白と制御文字を落とす = 1行1事象と、フィールド境界を壊さないため。
+_CALLER=$(printf '%s' "$_CALLER" | tr -d '\000-\037\177 ' | head -c 32)
+[ -n "$_CALLER" ] || _CALLER="unknown"
+
+# 指紋。sha256sum が無い機では nosha と名乗る（★黙って空にしない★）。
+if command -v sha256sum >/dev/null 2>&1; then
+  _FP=$(printf '%s\037%s' "$TITLE" "$BODY" | sha256sum | cut -c1-8)
+else
+  _FP="nosha"
+fi
+
+# 短時間に同じ指紋が再来したか。窓は既定 120 秒（NTFY_DUP_WINDOW_SEC で変えられる）。
+#   窓に 0 を渡すと重複判定そのものを止める（試験と、意図した連投のための逃げ道）。
+_DUP_WINDOW_SEC="${NTFY_DUP_WINDOW_SEC:-120}"
+_DUP_FIELD=""
+if [ "$_DUP_WINDOW_SEC" -gt 0 ] && [ "$_FP" != "nosha" ] && [ -f "$LOG_FILE" ]; then
+  _prev=$(grep -F " fp=$_FP " "$LOG_FILE" 2>/dev/null | tail -n 1 || true)
+  if [ -n "$_prev" ]; then
+    _prev_ts=${_prev#\[}
+    _prev_ts=${_prev_ts%%\]*}
+    _prev_epoch=$(date -d "$_prev_ts" +%s 2>/dev/null || true)
+    if [ -n "$_prev_epoch" ]; then
+      _age=$(( $(date +%s) - _prev_epoch ))
+      if [ "$_age" -ge 0 ] && [ "$_age" -le "$_DUP_WINDOW_SEC" ]; then
+        _DUP_FIELD=" dup_age=${_age}s"
+        echo "[ntfy] 警告: 同じ題と本文が ${_age} 秒前にも送られている (fp=$_FP caller=$_CALLER)。" >&2
+        echo "[ntfy]   送信は止めない。二度 鳴らす意図が無いなら呼び手を確かめること。" >&2
+      fi
+    fi
+  fi
+fi
+
 _curl_rc=0
 # shellcheck disable=SC2086
 if [ -n "$BODY" ]; then
@@ -131,7 +189,7 @@ fi
 #   ■ ★失うた物も名乗る★= 段4 で得た「成功行は従前と byte 一致」は ★本改修で意図して手放した★ =
 #     ★機械可読の方が値打ちが上と判じたゆえ★ (家老の下命が其れを求めておる)。
 _log_line() {
-  echo "[$(date '+%Y-%m-%dT%H:%M:%S%:z')] HTTP=${_http_status:-NONE} curl_rc=$_curl_rc title=$(_log_title "$TITLE")" >> "$LOG_FILE"
+  echo "[$(date '+%Y-%m-%dT%H:%M:%S%:z')] HTTP=${_http_status:-NONE} curl_rc=$_curl_rc caller=$_CALLER fp=$_FP${_DUP_FIELD} title=$(_log_title "$TITLE")" >> "$LOG_FILE"
 }
 _log_line
 if [ "$_curl_rc" -ne 0 ]; then

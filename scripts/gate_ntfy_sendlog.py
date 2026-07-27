@@ -70,10 +70,16 @@ _VERDICT = {PASS: "PASS", FAIL: "FAIL", UNDET: "UNDETERMINED"}
 # ★行の形★= [時刻] HTTP=… curl_rc=… title=…
 #   ★curl_rc を optional にしてあるのは【旧 1,097 行を今も読めるため】★ (実測 1,097/1,097 が解ける)。
 #   ★offset も optional★= 旧行は naive・段5(a) 以降の行は +09:00 つき。
+# ★cmd_1419 で caller / fp / dup_age を足した★= いずれも optional。
+#   ★title は常に最後★ = 題は自由文（空白を含む）ゆえ、後ろに欄を置くと題が食ってしまう。
+#   ★optional にした理由★= 旧 1,097 行にはこれらが無い。新旧どちらも同じ規則で読めること。
 LINE_RE = re.compile(
     r"^\[(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?P<off>[+-]\d{2}:?\d{2})?\]"
     r" HTTP=(?P<http>\S+)"
     r"(?: curl_rc=(?P<rc>\S+))?"
+    r"(?: caller=(?P<caller>\S+))?"
+    r"(?: fp=(?P<fp>\S+))?"
+    r"(?: dup_age=(?P<dup_age>\S+))?"
     r" title=(?P<title>.*)$"
 )
 

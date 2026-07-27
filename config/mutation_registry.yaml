@@ -3447,6 +3447,78 @@ mutations:
     expect: nonzero
     red_needle: not ok 1 T-AS-007
     timeout: 300
+  - id: MUT-1387-SW1
+    desc: ★添え札を【判定】へ漏らす変異★ = 切替で説明が付く体を抑止せず素通りさせる ⇒ ★★「切替を装えば抑止を逃れる」口が開く★★ (家老 14:21 が明示に退けた道)。★本層が触れてよいのは文字列だけである★を縛る牙
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_switch_note.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'sw_token, sw_sentence = switch_annotation('
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      new = ('if "EXPLAINS" in switch_annotation(switch_hist, switch_source, agent, now_ts, age_sec)[0]:\n'
+             '                continue\n            ') + old
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_idle_revive_switch_note.bats --filter "T-SW-00[12]"
+    expect: nonzero
+    red_needle: not ok 2 T-SW-002
+    timeout: 300
+  - id: MUT-1387-SW2
+    desc: ★真因を家老の便から落とし log にだけ残す変異★ = ★家老が読むのは inbox であって log ではない★ ⇒ 2026-07-27 14:12〜14:21 と同じく ★三通を受けた家老が己で pane を実査するまで crash-loop か切替かを割れぬ★ 形へ戻る
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_switch_note.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'sw_line = f" {sw}。" if sw'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, 'sw_line = "" if sw', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_idle_revive_switch_note.bats --filter "T-SW-001"
+    expect: nonzero
+    red_needle: not ok 1 T-SW-001
+    timeout: 300
+  - id: MUT-1387-SW3
+    desc: ★書き手 (switch_cli.sh) が刻を落とさぬ変異★ = ★読み手だけを試験すれば【誰も書かぬ file を読む番人】が全部緑になる★ (「登録した ≠ 壊せば落ちる」の二層に跨る顔)。★本牙のみ shell 側を撃つ★
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/switch_cli.sh
+    - tests/unit/test_idle_revive_switch_note.bats
+    # ★兄弟 (族α)★= 本牙は shell 側を撃つが、試験の setup_file は SCAN_PY の在処を
+    #   検めてから走る ⇒ ★之を欠くと baseline が赤 = 変異前から落ちて検出力を測れぬ★
+    #   (初回 replay で現に UNDETERMINED と名指された = 本朝 己で名付けた当の穴)
+    - scripts/idle_revive_scan.py
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/switch_cli.sh")
+      s = p.read_text(encoding="utf-8")
+      old = 'if ! printf'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, 'if false && ! printf', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_idle_revive_switch_note.bats --filter "T-SW-008"
+    expect: nonzero
+    red_needle: not ok 1 T-SW-008
+    timeout: 300
 
 coverage_waivers: []
 

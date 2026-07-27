@@ -39,6 +39,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SETTINGS_FILE="${PROJECT_ROOT}/config/settings.yaml"
 LOG_FILE="${PROJECT_ROOT}/logs/switch_cli.log"
+# ★cmd_1387 (2026-07-27 14:2x)★: 切替の刻を【機械が読める形】で落とす先。
+#   ★之は log の代わりではない★ = log は人が読む物・本 file は番人が読む物。
+SWITCH_HISTORY_FILE="${PROJECT_ROOT}/queue/state/switch_history.tsv"
 
 # cli_adapter.sh をロード
 source "${PROJECT_ROOT}/lib/cli_adapter.sh"
@@ -49,6 +52,30 @@ log() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [switch_cli] $*"
     echo "$msg" >&2
     echo "$msg" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+# ─── 切替の刻を落とす (cmd_1387・家老 14:21 の命(1)) ───
+# ★何ゆえ要るか★= 番人 (idle_revive_scan.py) は「名乗る沈黙 > process の齢」を
+#   ★起き直り (crash-loop)★ と読む。★而して我らが撃った切替も全く同じ顔で映る★
+#   = 2026-07-27 14:12〜14:21 に ★三体 (ashigaru1/2/6) が同時に其の顔で鳴った★。
+# ★落とすのは【真因】であって【逃げ道】ではない★= 番人は本 file を
+#   ★名乗りへ添えるだけ★に使い、★判定には一切 使わぬ★
+#   (母数から外せば「切替を装えば抑止を逃れる」口が開くゆえ = 家老の裁)。
+# ★刻は【launch の刻】である★= process の誕生と突き合わせる為ゆえ、
+#   切替の【完了】でなく【新 CLI を起こした其の刻】を落とす。
+# ★追記のみ★= 最後の 1 件だけを持てば「切替が無い日に何通 鳴るか」を後から数えられぬ。
+record_switch_ts() {
+    local agent="$1" cli="$2" model="$3"
+    local epoch iso
+    epoch="$(date '+%s')"
+    iso="$(date '+%Y-%m-%dT%H:%M:%S')"
+    mkdir -p "$(dirname "$SWITCH_HISTORY_FILE")" 2>/dev/null || true
+    # ★書けずとも切替は止めぬ★= 欠けるのは名乗りだけであり、切替そのものは害を受けぬ。
+    #   ★而して黙って欠かせぬ★= 書けなんだ事は log が名指す (番人は真因を読めぬ旨)。
+    if ! printf '%s\t%s\t%s\t%s\n' "$epoch" "$iso" "$agent" "${cli}/${model}" \
+            >> "$SWITCH_HISTORY_FILE" 2>/dev/null; then
+        log "WARN: 切替の刻を落とせなんだ (${SWITCH_HISTORY_FILE}) — 番人は此の切替の真因を読めぬ"
+    fi
 }
 
 # ─── Usage ───
@@ -536,6 +563,10 @@ log "Launching new CLI: ${TARGET_CMD}"
 tmux send-keys -t "$PANE_TARGET" "$TARGET_CMD" 2>/dev/null || true
 sleep 0.3
 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+
+# ★此処が【新 CLI の生年】である★ (cmd_1387) — 番人が齢と突き合わせる刻ゆえ、
+#   metadata 更新や完了 log でなく ★Enter を送った直後★ に落とす。
+record_switch_ts "$AGENT_ID" "$TARGET_CLI_TYPE" "$TARGET_MODEL"
 
 # Step 6: tmux pane metadata 更新
 DISPLAY_NAME=$(get_model_display_name "$AGENT_ID")

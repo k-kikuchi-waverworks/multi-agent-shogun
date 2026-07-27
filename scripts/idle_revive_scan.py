@@ -134,6 +134,31 @@ DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD = 3
 IMPOSSIBLE_JUDGE_STATS = {"judged": 0, "age_known": 0, "age_unknown": 0}
 
 # ══════════════════════════════════════════════════════════════════════════
+# ★cmd_1387 (2026-07-27 14:2x): 【我らが撃った切替】が crash-loop の顔で映る★
+# ──────────────────────────────────────────────────────────────────────────
+# ★実害の形★= 14:12〜14:21 に ★三体 (ashigaru1/2/6) が同時に restart_loop_alert★。
+#   真因は ★家老 13:59:53 / 将軍 14:12:25 の一斉切替★ であり、pane は三体とも
+#   生きて働いておった (家老が実査済)。★番人の判定は正しい★ = 齢は現に若く、
+#   名乗る沈黙は現に長い。★誤っておったのは【読む者に真因を渡さなんだ事】である★。
+#
+# ★★ゆえに直すのは【判定】ではなく【名乗り】である★★ (家老 14:21 の裁):
+#   ・母数から外さぬ = ★外せば「切替を装えば抑止を逃れる」口が開く★
+#   ・抑止するか否かは 1bit も動かさぬ = ★本節は出力の文字列にしか触れぬ★
+#   ・添えるだけ = ★門に己の射程を名乗らせる★ (六号が K-17 で立てた形と同じ)
+#
+# ★本節が【見ておらぬ物】も名乗る★:
+#   ・switch_cli.sh を通さぬ切替 (人が手で CLI を起こし直した等) は記録に出ぬ
+#   ・記録が無い事は「切替が無かった」の証ではない = ★源が不在なだけ★
+SWITCH_HISTORY_FILE = "switch_history.tsv"   # queue/state/ 配下・switch_cli.sh が追記
+# ★猶予★= 記録は Enter 送出の直後に落ちるが、process の誕生は其の前後に僅かに散る
+#   (shell の起動・CLI の fork)。★猶予は【添える側】を広くする★ = 誤って添えても
+#   判定は動かず、読む者が pane を実査して否めるゆえ害が小さい。
+SWITCH_EXPLAINS_SLACK_SEC = 120
+# ★scan() の戻り値は 3 組から動かさぬ★ (他の牙が 3 組で受けておる = 最小 churn)。
+#   ⇒ 母数の型 (IMPOSSIBLE_JUDGE_STATS) に倣い、読んだ源を module へ置いて main が名乗る。
+SWITCH_READ_STATS = {"source": "unread", "records": 0, "bad_lines": 0}
+
+# ══════════════════════════════════════════════════════════════════════════
 # ★cmd_1394: 番人が【己の振舞い】を証す★ (2026-07-27 未明・家老が二度誤った)
 # ──────────────────────────────────────────────────────────────────────────
 # 穴(a) ★log は【撃つと判じた】と【撃った】を一字も区別せなんだ★:
@@ -1897,6 +1922,83 @@ def _clear_impossible_state(entry):
     return entry
 
 
+def load_switch_history(state_dir: Path):
+    """cmd_1387: agent → ★最後の切替の epoch 秒★ を読む。
+
+    戻り = (mapping, source)。source は ★三値★ である:
+      "ok"         … 記録を現に読んだ
+      "absent"     … file が無い (★切替が無かったの証ではない = 源が不在★)
+      "unreadable" … 在るが読めなんだ (権限・破損)
+    ★三値に分ける理由★= 二値へ潰せば ★「切替は無かった」と「見ておらぬ」が
+      同じ顔になる★ = 本日 全軍で潰してきた病そのものである。
+
+    ★壊れた行は黙って捨てず数える★= 捨てた事も名乗れる様に (bad 件数を返す)。
+    """
+    p = state_dir / SWITCH_HISTORY_FILE
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return {}, "absent", 0
+    except OSError:
+        return {}, "unreadable", 0
+    hist, bad = {}, 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            bad += 1
+            continue
+        try:
+            ts = float(parts[0])
+        except ValueError:
+            bad += 1
+            continue
+        agent = parts[2].strip()
+        if not agent:
+            bad += 1
+            continue
+        # ★最後の 1 件を採る★= 追記のみゆえ後の行が新しい。
+        if agent not in hist or ts > hist[agent]:
+            hist[agent] = ts
+    return hist, "ok", bad
+
+
+def switch_annotation(hist, source, agent, now_ts, age_sec):
+    """cmd_1387: ★判定へは 1bit も触れぬ★ — 名乗りへ添える札を作る。
+
+    戻り = (token, sentence)。token は ACTION 行へ・sentence は家老への文へ。
+    ★否の側も必ず名乗る★= 「切替の記録が無い」も札にする。沈黙にすれば
+      読む者は ★「切替は無かった」と読む★ が、其れは我らが証しておらぬ。
+    """
+    if source == "absent":
+        return ("SWITCH=no_source",
+                "★切替の記録が無い (queue/state/switch_history.tsv 不在) = "
+                "【切替が無かった】ではなく【源が不在】である★")
+    if source == "unreadable":
+        return ("SWITCH=unreadable",
+                "★切替の記録を読めなんだ = 齢の若さの出所は判じられぬ★")
+    ts = hist.get(agent)
+    if ts is None:
+        return ("SWITCH=none",
+                "★此の agent の切替の記録は無い (記録の源は生きておる) = "
+                "齢の若さは切替では説明せぬ★")
+    since_min = round((now_ts - ts) / 60.0, 1)
+    if age_sec is None:
+        return (f"SWITCH={since_min}m_ago",
+                f"★直前に切替が在った ({since_min} 分前) = 而して齢を判じられぬゆえ "
+                f"突き合わせられぬ★")
+    birth_ts = now_ts - age_sec
+    if birth_ts >= ts - SWITCH_EXPLAINS_SLACK_SEC:
+        return (f"SWITCH={since_min}m_ago_EXPLAINS",
+                f"★直前に切替が在った ({since_min} 分前) = ★process の誕生が其の切替と重なる★ ⇒ "
+                f"★齢の若さは【我らが撃った切替】に由来する公算が高い (crash-loop ではない)★ — "
+                f"★但し之は【真因の申し送り】であって【判定】ではない★= 抑止も警報も 1bit も動いておらぬ")
+    return (f"SWITCH={since_min}m_ago_OLDER",
+            f"★切替は {since_min} 分前に在ったが、process は其れより古い★ ⇒ "
+            f"★此の齢の若さを切替では説明せぬ★")
+
+
 def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
          stall_min, min_interval_min, max_consecutive,
          alert_cooldown_min=DEFAULT_ALERT_COOLDOWN_MIN, now=None,
@@ -1928,6 +2030,12 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
     #   ★0 だけを見せて母数を見せぬ数は、原理的に読めぬ★ (本朝 全軍へ配った規の、我が門の側)。
     # ⇒ ★判定へ入った体数と、其のうち齢を判じられた体数を数え、名乗りへ載せる★。
     IMPOSSIBLE_JUDGE_STATS.update(judged=0, age_known=0, age_unknown=0)
+
+    # ★cmd_1387: 切替の記録を【1 走行に 1 度】読む★ (agent 毎に読めば file が
+    #   走行中に育った時、体ごとに別の盤面を見る = 一つの走行が二つの世を名乗る)。
+    switch_hist, switch_source, switch_bad = load_switch_history(tasks_dir.parent / "state")
+    SWITCH_READ_STATS.update(source=switch_source, records=len(switch_hist),
+                             bad_lines=switch_bad)
 
     # quorum 集計: eligible = active task を持つ scan 対象 (busy 含む)。
     # stalled = うち「沈黙」(idle+出力停止 / absent+出力停止) の agent。
@@ -2053,6 +2161,10 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
             age_min = age_sec / 60.0
             ratio = (f"{idle_min / age_min:.1f}" if (idle_min is not None and age_min > 0)
                      else "n/a")
+            # ★cmd_1387: 真因を【判定へ混ぜず】名乗りへ添える★ —
+            #   此処より下で抑止の可否は 1bit も変わらぬ (札を作るだけ)。
+            sw_token, sw_sentence = switch_annotation(
+                switch_hist, switch_source, agent, now_ts, age_sec)
             entry = dict(entry)
             streak = int(entry.get("impossible_consecutive", 0) or 0) + 1
             ages = list(entry.get("impossible_ages") or [])[-(impossible_loop_threshold - 1):]
@@ -2076,8 +2188,10 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
                 "proc_age_min": round(age_min, 1),
                 "claim_ratio": ratio,
                 "impossible_streak": streak,
+                "switch_note": sw_sentence,
                 "detail": (f"PROC_AGE_MIN={round(age_min, 1)} CLAIM_RATIO={ratio} "
                            f"STREAK={streak} SCAN_GAP_BEFORE={'yes' if recent_scan_gap else 'no'} "
+                           f"{sw_token} "
                            f"— ★観測が存在せなんだ区間を含む★: process の齢 "
                            f"{round(age_min, 1)}分 < 名乗る沈黙 "
                            f"{idle_min_disp if idle_min_disp is not None else f'≥{stall_min}'}分。"
@@ -2098,8 +2212,9 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
                     "consecutive": int(entry.get("consecutive", 0) or 0),
                     "action": "restart_loop_alert",
                     "ages": ages,
+                    "switch_note": sw_sentence,
                     "detail": (f"AGES={','.join(str(a) for a in ages)} "
-                               f"STREAK={streak} — ★齢が育たぬまま抑止が続いておる = "
+                               f"STREAK={streak} {sw_token} — ★齢が育たぬまま抑止が続いておる = "
                                f"起き直り続けておる★ (連続{streak}回・閾{impossible_loop_threshold})。"
                                f"★/clear は撃たぬ (撃っても直らぬ族ゆえ) = 家老へ回す★ (cmd_1392)"),
                     "_new_state": alerted,
@@ -2277,12 +2392,17 @@ def format_blackout_alert(hit, upstream_notes, throttle_min):
 def format_restart_loop_alert(hit, threshold):
     """cmd_1392 牙(2): 起き直り続ける agent を家老へ回す文面 (/clear は撃たぬ)。"""
     ages = ", ".join(f"{a}秒" for a in hit.get("ages", []))
+    # ★cmd_1387: 真因の申し送りを【同じ便へ同梱する】★ — 別便にすれば
+    #   ★警報を読んだ其の場で真因が手に入らぬ★ (六号が cmd_1411 で立てた形と同じ)。
+    sw = hit.get("switch_note")
+    sw_line = f" {sw}。" if sw else ""
     return (f"🚨起き直り続ける agent (idle_revive cmd_1392): {hit['agent']} は "
             f"★連続{threshold}回 の scan で【名乗る沈黙より process が若い】状態が続いておる★"
             f" (齢の推移: {ages})。"
             f"★齢が育たぬまま抑止が続く = agent が落ちて生まれ直しておる公算★ "
             f"(task {hit['task_id']})。"
             f"★/clear は撃っておらぬ★ = 撃っても直らぬ族ゆえ (session を殺すだけ)。"
+            f"{sw_line}"
             f"pane を実査し、CLI が crash-loop に陥っておらぬかを検められたい。"
             f"★本警報は1 episode 1通★ = 齢が育てば自動で解け、其の後 再発すれば改めて鳴る。")
 
@@ -2574,10 +2694,15 @@ def main(argv=None):
             _zero_note = " ★0 の意味 = 齢を一度も判じられなんだ (門が盲である)★"
         else:
             _zero_note = " ★0 の意味 = 現に問うて、成らなんだ★"
+    # ★cmd_1387: 添える側の【源】も同じ行で名乗る★ — 添え札が出ておらぬ時、
+    #   「切替が無かった」と「源を読めなんだ」を読み手が割れる様に。
+    _sw = SWITCH_READ_STATS
     print(f"[idle_revive] IMPOSSIBLE_CLAIM 抑止 = {len(_imp)} 体 "
           f"(うち連続 {args.impossible_loop_threshold} 回以上 = {len(_imp_loop)} 体) "
           f"JUDGED={_st['judged']} AGE_KNOWN={_st['age_known']} "
-          f"AGE_UNKNOWN={_st['age_unknown']}{_zero_note}",
+          f"AGE_UNKNOWN={_st['age_unknown']}{_zero_note} "
+          f"SWITCH_SRC={_sw['source']} SWITCH_RECORDS={_sw['records']} "
+          f"SWITCH_BAD_LINES={_sw['bad_lines']}",
           file=sys.stderr)
 
     # ── Task B: 家老 degrade 検知(同居)。scan() の clear_log を引き継ぐ。 ──

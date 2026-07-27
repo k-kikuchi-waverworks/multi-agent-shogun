@@ -727,6 +727,61 @@ def registry_named_test_bodies(entries, repo: Path):
     return out, comp, None
 
 
+_BUNDLE_RUNNERS = {"pytest", "py.test", "bats", "unittest", "nose2"}
+
+
+def bundle_style_tests(entries, repo: Path) -> list[tuple[str, str]]:
+    """entry の test が【束】(ディレクトリ・ワイルドカード) を走らせておるかを数える。
+
+    何を見張るか (cmd_1408・六号が己の借財として名乗った穴):
+      同伴かどうかの判別は「entry の test/mutate に path がそのまま現れるか」で決めている
+      (registry_named_test_bodies)。ゆえに誰かが test を束で書けば
+      (例: `pytest tests/unit/`)、その test 本体は paths にしか現れず【同伴】と読まれ、
+      視野計の分母から静かに落ちる。落ちても画面には何も出ぬ。
+
+    今 6冊にこの形は 1 件も無い (2026-07-27 09:32 実測)。
+    「今 無い」は「起こらぬ」ではないゆえ、機械の側へ移す。
+
+    探し方: test の各行を空白で割り、runner (pytest/bats 等) より後ろの引数のうち
+      ・ワイルドカードを含む
+      ・末尾が / である
+      ・repo の中で現にディレクトリである
+    のいずれかに当たるものを束と読む。runner の後ろに限るのは、
+    引用符の中の綴りや `mkdir -p .venv/bin` の類を束と誤読せぬためである。
+
+    返り = [(entry id, 当たった綴り)] (該当なしなら空)。判定 (exit code) には使わぬ。
+    """
+    found: list[tuple[str, str]] = []
+    for e in entries:
+        if not isinstance(e, dict):
+            continue
+        eid = str(e.get("id", "?"))
+        hit = None
+        for line in str(e.get("test", "")).splitlines():
+            toks = line.split()
+            after_runner = False
+            for tok_raw in toks:
+                tok = tok_raw.strip("\"'`,();")
+                if not tok:
+                    continue
+                if Path(tok).name in _BUNDLE_RUNNERS:
+                    after_runner = True
+                    continue
+                if not after_runner or tok.startswith("-"):
+                    continue
+                if any(ch in tok for ch in "*?["):
+                    hit = tok
+                    break
+                if tok.endswith("/") or ("/" in tok and (repo / tok).is_dir()):
+                    hit = tok
+                    break
+            if hit:
+                break
+        if hit:
+            found.append((eid, hit))
+    return found
+
+
 def registry_shard_dir(path: Path) -> Path:
     """台帳 file から、族 shard 置場の名を導く。
 
@@ -1529,6 +1584,22 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
               " paths にのみ挙げる物 = ★台帳は之を走らせてはおらぬ★ (本体が import する依存等)"
               " ⇒ ★規則に見えておらぬが【視野の分母には入れぬ】★"
               " (走らせてもおらぬ物を『規則の盲』と数えれば、規則の死を誤って疑う)")
+    # ── 束で走らせる entry を数える (cmd_1408・六号の借財) ────────────────────
+    #   同伴の判別は「test に path がそのまま現れるか」で決めておる。束で書けば
+    #   test 本体が同伴と読まれ、視野計の分母から静かに落ちる。
+    #   母数は 0 でも必ず刷る = 「0 件」と「そもそも数えておらぬ」を分ける。
+    #   判定 (exit code) は動かさぬ = 名乗るに留める。昇格は家老/殿の号令。
+    bundles = bundle_style_tests(entries, repo)
+    print(f"  [束] 台帳 {len(entries)} 件を走査 / ★test を束 (ディレクトリ・ワイルドカード) で"
+          f"走らせる entry = {len(bundles)} 件★"
+          " — 探し方 = test の runner (pytest/bats 等) より後ろの引数が dir か glob か")
+    for eid, tok in bundles:
+        rels = sorted(r for r, ids in companions.items() if eid in ids)
+        print(f"  注   [束/同伴] {eid}: test が ★{tok}★ を束で走らせる"
+              " ⇒ paths の test 本体が test に現れず【同伴】と読まれ、"
+              "★視野計の分母から静かに落ちうる★"
+              f" (この entry の同伴 = {', '.join(rels) if rels else 'なし'})"
+              " — 処方は test に本体の path を名指しで書くこと")
     n_named, n_seen = len(named), len(named) - len(blind)
     # ★物差しの長さを先に言う★: 対照は必ず当たる fixture ゆえ分母から除く。
     #   除いた残りが 0 件なら【recall を測れておらぬ】= 「全部見えておる」ではない
@@ -2474,6 +2545,38 @@ def selftest() -> int:
         expect("T73b ★同伴は消さず役を名乗る★ (黙って分母から落とさぬ)", 0, rc,
                "[RULE-BLIND/同伴]", out)
 
+        # ── T74 (cmd_1408・六号) = 束で走らせる entry を門が己で名乗る ────────────
+        #   塞ぐ穴: 同伴の判別は「test に path がそのまま現れるか」で決めておる。
+        #   束 (pytest tests/unit/ 等) で書けば test 本体は同伴と読まれ、
+        #   視野計の分母から静かに落ちる。落ちた事は画面に何も出ぬ。
+        #   両方向で縛る = 束を名乗ること (T74a) と、名指しの時に黙ること (T74b)。
+        #   ★T74b が無ければ「常に鳴る門」を作れてしまう★ (cmd_1388 の族)。
+        repo = _mk_git_repo(T / "t74", {ctl: _COV_CONTROL_BODY,
+                                        "tests/silent_body.py": _COV_SILENT_PY})
+        reg = T / "t74reg.yaml"
+        bundle_entry = {"id": "MUT-COV-BUNDLE", "desc": "束で走らせる形",
+                        "paths": ["tests/silent_body.py"],
+                        "mutate": "true", "test": "pytest tests/"}
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]), bundle_entry])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        expect("T74a ★束で走らせる entry を名乗る★", 0, rc, "[束/同伴] MUT-COV-BUNDLE", out)
+        expect("T74a2 ★母数を刷る (0 件と未走査を分ける)★", 0, rc,
+               "台帳 2 件を走査", out)
+
+        # T74b (負例): test が本体を名指しておれば ★束とは読まぬ★ = 黙る
+        repo = _mk_git_repo(T / "t74b", {ctl: _COV_CONTROL_BODY,
+                                         "tests/silent_body.py": _COV_SILENT_PY})
+        reg = T / "t74breg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-NAMED", ["tests/silent_body.py"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
+        # rc=2 はこの fixture の性質 (silent な本体は検知規則に見えぬ = T25 と同じ)。
+        # ここで縛るのは rc ではなく ★束と読まぬこと★ である。
+        check("T74b ★名指しは束と読まぬ (常に鳴る門にせぬ)★",
+              "[束/同伴]" not in out and "走らせる entry = 0 件" in out,
+              f"rc={rc} / [束/同伴] が出た: {'[束/同伴]' in out}"
+              f" / 母数行: {'走らせる entry = 0 件' in out}")
+
         # T22: 実在 ID の言及は幽霊扱いせぬ (誤検知抑止の負例)
         repo = _mk_git_repo(T / "t22", {ctl: _COV_CONTROL_BODY,
                                         "tests/rogue_mutation.bats":
@@ -3170,7 +3273,9 @@ def selftest() -> int:
                                    # 付帯3 幽霊の出所割り + 物差し是正 (cmd_1408・2026-07-27)
                                    "別台帳に実在", "真に未登録", "判別不能", "捨てた綴り",
                                    # 物差しB で鳴った時の手掛かり (cmd_1387・2026-07-27)
-                                   "塊の出所")
+                                   "塊の出所",
+                                   # 束で走らせる test の見張り (cmd_1408・2026-07-27)
+                                   "を束で走らせる")
                        if w not in doc_txt]
             expect(f"T50 ★gate の実出力の語が docs に在る★ (欠けておる語: {missing})",
                    0, len(missing))

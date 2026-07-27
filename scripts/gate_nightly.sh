@@ -327,6 +327,46 @@ else
     [ "$append_rc" -ge 2 ] && echo "[gate_nightly] ★台帳の呑まれ = 測れなんだ (rc=$append_rc)★ = ★門にも警報にも入れておらぬ★ (環境の揺れで毎朝鳴る札を作らぬため・出力は上に在る)"
 fi
 
+# ── ★捏造の門 (K-17 / cmd_1396) に【呼ぶ者】を与える (cmd_1413 (c)・家老 12:23)★ ──────
+# ★軍師二号の実測 (12:26)★= ★.git/hooks 0 本 / GHA で eval を呼ぶ物 0 本 /
+#   fabrication_probe の綴りを持つ file 5 本は ★牙台帳 2 + 対応表 1 + 稿★ = ★走らせる script 0 本★★
+#   ⇒ ★★条文は在るが走っておらぬ = 「門が在る」と読ませておった★★
+#   = 本朝ずっと潰してきた「三つの口に呼ぶ者が居らぬ」の、著述段における顔である。
+# ★何ゆえ既定で呼ぶか (census 三本と扱いを違えた理由を隠さず記す)★=
+#   ★配線前に鳴る数を数えた★= ★六号実測 2026-07-27 12:47/12:52 = 全 corpus (13→14 束・390→420 対)
+#   に候補 0 span・RED 0 件★ (★--all-types で射程を全開にしても 0★)
+#   ⇒ ★毎朝鳴る札にはならぬ★ゆえ既定で呼ぶ (census 三本は今 現に鳴るゆえ既定 0 に据えてある)。
+#   ★0 が盲でないことも撃ってある★= 複写へ捏造を差せば 5 span で RED・exit 1 (★corpus へは 0 byte★)。
+# ★★而して門へは 1bit も入れぬ (既定 = 名乗るのみ)★★ = 家老の命。★GATE_FAB_STRICT=1★ で門へ入る。
+#   ⇒ ★RED の朝は【門を落とさずとも家老の警報へ載せる】★ (呑まれ cmd_1409 と同じ扱い)。
+# ★札で確かめる (run_reporter)★= 札 = ★[射程]★ =
+#   ★之は門が【己の見ておらぬ物】を名乗る行である★ ⇒ ★名乗りが消えたら UNDETERMINED で鳴る★
+#   = ★「通った時に捏造を見たと読ませぬ」形そのものを、朝の門が縛る★。
+FAB_STRICT="${GATE_FAB_STRICT:-0}"
+FAB_PROBE="${GATE_FAB_PROBE:-$HOME/aituber-project/eval/authoring/fabrication_probe.py}"
+FAB_CORPUS_DIR="${GATE_FAB_CORPUS_DIR:-$HOME/aituber-project/eval/authoring/corpus}"
+fab_out=""; fab_rc=0
+# ★corpus が 1 束も見えぬ朝を【緑にせぬ】★= 筆の木は別 repo ゆえ、見えぬ事は現に起こりうる。
+fab_corpora=()
+[ -d "$FAB_CORPUS_DIR" ] && while IFS= read -r f; do fab_corpora+=("$f"); done \
+    < <(find "$FAB_CORPUS_DIR" -maxdepth 1 -name 'koi_core_batch*.jsonl' | sort)
+if [ "${#fab_corpora[@]}" -eq 0 ]; then
+    fab_rc=2
+    fab_out="[捏造の門] ★UNDETERMINED★ corpus が 1 束も見えぬ ($FAB_CORPUS_DIR) = ★撃てなんだ★ (黙って飛ばさぬ)"
+    printf '%s\n' "$fab_out"
+else
+    fab_out="$(run_reporter '捏造の門' '[射程]' "$FAB_PROBE" "${fab_corpora[@]}")"; fab_rc=$?
+    printf '%s\n' "$fab_out"
+    echo "[gate_nightly] ★捏造の門 = 走査 ${#fab_corpora[@]} 束★ (★母数を必ず刷る = 0 束と N 束を分ける★)"
+fi
+if [ "$FAB_STRICT" = "1" ]; then
+    fab_gate="$fab_rc"
+else
+    fab_gate=0
+    [ "$fab_rc" -eq 1 ] && echo "[gate_nightly] ★捏造の門が RED を申した (rc=1) なれど門の rc へは入れておらぬ★ = ★家老への警報には載せる★ (GATE_FAB_STRICT=1 で門へも入る・号令は家老/殿)"
+    [ "$fab_rc" -ge 2 ] && echo "[gate_nightly] ★捏造の門 = 測れなんだ (rc=$fab_rc)★ = ★門にも警報にも入れておらぬ★ (別 repo の木ゆえ環境の揺れで起こりうる・出力は上に在る)"
+fi
+
 verdict() { case "$1" in 0) echo PASS;; 1) echo FAIL;; *) echo UNDETERMINED;; esac; }
 # ★免除した札を【緑に見せぬ】★= 門は落とさぬが、名乗りは UNDETERMINED のまま残し
 #   「免除ゆえ落としておらぬ」と其の場で申す (cmd_1408・六号)。
@@ -353,7 +393,7 @@ fold_lines() {
     return 0
 }
 
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$rc11" -ne 0 ] || [ "$ml_cov_gate" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$regcensus_gate" -ne 0 ] || [ "$fangdom_gate" -ne 0 ] || [ "$drift_gate" -ne 0 ] || [ "$append_rc" -eq 1 ] || [ "$append_gate" -ne 0 ]; then
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$rc11" -ne 0 ] || [ "$ml_cov_gate" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$regcensus_gate" -ne 0 ] || [ "$fangdom_gate" -ne 0 ] || [ "$drift_gate" -ne 0 ] || [ "$append_rc" -eq 1 ] || [ "$append_gate" -ne 0 ] || [ "$fab_rc" -eq 1 ] || [ "$fab_gate" -ne 0 ]; then
     # ★append_rc は【gate でなく生の rc】を見る (cmd_1409)★= ★呑まれは門を落とさずとも人が知らねばならぬ★。
     #   ★rc=1 (呑まれ) のみ★ = rc=2 (測れなんだ) では警報を出さぬ = 環境の揺れで毎朝鳴る札を作らぬ。
     # 警告は1行に畳む (inbox message の YAML 安全のため改行・コロン+空白を避ける)
@@ -408,12 +448,19 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
     if [ "$append_rc" -ne 0 ]; then
         appendnote="★台帳の呑まれ (cmd_1409)=$([ "$append_rc" -eq 1 ] && echo "呑まれ在り" || echo "測れなんだ")$([ "$APPEND_STRICT" = "1" ] && echo "（門へ入れておる）" || echo "（★報告のみ=本札は門を落としておらぬ★）")=$(printf '%s' "$append_out" | grep -E '★呑まれ★|★増分が合わぬ★|⚠ 測れなんだ|★母数★' | fold_lines 4)★ "
     fi
-    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/engine台帳(cmd_1376)=$(verdict "$rc9")/engine登録検知=$(verdict "$rc10")/ml台帳(cmd_1408)=$(verdict "$rc11")/ml登録検知=$(mlcov)/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")/殿への通知路(cmd_1381)=$(verdict "$ntfy_rc")。${hooknote}${wirenote}${undistnote}${censusnote}${ntfynote}${census3note}${appendnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
+    # ★cmd_1413 (c)★= ★捏造の門が RED を申した朝は、門を落とさずとも家老の目へ入れる★。
+    #   ★rc=2 (別 repo が見えぬ等) も、別の理由で警報が出る朝には一緒に載せる★。
+    #   ★所見には【射程】の行を必ず含める★= ★RED の数だけを渡せば「捏造を全て見た」と読まれる★。
+    fabnote=""
+    if [ "$fab_rc" -ne 0 ]; then
+        fabnote="★捏造の門 (cmd_1396/1413)=$([ "$fab_rc" -eq 1 ] && echo "RED 在り" || echo "測れなんだ")$([ "$FAB_STRICT" = "1" ] && echo "（門へ入れておる）" || echo "（★報告のみ=本札は門を落としておらぬ★）")=$(printf '%s' "$fab_out" | grep -E '^RED |^\[射程\]|^\[見ておらぬ|UNDETERMINED' | fold_lines 4)★ "
+    fi
+    msg="【gate_nightly警告】沈黙落とし穴gate非PASS=gate-1(commit捕捉)=$(verdict "$rc1")/gate-2(変異台帳)=$(verdict "$rc2")/台帳登録検知=$(verdict "$rc3")/backend台帳(cmd_1355)=$(verdict "$rc4")/backend登録検知=$(verdict "$rc5")/app登録検知(cmd_1374)=$(verdict "$rc6")/app台帳=$(verdict "$rc6b")/web台帳(cmd_1374 A-1)=$(verdict "$rc7")/web登録検知=$(verdict "$rc8")/engine台帳(cmd_1376)=$(verdict "$rc9")/engine登録検知=$(verdict "$rc10")/ml台帳(cmd_1408)=$(verdict "$rc11")/ml登録検知=$(mlcov)/配布(cmd_1367)=$(verdict "$undist_rc")/木の点呼(cmd_1374)=$(verdict "$census_rc")/殿への通知路(cmd_1381)=$(verdict "$ntfy_rc")。${hooknote}${wirenote}${undistnote}${censusnote}${ntfynote}${census3note}${appendnote}${fabnote}所見=${detail} 処方=docs/content/ops/cmd_1352_silent_pitfall_gates.md (backend側は cmd_1355_backend_registry_extension.md) を見て名指しされた項目を是正し、対応する gate の再走で緑を確認せよ。"
     bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly \
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2
 fi
 
-echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") engine台帳=$(verdict "$rc9") engine登録検知=$(verdict "$rc10") ml台帳=$(verdict "$rc11") ml登録検知=$(mlcov) hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") 通知路=$(verdict "$ntfy_rc") 台帳の呑まれ=$(verdict "$append_rc")$([ "$APPEND_STRICT" = "1" ] || echo "（報告のみ）") ──"
-if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$rc9" -eq 1 ] || [ "$rc10" -eq 1 ] || [ "$rc11" -eq 1 ] || [ "$ml_cov_gate" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ] || [ "$ntfy_rc" -eq 1 ] || [ "$append_gate" -eq 1 ]; then exit 1; fi
-if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$rc11" -ne 0 ] || [ "$ml_cov_gate" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$append_gate" -ne 0 ]; then exit 2; fi
+echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") engine台帳=$(verdict "$rc9") engine登録検知=$(verdict "$rc10") ml台帳=$(verdict "$rc11") ml登録検知=$(mlcov) hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") 通知路=$(verdict "$ntfy_rc") 台帳の呑まれ=$(verdict "$append_rc")$([ "$APPEND_STRICT" = "1" ] || echo "（報告のみ）") 捏造の門=$(verdict "$fab_rc")$([ "$FAB_STRICT" = "1" ] || echo "（報告のみ）") ──"
+if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$rc9" -eq 1 ] || [ "$rc10" -eq 1 ] || [ "$rc11" -eq 1 ] || [ "$ml_cov_gate" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ] || [ "$ntfy_rc" -eq 1 ] || [ "$append_gate" -eq 1 ] || [ "$fab_gate" -eq 1 ]; then exit 1; fi
+if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$rc11" -ne 0 ] || [ "$ml_cov_gate" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$append_gate" -ne 0 ] || [ "$fab_gate" -ne 0 ]; then exit 2; fi
 exit 0

@@ -66,6 +66,10 @@ plans/**/README.md
 #   ★之を白名簿へ入れ忘れると【fresh clone に無い】= 両呼び手とも fail-open ゆえ
 #   ★黙って記録が消える★ = 「在るが配られておらぬ」の族 (本日 gate が名指した当の形)。
 !lib/switch_record.sh
+# cmd_1418 (2026-07-27): pane で CLI プロセスが現に動いているかを見る口。
+#   これも .gitignore:7 の * に黙って弾かれる。白名簿へ入れねば fresh clone に無く、
+#   agent_status.sh の実体欄が全部「不明」になる (在るが配られておらぬ形)。
+!lib/pane_cli_liveness.sh
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md
@@ -160,6 +164,8 @@ scripts/seo_qc.sh
 !scripts/retroactive_commit_verify.sh
 !scripts/mcp_health_check.sh
 !scripts/context_cleanup_diagnose.sh
+# cmd_1418 (2026-07-27): pane の CLI 生死を単体で見る CLI (lib/pane_cli_liveness.sh の入口)
+!scripts/pane_cli_liveness.sh
 # cmd_1255 (2026-07-11): 台帳parse自己検証gate (ledger_guard watcher + 手動検証CLI)
 !scripts/ledger_guard.sh
 !scripts/ledger_validate.py

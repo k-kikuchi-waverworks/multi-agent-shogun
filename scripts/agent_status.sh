@@ -46,6 +46,31 @@ done
 # ─── Load shared library ───
 source "$SCRIPT_DIR/lib/agent_status.sh"
 
+# ─── Load pane CLI liveness library (cmd_1418) ───
+# 「pane に何が描かれているか」ではなく「pane で CLI プロセスが現に動いているか」を見る。
+# 無くても既存の表示は動く (実体欄が '不明' になるだけ)。
+PCL_AVAILABLE=false
+if [[ -f "$SCRIPT_DIR/lib/pane_cli_liveness.sh" ]]; then
+    source "$SCRIPT_DIR/lib/pane_cli_liveness.sh"
+    PCL_AVAILABLE=true
+fi
+
+# 実体欄の値を返す。ライブラリが無い時は '不明' / 'UNKNOWN'。
+proc_state_label() {
+    local pane_target="$1" expected_cli="${2:-}"
+    if ! $PCL_AVAILABLE; then
+        pane_cli_liveness_label_fallback "$LANG_MODE"
+        return
+    fi
+    local verdict
+    verdict=$(pane_cli_liveness_check "$pane_target" "$expected_cli") || true
+    pane_cli_liveness_label "$verdict" "$LANG_MODE"
+}
+
+pane_cli_liveness_label_fallback() {
+    [[ "${1:-ja}" == "en" ]] && echo "UNKNOWN" || echo "不明"
+}
+
 # ─── Label functions ───
 state_label() {
     local rc="$1"
@@ -108,14 +133,17 @@ if $STANDALONE; then
         while IFS= read -r line; do PANE_TARGETS+=("$line"); done < <(tmux list-panes -s -t "$SESSION_NAME" -F '#{session_name}:#{window_name}.#{pane_index}' 2>/dev/null)
     fi
 
+    # 全 pane を同じ瞬間のプロセス表で判ずる (cmd_1418)
+    $PCL_AVAILABLE && pane_cli_liveness_snapshot on
+
     # Header
     printf "\n"
     if [[ "$LANG_MODE" == "en" ]]; then
-        printf "%-30s %-10s %s\n" "Pane" "State" "Agent ID"
-        printf "%-30s %-10s %s\n" "------------------------------" "----------" "----------"
+        printf "%-30s %-10s %-9s %s\n" "Pane" "State" "Process" "Agent ID"
+        printf "%-30s %-10s %-9s %s\n" "------------------------------" "----------" "---------" "----------"
     else
-        printf "%-30s %-10s %s\n" "Pane" "状態" "Agent ID"
-        printf "%-30s %-10s %s\n" "------------------------------" "----------" "----------"
+        printf "%-30s %-10s %-9s %s\n" "Pane" "状態" "実体" "Agent ID"
+        printf "%-30s %-10s %-9s %s\n" "------------------------------" "----------" "---------" "----------"
     fi
 
     for pane_target in "${PANE_TARGETS[@]}"; do
@@ -125,10 +153,13 @@ if $STANDALONE; then
 
         agent_is_busy_check "$pane_target" && rc=0 || rc=$?
         label=$(state_label "$rc")
+        proc_label=$(proc_state_label "$pane_target")
 
         print_padded "$pane_target" 30
         printf " "
         print_padded "$label" 10
+        printf " "
+        print_padded "$proc_label" 9
         printf " %s\n" "$agent_id"
     done
     printf "\n"
@@ -215,14 +246,17 @@ except Exception:
 " 2>/dev/null || echo "?"
 }
 
+# 全 pane を同じ瞬間のプロセス表で判ずる (cmd_1418)
+$PCL_AVAILABLE && pane_cli_liveness_snapshot on
+
 # ─── Output ───
 printf "\n"
 if [[ "$LANG_MODE" == "en" ]]; then
-    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "Agent" "CLI" "State" "Task ID" "Status" "Inbox"
-    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "------------------------------------------" "----------" "-----"
+    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "Agent" "CLI" "State" "Process" "Task ID" "Status" "Inbox"
+    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "---------" "------------------------------------------" "----------" "-----"
 else
-    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "Agent" "CLI" "Pane" "Task ID" "Status" "Inbox"
-    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "------------------------------------------" "----------" "-----"
+    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "Agent" "CLI" "Pane" "実体" "Task ID" "Status" "Inbox"
+    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "---------" "------------------------------------------" "----------" "-----"
 fi
 
 for i in "${!AGENTS[@]}"; do
@@ -241,6 +275,10 @@ for i in "${!AGENTS[@]}"; do
     agent_is_busy_check "$pane_target" "$cli_type" && rc=0 || rc=$?
     pane_state=$(state_label "$rc")
 
+    # 実体 (pane で CLI プロセスが現に動いているか) — cmd_1418
+    # metadata (CLI 欄) が緑でも実体が落ちている形を、ここで名指す。
+    proc_state=$(proc_state_label "$pane_target" "$cli_type")
+
     # Task info
     task_info=$(get_task_info "$agent")
     task_id=$(echo "$task_info" | awk '{print $1}')
@@ -252,6 +290,8 @@ for i in "${!AGENTS[@]}"; do
     # Print with CJK padding
     printf "%-10s %-7s " "$agent" "$cli_type"
     print_padded "$pane_state" 9
+    printf " "
+    print_padded "$proc_state" 9
     printf " %-42s %-10s %s\n" "$task_id" "$task_status" "$unread"
 done
 

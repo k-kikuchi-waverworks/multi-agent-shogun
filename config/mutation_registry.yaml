@@ -2583,6 +2583,115 @@ mutations:
     red_needle: "not ok 1 T-WIN-004"
     timeout: 600
 
+  # ─── ★四号の登録案 4 本 (cmd_1408 stage5 harness の牙)★ ─────────────────────
+  #   ★案の出所 = 足軽四号★ / ★代筆 = 六号 (台帳の単独書き手ゆえ)★。
+  #   ★貼る元 = plans/registry_entries_cmd1408_ash4.yaml (md5 b4180be43f80cee768a0d49b11f1de7a)★
+  #     = ★六号が己の手で md5 を撃ち直してから貼った (2026-07-27 09:18:26 実測)★。
+  #   ★登録の前に己の手で撃った★= 4 本とも PASS (赤 + 針の名指し・09:18:34〜09:18:59)。
+  #   ★四号の申し送り★= paths 7 本のうち config/settings.yaml と logs/ntfy_send.log は
+  #     ★追跡外★ゆえ ★配られた木では 4 本とも UNDETERMINED になる★ (緑の嘘にはならぬが緑にもならぬ)。
+  - id: MUT-1408-H1
+    desc: |
+      ★harness が【bats の検が名ごと消えた形】を緑と読まぬこと★。
+      bats --filter は綴りが当たらねば TAP 空計画 (1..0) を刷り ★rc=0 (緑)★ を返す
+      = ★1 本も走っておらぬのに緑★。harness が之を「変異後も緑のまま」と名指して
+      落ちねば、★検が消えた朝に 12/12 ok が出る★。
+    origin: cmd_1408
+    suspected_by: ashigaru4
+    paths: [tests/mutation_cmd1381_stage5.sh, tests/test_cmd1381_ntfy_logline.bats, scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, lib/ntfy_auth.sh, config/settings.yaml, logs/ntfy_send.log]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("tests/test_cmd1381_ntfy_logline.bats")
+      s = p.read_text(encoding="utf-8")
+      old = '@test "A2 '
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, '@test "ZQW ', 1), encoding="utf-8")
+      PY
+    test: |
+      bash tests/mutation_cmd1381_stage5.sh
+    expect: nonzero
+    # ★針は id だけでなく【理由】まで含める★= 依存を欠いた盤面の別の赤 (baseline) では当たらぬ形
+    red_needle: "MUT-1381-201 (制御文字を除く守りを外す→改行で行が割れる): ★変異させても試験が緑のまま★"
+    timeout: 600
+
+  - id: MUT-1408-H2
+    desc: |
+      ★harness が【錨の漂流】を黙って通さぬこと★= production の守りが先に消えておる盤面で、
+      harness は撃つ前に錨を数え ★hit 0 件★ と名乗って落ちる。名乗らねば
+      ★「撃ったふり」で ok が積まれる★ (規律(8)(a) の harness 側の顔)。
+    origin: cmd_1408
+    suspected_by: ashigaru4
+    paths: [tests/mutation_cmd1381_stage5.sh, tests/test_cmd1381_ntfy_logline.bats, scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, lib/ntfy_auth.sh, config/settings.yaml, logs/ntfy_send.log]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/ntfy.sh")
+      s = p.read_text(encoding="utf-8")
+      old = r"tr -d '\000-\037\177' | head -c 80"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "head -c 80", 1), encoding="utf-8")
+      PY
+    test: |
+      bash tests/mutation_cmd1381_stage5.sh
+    expect: nonzero
+    red_needle: "MUT-1381-201: anchor の hit が 0 件"
+    timeout: 600
+
+  - id: MUT-1408-H3
+    desc: |
+      ★負の対照 208 が【己と無縁の NG】を吸い取らぬこと★。
+      208 の帳消しが「NG が 1 増えた」だけを見ておれば、★harness 自身の赤の検めを
+      目潰しした時に立つ別種の NG (針が名指されぬ) を「期待どおり」と読み rc=0 へ戻す★
+      = ★2026-07-27 08:5x に現に起きておった形★ ⇒ 理由 [green] 以外は帳消しにせぬ。
+    origin: cmd_1408
+    suspected_by: ashigaru4
+    paths: [tests/mutation_cmd1381_stage5.sh, tests/test_cmd1381_ntfy_logline.bats, scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, lib/ntfy_auth.sh, config/settings.yaml, logs/ntfy_send.log]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("tests/mutation_cmd1381_stage5.sh")
+      s = p.read_text(encoding="utf-8")
+      old = "  if [ $rc -eq 0 ]; then"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "  if false; then", 1), encoding="utf-8")
+      PY
+    test: |
+      bash tests/mutation_cmd1381_stage5.sh
+    expect: nonzero
+    red_needle: "其の理由が [needle] であって [green] でない"
+    timeout: 600
+
+  - id: MUT-1408-H4
+    desc: |
+      ★harness が【依存を欠いた盤面】で緑を出さぬこと (SKIP=FAIL の harness 版)★。
+      config/settings.yaml を欠くと ntfy.sh が読めず ★素の bats が変異前から赤★ になる。
+      baseline の門が無ければ harness は其の赤を「変異ゆえ」と読み ★12/12 ok・rc=0★ を刷る
+      = ★2026-07-27 08:53 に fresh clone の姿で現に測った形★。
+    origin: cmd_1408
+    suspected_by: ashigaru4
+    paths: [tests/mutation_cmd1381_stage5.sh, tests/test_cmd1381_ntfy_logline.bats, scripts/ntfy.sh, scripts/gate_ntfy_sendlog.py, lib/ntfy_auth.sh, config/settings.yaml, logs/ntfy_send.log]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("config/settings.yaml")
+      s = p.read_text(encoding="utf-8")
+      old = "ntfy_topic:"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      # ★file を消さず key の綴りを外す★= 「在るが必要な key が無い」= 現に起こる漂流の形。
+      #   (file 削除は着弾の物差しが「空白のみ」と読み UNDETERMINED になる — 08:56 実測)
+      p.write_text(s.replace(old, "ntfy_topic_MISSING:", 1), encoding="utf-8")
+      PY
+    test: |
+      bash tests/mutation_cmd1381_stage5.sh
+    expect: nonzero
+    red_needle: "MUT-1381-201: ★baseline が既に赤"
+    timeout: 600
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

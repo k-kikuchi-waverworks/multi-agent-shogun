@@ -2775,7 +2775,9 @@ mutations:
       old = '    rc12=2; out12="[gate-2 ml coverage] UNDETERMINED: 同上"\nfi\n'
       n = s.count(old)
       assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, old.replace("\nfi\n", "\n  fi\n"), 1), encoding="utf-8")
+      # ★空白でなく【意味の在る綴り】を変える★ (gate-3 が 10:17 に鈍り疑いで名指した処方)
+      #   = 字下げだけを変える形では ★着弾を測れなんだ★ と門が申す (size 差 0 の族)。
+      p.write_text(s.replace(old, old.replace("\nfi\n", "\nfi  # ★変異★ 終端を崩す\n"), 1), encoding="utf-8")
       PY
     test: |
       bats tests/unit/test_gate_ml_registry.bats --filter T-ML-000

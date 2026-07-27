@@ -59,6 +59,61 @@ agent_registry_read_agents_from_settings() {
     ' "$settings"
 }
 
+# 廃止済みのエージェントを 1 行ずつ印字する (cmd_1418)。
+#
+# settings.yaml の `cli.agents.<name>.deprecated: true` を見る。
+# 廃止済みでも定義は残してある (cmd_645 の gunshi_a / gunshi_b が現物)。
+# pane は元より無いので、点呼では「不在」でも「待機中」でもなく
+# 「廃止済」と別に名乗らせる。一覧から黙って除くと、後から読む者が
+# 「居たものが消えた」と誤る。
+agent_registry_deprecated_agents() {
+    local settings="${1:-$AGENT_REGISTRY_SETTINGS}"
+    [ -f "$settings" ] || return 0
+
+    awk '
+        /^cli:[[:space:]]*$/ {
+            in_cli = 1
+            in_agents = 0
+            next
+        }
+
+        in_cli && /^[^[:space:]#]/ {
+            in_cli = 0
+            in_agents = 0
+        }
+
+        in_cli && /^[[:space:]]{2}agents:[[:space:]]*$/ {
+            in_agents = 1
+            next
+        }
+
+        in_agents {
+            if ($0 ~ /^[[:space:]]*#/ || $0 ~ /^[[:space:]]*$/) { next }
+            if ($0 !~ /^[[:space:]]{4}/) { exit }
+            if ($0 ~ /^[[:space:]]{4}[A-Za-z0-9_-]+:[[:space:]]*/) {
+                line = $0
+                sub(/^[[:space:]]*/, "", line)
+                sub(/:.*/, "", line)
+                agent = line
+                next
+            }
+            if (agent != "" && $0 ~ /^[[:space:]]{6}deprecated:[[:space:]]*true([[:space:]]|$)/) {
+                print agent
+                agent = ""
+            }
+        }
+    ' "$settings"
+}
+
+# agent_registry_is_deprecated <agent> [settings] → 廃止済みなら rc=0
+agent_registry_is_deprecated() {
+    local wanted="$1" settings="${2:-$AGENT_REGISTRY_SETTINGS}" agent
+    while IFS= read -r agent; do
+        [ "$agent" = "$wanted" ] && return 0
+    done < <(agent_registry_deprecated_agents "$settings")
+    return 1
+}
+
 agent_registry_has_agent() {
     local wanted="$1"
     shift || true

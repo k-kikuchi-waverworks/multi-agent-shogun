@@ -32,6 +32,10 @@
 #   mismatch  3  CLI は居るが期待した物と違う (札と実体の食い違い)
 #   unknown   4  見られなかった (pane_pid が取れぬ / /proc が読めぬ)
 #
+#   これに加えて deprecated (廃止済) という語がある。これはプロセスを見て出す
+#   判定ではなく、呼ぶ側 (点呼) が settings.yaml の deprecated: true を見て
+#   付ける札である。ここでは表示ラベルだけを持つ (cmd_1418)。
+#
 # 枷: 判定は読むだけで行う。プロセスへ signal を送らない。pane を殺さない。
 
 # ─── CLI ごとの実行ファイル名 ───
@@ -230,19 +234,21 @@ pane_cli_liveness_label() {
     local verdict="$1" lang="${2:-ja}"
     if [[ "$lang" == "en" ]]; then
         case "$verdict" in
-            alive)    echo "ALIVE" ;;
-            dead)     echo "DEAD" ;;
-            no_pane)  echo "NO-PANE" ;;
-            mismatch) echo "OTHER-CLI" ;;
-            *)        echo "UNKNOWN" ;;
+            alive)      echo "ALIVE" ;;
+            dead)       echo "DEAD" ;;
+            no_pane)    echo "NO-PANE" ;;
+            mismatch)   echo "OTHER-CLI" ;;
+            deprecated) echo "RETIRED" ;;
+            *)          echo "UNKNOWN" ;;
         esac
     else
         case "$verdict" in
-            alive)    echo "生存" ;;
-            dead)     echo "落ち" ;;
-            no_pane)  echo "不在" ;;
-            mismatch) echo "別CLI" ;;
-            *)        echo "不明" ;;
+            alive)      echo "生存" ;;
+            dead)       echo "落ち" ;;
+            no_pane)    echo "不在" ;;
+            mismatch)   echo "別CLI" ;;
+            deprecated) echo "廃止済" ;;
+            *)          echo "不明" ;;
         esac
     fi
 }

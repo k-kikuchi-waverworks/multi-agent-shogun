@@ -246,6 +246,31 @@ except Exception:
 " 2>/dev/null || echo "?"
 }
 
+# ─── 廃止済みのエージェント (cmd_1418) ───
+# settings.yaml に deprecated: true と書かれた定義 (cmd_645 の gunshi_a / gunshi_b)。
+# pane は元より無いため、既存の点呼はこれを「待機中」と出していた = 誤り。
+# 一覧から除くと「居たものが黙って消える」形になるので、除かずに札を替える。
+DEPRECATED_AGENTS=()
+if declare -f agent_registry_deprecated_agents >/dev/null 2>&1; then
+    while IFS= read -r _d; do
+        [ -n "$_d" ] && DEPRECATED_AGENTS+=("$_d")
+    done < <(agent_registry_deprecated_agents)
+fi
+is_deprecated_agent() {
+    local a
+    for a in ${DEPRECATED_AGENTS[@]+"${DEPRECATED_AGENTS[@]}"}; do
+        [[ "$a" == "$1" ]] && return 0
+    done
+    return 1
+}
+deprecated_label() {
+    if $PCL_AVAILABLE; then
+        pane_cli_liveness_label deprecated "$LANG_MODE"
+    else
+        [[ "$LANG_MODE" == "en" ]] && echo "RETIRED" || echo "廃止済"
+    fi
+}
+
 # 全 pane を同じ瞬間のプロセス表で判ずる (cmd_1418)
 $PCL_AVAILABLE && pane_cli_liveness_snapshot on
 
@@ -259,6 +284,7 @@ else
     printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "---------" "------------------------------------------" "----------" "-----"
 fi
 
+retired_count=0
 for i in "${!AGENTS[@]}"; do
     agent="${AGENTS[$i]}"
     pane_idx=$((PANE_BASE + i))
@@ -271,13 +297,20 @@ for i in "${!AGENTS[@]}"; do
         cli_type="?"
     fi
 
-    # Pane state
-    agent_is_busy_check "$pane_target" "$cli_type" && rc=0 || rc=$?
-    pane_state=$(state_label "$rc")
+    if is_deprecated_agent "$agent"; then
+        # 廃止済み — pane は無い。生死を問う対象ではないので判定しない。
+        retired_count=$((retired_count + 1))
+        pane_state=$(deprecated_label)
+        proc_state="-"
+    else
+        # Pane state
+        agent_is_busy_check "$pane_target" "$cli_type" && rc=0 || rc=$?
+        pane_state=$(state_label "$rc")
 
-    # 実体 (pane で CLI プロセスが現に動いているか) — cmd_1418
-    # metadata (CLI 欄) が緑でも実体が落ちている形を、ここで名指す。
-    proc_state=$(proc_state_label "$pane_target" "$cli_type")
+        # 実体 (pane で CLI プロセスが現に動いているか) — cmd_1418
+        # metadata (CLI 欄) が緑でも実体が落ちている形を、ここで名指す。
+        proc_state=$(proc_state_label "$pane_target" "$cli_type")
+    fi
 
     # Task info
     task_info=$(get_task_info "$agent")
@@ -295,4 +328,25 @@ for i in "${!AGENTS[@]}"; do
     printf " %-42s %-10s %s\n" "$task_id" "$task_status" "$unread"
 done
 
+printf "\n"
+
+# 母数の内訳を必ず出す (cmd_1418)。廃止済みを黙って除かない・黙って混ぜない。
+active_count=$(( ${#AGENTS[@]} - retired_count ))
+retired_names=""
+if (( retired_count > 0 )); then
+    retired_names=" ($(IFS=,; echo "${DEPRECATED_AGENTS[*]}"))"
+fi
+if [[ "$LANG_MODE" == "en" ]]; then
+    printf "Total %d = active %d + retired %d%s\n" \
+        "${#AGENTS[@]}" "$active_count" "$retired_count" "$retired_names"
+    if (( retired_count > 0 )); then
+        printf "Retired entries have no pane; liveness is not judged for them.\n"
+    fi
+else
+    printf "母数 %d 件 = 現役 %d 件 + 廃止済み %d 件%s\n" \
+        "${#AGENTS[@]}" "$active_count" "$retired_count" "$retired_names"
+    if (( retired_count > 0 )); then
+        printf "廃止済みは pane が無い。生死の判定は行わない (実体欄は -)。\n"
+    fi
+fi
 printf "\n"

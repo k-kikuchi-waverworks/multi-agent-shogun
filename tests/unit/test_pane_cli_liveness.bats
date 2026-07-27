@@ -21,6 +21,10 @@
 #   T-PCL-008  実行ファイル名の取り出し (純関数)
 #   T-PCL-009  CLI ごとの実行ファイル名の対応表
 #   T-PCL-010  判定語 → 表示ラベル
+#   T-PCL-010b 廃止済の札 (settings.yaml の deprecated: true 由来・プロセスは見ない)
+#   T-PCL-011  一巡だけ読む形でも同じ答えになる
+#
+# 廃止済みの側の試験は tests/unit/test_agent_registry_deprecated.bats にある。
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
@@ -181,6 +185,16 @@ _wait_for_verdict() {
     [ "$output" = "別CLI" ]
     run bash -c "source '$LIB'; pane_cli_liveness_label no_pane en"
     [ "$output" = "NO-PANE" ]
+}
+
+@test "T-PCL-010b: 廃止済の札 (プロセスを見て出す判定ではない)" {
+    run bash -c "source '$LIB'; pane_cli_liveness_label deprecated"
+    [ "$output" = "廃止済" ]
+    run bash -c "source '$LIB'; pane_cli_liveness_label deprecated en"
+    [ "$output" = "RETIRED" ]
+    # 知らぬ語は「不明」へ落ちる。廃止済がそこへ紛れていないことを見る。
+    run bash -c "source '$LIB'; pane_cli_liveness_label nosuchverdict"
+    [ "$output" = "不明" ]
 }
 
 # --- T-PCL-011: 一巡だけ読む形でも同じ答えになる ---

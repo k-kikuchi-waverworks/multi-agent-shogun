@@ -48,6 +48,14 @@ PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
 # 稼働中の pane へ書き込むテストの入口。tmux を触る前に必ず通す。
 require_live_pane_optin() {
     if [ "${E2E_BLOOM_ALLOW_LIVE_PANES:-0}" = "1" ]; then
+        # opt-in した上で session が無いのは、環境の問題ではなく前提が崩れている。
+        # SKIP にすると「走っていないのに合格」になるので不合格にする (cmd_1462)。
+        if ! tmux has-session -t multiagent 2>/dev/null; then
+            echo "opt-in したが tmux session 'multiagent' が無い。" >&2
+            echo "  出陣していない機械では、この 2 本は走れない。" >&2
+            echo "  SKIP にはしない。走っていないことを合格として扱わないためである。" >&2
+            return 1
+        fi
         return 0
     fi
     echo "このテストは走っていません。合格ではありません。" >&2
@@ -68,10 +76,12 @@ require_live_pane_optin() {
 }
 
 setup() {
-    # tmuxセッションの存在確認
-    if ! tmux has-session -t multiagent 2>/dev/null; then
-        skip "tmux session 'multiagent' が存在しない。VPS上でshutsuijin後に実行せよ。"
-    fi
+    # ★tmux session の有無をここで見ない★ (cmd_1462・軍師二号の検分 O1)
+    #   以前はここで session 単位の skip をしており、session が無い機械では 6 本とも
+    #   止まっていた。しかし pane へ書き込むのは 004/005 の 2 本だけで、
+    #   001/002/003/006/100 は session が無くても走れる。
+    #   走れる物が走れない物と一緒に止まっており、しかも SKIP なので合格に見えていた。
+    #   ⇒ session の確認は、それを本当に要る 004/005 の中へ移した。
 
     TEST_TMP="$(mktemp -d)"
     make_fixture_settings

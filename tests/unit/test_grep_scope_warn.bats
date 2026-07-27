@@ -236,3 +236,99 @@ _mutate() {
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "grep_scope"
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 23:2x 追加 — 軍師一号の検分 (8 通り) が名指した 3 つの穴。家老 23:20 が三件とも裁可
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ---------------------------------------------------------------------------
+# T-GSW-014: ★rg PAT . が鳴る★ — 今 最も普通に打たれる形が盲のまま黙っていた
+# ---------------------------------------------------------------------------
+@test "T-GSW-014: rg with an explicit path is still recursive — it must speak" {
+    run _fire "rg 'canary_only_in_untracked' ." ""
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "plans/untracked_a.md"
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-015: ugrep の同型も鳴る (家老の条件③)
+# ---------------------------------------------------------------------------
+@test "T-GSW-015: ugrep with an explicit path speaks too" {
+    run _fire "ugrep 'canary_only_in_untracked' ." ""
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "plans/untracked_a.md"
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-016: ★両方向★ 正しく全数を見る呼びでは、rg でも黙る
+#   ※之が無ければ T-GSW-014 は「常に鳴る門」でも緑になる
+# ---------------------------------------------------------------------------
+@test "T-GSW-016: rg rooted at a subdir that carries no .gitignore stays silent" {
+    run _fire "rg 'canary_only_in_untracked' ./plans" ""
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-017: ★git grep が鳴る★ + 責めでなく報せの一行を添える
+#   git grep は追跡下しか見ぬ = 家老を欺いたのと同じ病を持つ道具である
+# ---------------------------------------------------------------------------
+@test "T-GSW-017: git grep is tracked-only — it must speak, and say why" {
+    run _fire "git grep -n 'canary_only_in_untracked'" ""
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "plans/untracked_a.md"
+    echo "$output" | grep -q "git grep は元より追跡下のみを見る道具である"
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-018: ★負の対照★ git の他の副命令 (git log) では黙る
+# ---------------------------------------------------------------------------
+@test "T-GSW-018: other git subcommands stay silent" {
+    run _fire "git log --oneline" ""
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-019: ★引用符が閉じておらぬ command で、門が黙らぬ★
+#   段が 0 個で rc=0 は「何も検めておらぬ」が「異常なし」の顔で返る形である
+# ---------------------------------------------------------------------------
+@test "T-GSW-019: an unparseable command is named, not silently passed" {
+    run _fire 'grep -rn "unbalanced .' ""
+    [ "$status" -eq 2 ]
+    echo "$output" | grep -q "一つも検めておらぬ"
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-020: 変異E = rg の再帰判定に `and not roots` を戻すと T-GSW-014 が黙る
+# ---------------------------------------------------------------------------
+@test "T-GSW-020: mutation E (rg path guard restored) silences T-GSW-014" {
+    local mutant
+    mutant="$(_mutate 's|^    if not recursive and prog in ("rg", "ugrep"):|    if not recursive and prog in ("rg", "ugrep") and not roots:|')"
+    run _fire "rg 'canary_only_in_untracked' ." "" "$mutant"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-021: 変異F = git grep の読み取りを外すと T-GSW-017 が黙る
+# ---------------------------------------------------------------------------
+@test "T-GSW-021: mutation F (git grep detection removed) silences T-GSW-017" {
+    local mutant
+    mutant="$(_mutate 's|^    if tokens\[0\] == "git" and len(tokens) > 1 and tokens\[1\] == "grep":|    if False:|')"
+    run _fire "git grep -n 'canary_only_in_untracked'" "" "$mutant"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# ---------------------------------------------------------------------------
+# T-GSW-022: 変異G = lex 失敗を空 list へ戻すと T-GSW-019 が黙る
+#   ★「読めなんだ」が「異常なし」の顔になる形の再現★
+# ---------------------------------------------------------------------------
+@test "T-GSW-022: mutation G (lex failure returns empty) makes the gate silent again" {
+    local mutant
+    mutant="$(_mutate 's|^        return None$|        return []|')"
+    run _fire 'grep -rn "unbalanced .' "" "$mutant"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}

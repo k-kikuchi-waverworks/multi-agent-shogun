@@ -122,21 +122,29 @@ def blind_files(root: str) -> tuple[list[str], int]:
 # ══════════════════════════════════════════════════════════════════════════
 class Search:
     def __init__(self, pattern: str, flags: list[str], fixed: bool,
-                 roots: list[str] | None = None):
+                 roots: list[str] | None = None, git_grep: bool = False):
         self.pattern = pattern
         self.flags = flags      # /usr/bin/grep へ引き継ぐ flag
         self.fixed = fixed
         self.roots = roots or ["."]
+        # ★git grep は【根に依らず】常に追跡下しか見ぬ★ (道具の定義そのもの)。
+        #   ゆえに .gitignore の在処を見る判定を通さぬ (cmd_1399 の芯と同じ病を持つ道具である)。
+        self.git_grep = git_grep
 
 
-def _split_segments(command: str) -> list[list[str]]:
-    """`;` `&&` `||` `|` で割り、各段を token 列にする。lex に失敗したら空を返す。"""
+def _split_segments(command: str) -> list[list[str]] | None:
+    """`;` `&&` `||` `|` で割り、各段を token 列にする。
+
+    ★lex に失敗した時は None を返す (空 list ではない)★ — cmd_1425 と同じ族の直し。
+    空 list を返すと呼ぶ側の for が一度も回らず、★一つも検めておらぬのに rc=0★ になる。
+    「何も検めておらぬ」が「異常なし」の顔で返る形であり、本門が塞ごうとしている病そのものである。
+    """
     try:
         lexer = shlex.shlex(command, posix=True)
         lexer.whitespace_split = True
         toks = list(lexer)
     except Exception:
-        return []
+        return None
     segs, cur = [], []
     for t in toks:
         if t in (";", "&&", "||", "|", "&"):
@@ -160,6 +168,12 @@ def parse_search(tokens: list[str]) -> Search | None:
     """token 列が「盲点を持つ再帰検索」なら Search を、違えば None を返す。"""
     if not tokens:
         return None
+    # ★git grep は追跡下しか見ぬ = 家老を欺いたのと同じ病を持つ★ (家老 23:20 の裁)
+    #   綴りが "git" ゆえ検索器の一覧に当たらず、之まで黙っていた。
+    git_grep = False
+    if tokens[0] == "git" and len(tokens) > 1 and tokens[1] == "grep":
+        git_grep = True
+        tokens = ["grep"] + tokens[2:]
     prog = tokens[0]
     # ★`command grep` / `/usr/bin/grep` / `\grep` は全数を見る = 警めぬ★
     if prog != os.path.basename(prog) or prog not in IGNORE_AWARE:
@@ -234,13 +248,19 @@ def parse_search(tokens: list[str]) -> Search | None:
 
     if from_file or pattern is None:
         return None
-    # rg / ugrep は path を省くと既定で再帰する
-    if not recursive and prog in ("rg", "ugrep") and not roots:
+    # ★rg / ugrep は【path を与えても】既定で再帰する★ (家老 23:20 の裁で直した)
+    #   旧: `and not roots` が付いており、path を書くと再帰と読まなかった。
+    #   ⇒ ★今 最も普通に打たれる `rg PAT .` が盲のまま黙っていた★ (軍師一号 23:1x の検分)。
+    #   path が dir でなく file の時は blind_roots が dir か否かを見て弾くゆえ、之で騒ぎ過ぎぬ。
+    if not recursive and prog in ("rg", "ugrep"):
+        recursive = True
+    # git grep は path の有無に依らず木を掃く
+    if git_grep:
         recursive = True
     if not recursive:
         return None
     fixed = any(f in ("-F", "--fixed-strings") for f in carried)
-    return Search(pattern, carried, fixed, roots or ["."])
+    return Search(pattern, carried, fixed, roots or ["."], git_grep=git_grep)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -327,7 +347,11 @@ def _beat(root: str) -> None:
 def build_message(root: str, search: Search, observed_empty: bool | None,
                   cwd: str | None = None) -> str | None:
     cwd = cwd or root
-    blind = blind_roots(cwd, search.roots)
+    if search.git_grep:
+        # ★git grep は根に依らず追跡下しか見ぬ★ ゆえ .gitignore の在処を問わぬ
+        blind = [os.path.normpath(root)]
+    else:
+        blind = blind_roots(cwd, search.roots)
     if not blind:
         # 根に .gitignore が無い = 此の検索は全数を見ておる = 口を開かぬ
         return None
@@ -345,6 +369,9 @@ def build_message(root: str, search: Search, observed_empty: bool | None,
     if not files:
         return None
     hint = "根を下位 dir へ取れば見える (例: grep -rn PAT ./queue)"
+    if search.git_grep:
+        # 責めではなく報せである (家老 23:20 の指定)
+        hint = "git grep は元より追跡下のみを見る道具である。" + hint
     # 追跡下に当たりが在ったと判っている時は、深い走査を省いて一行だけ名乗る。
     # (WSL2 の /mnt/c では全数走査が 5〜7 秒 かかる = 毎回 払う値ではない)
     if observed_empty is False:
@@ -375,7 +402,15 @@ def run_hook(payload: dict) -> int:
         return 0
     _beat(root)
 
-    for seg in _split_segments(command):
+    segments = _split_segments(command)
+    if segments is None:
+        # ★lex に失敗した = 一つも検めておらぬ★。黙って rc=0 で返せば
+        # 「何も検めておらぬ」が「異常なし」の顔になる (本門が塞ぐ病そのもの)。
+        sys.stderr.write("[grep_scope] ★此の command を読めず、一つも検めておらぬ★ "
+                         "(引用符が閉じておらぬ等)。0 件と出ても「無い」の証にはならぬ\n")
+        return 2
+
+    for seg in segments:
         search = parse_search(seg)
         if search is None:
             continue
@@ -470,6 +505,24 @@ def cmd_selftest() -> int:
     check("S12 根を token から拾う", s2 is not None and s2.roots == ["./queue"])
     s3 = parse_search(["grep", "-rn", "foo"])
     check("S13 根を省いたら . と読む", s3 is not None and s3.roots == ["."])
+    # ★path を書いた rg / ugrep も再帰である★ (23:1x に軍師一号が名指した盲)
+    check("S16 rg pat . を再帰と読む",
+          parse_search(["rg", "foo", "."]) is not None)
+    check("S17 ugrep pat . を再帰と読む",
+          parse_search(["ugrep", "foo", "."]) is not None)
+    check("S18 rg pat file (dir でない) も候補には上げる (dir か否かは根の側で見る)",
+          parse_search(["rg", "foo", "a.txt"]) is not None)
+    # ★git grep は追跡下しか見ぬ★
+    s4 = parse_search(["git", "grep", "-n", "foo"])
+    check("S19 git grep を盲と読む", s4 is not None and s4.git_grep)
+    check("S20 git log は検索器でないゆえ黙る",
+          parse_search(["git", "log", "--oneline"]) is None)
+    # ★読めなんだ時は「空」でなく「読めぬ」を返す★
+    check("S21 lex に失敗したら None (空 list を返さぬ)",
+          _split_segments('grep -rn "unbalanced .') is None)
+    check("S22 lex が通れば list を返す",
+          isinstance(_split_segments('grep -rn foo .'), list))
+
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         os.makedirs(os.path.join(td, "sub"))

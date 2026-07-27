@@ -3609,6 +3609,73 @@ mutations:
     red_needle: NG S12b
     timeout: 300
 
+  - id: MUT-1387-FB1
+    desc: 見本用の予約帯を「黙って」除く変異。除いた件数を表示しなくなる。数を静かに減らす形は禁じられており (cmd_1408)、黙って除けば読む者は幽霊が実際に減ったと誤読する
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/gate_mutation_replay.py
+    - tests/unit/test_registry_fixture_band.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'print(f"  [予約帯] 見本用 MUT-9999-* を {len(fixture_refs)} 件 除いた"'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'print(f"  [黙] {len(fixture_refs)}"', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_fixture_band.bats --filter "T-FB-001"
+    expect: nonzero
+    red_needle: not ok 1 T-FB-001
+    timeout: 300
+  - id: MUT-1387-FB2
+    desc: 逆向きの守りを外す変異。予約帯の id を台帳へ登録できてしまう。除外と登録禁止は必ず対で置く必要があり、片方だけだと「登録されているのに幽霊検分から見えない本物」が作れる
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/gate_mutation_replay.py
+    - tests/unit/test_registry_fixture_band.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    if FIXTURE_ID_BAND_RE.match(str(e["id"])):'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, '    if False:', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_fixture_band.bats --filter "T-FB-003"
+    expect: nonzero
+    red_needle: not ok 1 T-FB-003
+    timeout: 300
+  - id: MUT-1387-FB3
+    desc: 予約帯を広げすぎる変異 (MUT-* 全部を見本扱い)。幽霊検分が本物も見逃す形になる。除外は狭い側へ倒すという契約を、反対側から縛る
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/gate_mutation_replay.py
+    - tests/unit/test_registry_fixture_band.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_mutation_replay.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'FIXTURE_ID_BAND_RE = re.compile(r"^MUT-9999-")'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'FIXTURE_ID_BAND_RE = re.compile(r"^MUT-")', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_registry_fixture_band.bats --filter "T-FB-002"
+    expect: nonzero
+    red_needle: not ok 1 T-FB-002
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

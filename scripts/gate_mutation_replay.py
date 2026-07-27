@@ -538,6 +538,21 @@ REGISTRY_ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*(?:-[A-Za-z0-9]
 REGISTRY_ID_RE_DISCARDED = re.compile(r"MUT-\d{3,4}-[A-Za-z0-9]+")
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 見本用の予約帯 MUT-9999-* (cmd_1387・2026-07-27 家老 17:31 の裁(乙))
+#
+# 何が起きていたか: 変異テストの道具は、自分の selftest の中で「台帳の見本」を作る。
+#   その見本 id (MUT-9999-SWALLOW など) を、幽霊 ID 検分が本物の id と同じに数えていた。
+#   実測 = 幽霊 64 件のうち 14 件が見本 id (gate_registry_append.py 10 / gate_verdict_drift.py 2 /
+#   test_gate_registry_append_wiring.bats 2)。
+# なぜ登録で消してはいけないか: 見本を台帳へ登録すれば、実体のない変異テストが 1 本増える。
+#   つまり「幽霊を消すために偽物を作る」形になる。数を減らすために中身を悪くしてはならない。
+# 対処: 綴りで分ける。9999 は実在しない cmd 番号なので、本物と衝突しない。
+#   検分は予約帯を除いて数え、除いた件数を必ず表示する (黙って減らさない)。
+#   逆向きの守りも同時に置く = 予約帯の id を台帳へ登録しようとしたら schema エラーにする
+#   (これが無いと「偽の変異テスト 1 本」を防ぐ代わりに「本物が黙って検分から落ちる」穴が開く)。
+FIXTURE_ID_BAND_RE = re.compile(r"^MUT-9999-")
+
+# ─────────────────────────────────────────────────────────────────────────────
 # gate-2 付帯4: ★視野計★ (--coverage に相乗り・cmd_1370)
 # 何を塞ぐか = ★「候補 N 件すべて登録済 = PASS」は【候補に挙がった物】しか数えておらぬ★。
 # 候補に挙がらなんだ牙は最初から分母の外に在り、検知器は静かに盲になる (軍師一号 R5)。
@@ -736,6 +751,12 @@ def validate_entry(e) -> str | None:
             return f"必須 field 欠落: {k}"
     if not isinstance(e["paths"], list) or not e["paths"]:
         return "paths が空"
+    # cmd_1387: 見本用の予約帯を本物として登録させない。
+    #   予約帯は幽霊 ID 検分から除かれる = ここを通せば「登録されているのに検分から見えない」
+    #   本物が生まれる。除外と登録禁止は必ず対で置く。
+    if FIXTURE_ID_BAND_RE.match(str(e["id"])):
+        return (f"id が見本用の予約帯にある: {e['id']} — MUT-9999-* は selftest の見本専用で、"
+                f"幽霊 ID 検分から除かれる。本物の変異テストには使えない (cmd_1387)")
     # cmd_1382: 着弾数の申告は整数のみ (綴り間違いを黙って既定 1 へ倒さぬ)
     if "anchor_sites" in e:
         try:
@@ -1311,7 +1332,14 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
         print(f"[gate-2 coverage] UNDETERMINED: {rerr}")
         return 2
     known = {str(e.get("id")) for e in entries}
-    ghosts = [(rel, ln, mid) for rel, ln, mid in refs if mid not in known]
+    # cmd_1387: 見本用の予約帯 (MUT-9999-*) を除く。除いた件数は必ず表示する。
+    fixture_refs = [(rel, ln, mid) for rel, ln, mid in refs if FIXTURE_ID_BAND_RE.match(mid)]
+    ghosts = [(rel, ln, mid) for rel, ln, mid in refs
+              if mid not in known and not FIXTURE_ID_BAND_RE.match(mid)]
+    fixture_files = sorted({rel for rel, _, _ in fixture_refs})
+    print(f"  [予約帯] 見本用 MUT-9999-* を {len(fixture_refs)} 件 除いた"
+          f" (file {len(fixture_files)} 本: {', '.join(fixture_files) if fixture_files else 'なし'})"
+          f" — selftest の見本ゆえ台帳には載らぬ。登録しようとすれば schema が拒む (cmd_1387)")
     # ── ★出所の別 (cmd_1408)★ = 「幽霊 N 件」の一語を A / C / C? の三語へ割る ──
     #   ★verdict は動かさぬ★ = A も C も従来どおり FAIL の中に数える (門を静かにする為に
     #   数を消す形は禁 — 家老下命)。★割るのは【誰の手番か】を画面から読ませる為である★:
@@ -2044,6 +2072,16 @@ def selftest() -> int:
         print(f"  ok {name}")
         ok += 1
 
+    def check(name: str, cond: bool, note: str = ""):
+        """真偽で縛る口 (cmd_1387)。rc でなく【出力の中身】を見る試験に使う。"""
+        nonlocal ok, ng
+        if cond:
+            print(f"  ok {name}")
+            ok += 1
+        else:
+            print(f"  NG {name}: {note}")
+            ng += 1
+
     with tempfile.TemporaryDirectory(prefix="mutreplay_selftest_") as td:
         T = Path(td)
 
@@ -2225,7 +2263,10 @@ def selftest() -> int:
 
         # T21: ★幽霊 ID 言及 (台帳に実在せぬ ID を「確認済」と申告) = FAIL + 名指し★
         #      ID は動的に組む — literal を書くと本 file 自身が幽霊言及になる (自縄自縛)
-        ghost_id = "MUT-" + "9999-999"
+        #      cmd_1387: 9999 は見本用の予約帯になったので 9998 へ移した。
+        #        9999 のままだと予約帯として除かれ、この試験が「幽霊を出せない」形で緑になる
+        #        (= 検査が何も見ていないのに通る形。実際にこの試験は赤で教えてくれた)。
+        ghost_id = "MUT-" + "9998-999"
         real_id = "MUT-" + "1111-001"
         repo = _mk_git_repo(T / "t21", {ctl: _COV_CONTROL_BODY,
                                         "tests/rogue_mutation.bats":
@@ -2359,7 +2400,37 @@ def selftest() -> int:
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
                            "--peer-registry", str(peer_reg)])
         expect("T71 枝つき幽霊を名指す (捨てた綴りなら黙る形)", 1, rc, branch, out)
+
         expect("T71b 影の計器が読みの差を数える", 1, rc, "[RULER-SHADOW]", out)
+
+        # ── cmd_1387: 見本用の予約帯 MUT-9999-* (家老 17:31 の裁(乙)) ──
+        # T75: 予約帯の id は幽霊に数えない。除いた件数は必ず表示する。
+        #   数を黙って減らす形は禁じられている (cmd_1408 の掟)。
+        fixture_id = "MUT-" + "9999-SAMPLE"
+        repo = _mk_git_repo(T / "t75", {ctl: _COV_CONTROL_BODY,
+                                        "tests/rogue_mutation.bats":
+                                            _COV_ROGUE_BATS + f"# selftest の見本: {fixture_id}\n"})
+        reg = T / "t75reg.yaml"
+        _write_reg(reg, [_cov_entry("MUT-COV-CTL", [ctl]),
+                         _cov_entry("MUT-COV-ROGUE", ["tests/rogue_mutation.bats"])])
+        rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo),
+                           "--peer-registry", str(peer_reg)])
+        ghost_lines = "\n".join(l for l in out.splitlines() if "GHOST-ID" in l)
+        check("T75 予約帯の id を幽霊に数えない", fixture_id not in ghost_lines,
+              f"予約帯の id が幽霊として名指された: {ghost_lines[:300]}")
+        check("T75b 除いた件数を名乗る", "見本用 MUT-9999-* を 1 件 除いた" in out,
+              f"除外の件数が出ておらぬ: {out[:400]}")
+
+        # T76: 逆向きの守り = 予約帯の id を台帳へ登録したら schema が拒む。
+        #   これが無いと「偽の変異テストを 1 本増やす」代わりに
+        #   「本物が黙って幽霊検分から落ちる」穴が開く (向きが逆の同じ病)。
+        why = validate_entry({"id": "MUT-" + "9999-REAL", "desc": "x", "paths": ["a"],
+                              "mutate": "x", "test": "x"})
+        check("T76 予約帯を本物として登録できない", bool(why) and "予約帯" in (why or ""),
+              f"予約帯の id が schema を通ってしまう: {why!r}")
+        why_ok = validate_entry({"id": "MUT-" + "1387-OK", "desc": "x", "paths": ["a"],
+                                 "mutate": "x", "test": "x"})
+        check("T76b 予約帯でない id は従来どおり通る", why_ok is None, f"→ {why_ok!r}")
 
         # T72: ★綴りの途中を拾わぬ★ = 捨てた綴りの二つ目の破れ (先読みが無い) の負例。
         #   ★捨てた綴りなら鳴り、今の物差しなら鳴らぬ★ = 誤検知の側からも物差しを縛る。

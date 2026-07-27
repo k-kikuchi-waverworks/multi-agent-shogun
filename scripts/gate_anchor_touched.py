@@ -80,7 +80,26 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_HISTORY = REPO_ROOT / "queue" / "state" / "anchor_dulling_history.yaml"
 HISTORY_MAX = 200          # 追記式ゆえ際限なく伸びる — 古い順に落とす (cmd_1385 の流儀に倣う)
 PER_ENTRY_TIMEOUT = 20     # 1 件の mutate/第2射に許す秒数 (実測 0.00s ゆえ 桁で余裕を取る)
-DEFAULT_BUDGET_SEC = 15.0  # 全体の所要上限 (実測 0.03s/件 ゆえ 桁で余裕。超えたら★名指して打ち切る★)
+DEFAULT_BUDGET_SEC = 15.0  # ★下限★ (小さい盤面で予算が痩せぬ為の床。★上限ではない★)
+
+# ══════════════════════════════════════════════════════════════════════════
+# ★cmd_1387 (2026-07-27 16:4x): ★育つ台帳と、固定の予算★
+# ──────────────────────────────────────────────────────────────────────────
+# ★実害の形★= 台帳 142 件・触った file 4 件の commit で ★選抜 55 件・実測 20.95s★ =
+#   ★固定 15.0s を超え、21 件を打ち切って UNDETERMINED を刷った★。
+#   ★牙は 1 本も鈍っておらなんだ★ (--budget-sec 240 で撃ち直せば 55 件すべて PASS)。
+# ⇒ ★★予算だけを上げれば、台帳が更に育った日に黙って同じ事が起きる★★ =
+#   ★之は「数を良くする動き」であって「守りを増やす動き」ではない★ ⇒ 二つを据える:
+#     (a) ★予算を【選抜件数】へ比例させる★ = 台帳の育ちに予算が追随する
+#     (b) ★打ち切りを【履歴へ焼く】★ = ★名乗るだけでは流れて消える★ =
+#         「何度 打ち切ったか」を後から数えられる形にする (母数を印字せよ の履歴版)
+# ★実測の出所★= 0.48s/件 (commit 時 16.40s / 34 件) と 0.38s/件 (撃ち直し 20.95s / 55 件)
+#   ⇒ ★悪い方 (0.48) を採り、倍の余裕を積んで 1.0s/件★。
+PER_ENTRY_BUDGET_SEC = 1.0
+# ★上限★= pre-commit へ置ける重さの天井 (之を超えるなら層の設計を見直す合図)。
+#   ★★之が「台帳が幾つまで育てば再び打ち切られるか」を決める★★ =
+#   MAX_BUDGET_SEC / PER_ENTRY_BUDGET_SEC = ★選抜 120 件★ が次の分かれ目である。
+MAX_BUDGET_SEC = 120.0
 
 # CONTRACT: ★本 gate は commit を止めぬ★ = 1 を返さぬ。これを破ると「正当な作業を塞ぐ門」へ化ける。
 NEVER_BLOCKS_COMMIT = True
@@ -156,6 +175,16 @@ def screen_entry(e, repo: Path, work: Path):
                                      spelling_measure=False)
 
 
+def derive_budget(selected_n: int) -> float:
+    """★予算を【選抜件数】から導く★ (cmd_1387・家老 16:48 の命(2))。
+
+    ★床★= 小さい盤面で予算が痩せぬ為 / ★天井★= pre-commit へ置ける重さの限り。
+    ★純粋な関数に切り出してある★= ★試験が【印字】でなく【数そのもの】を撃てる★ =
+      印字だけを見る試験は「数を固定へ戻す変異」を素通りさせる (本 gate で現に踏んだ)。
+    """
+    return min(MAX_BUDGET_SEC, max(DEFAULT_BUDGET_SEC, PER_ENTRY_BUDGET_SEC * selected_n))
+
+
 def history_append(path: Path, records: list) -> str | None:
     """鳴った件を追記式台帳へ焼く。失敗しても commit は止めぬが ★黙らぬ★ (理由を返す)。
 
@@ -187,7 +216,7 @@ def history_append(path: Path, records: list) -> str | None:
 
 
 def run(registry: Path, repo: Path, changed: list | None, history: Path,
-        budget: float, now: str | None = None) -> int:
+        budget: float | None = None, now: str | None = None) -> int:
     import time
     t0 = time.monotonic()
 
@@ -225,6 +254,18 @@ def run(registry: Path, repo: Path, changed: list | None, history: Path,
               f" (台帳 {len(entries)} 件) = ★盤面が変わっておらぬ牙は着弾数も変わらぬ★")
         return 0
 
+    # ── ★cmd_1387: 予算を【選抜件数】で決める★ (家老 16:48 の命(2)) ──
+    #   ★budget が None = 呼び手が明示しておらぬ★ ⇒ 盤面の大きさから導く。
+    #   ★明示された値は尊ぶ★ = 撃ち直しや試験が予算を握れる口を潰さぬ。
+    budget_note = ""
+    if budget is None:
+        budget = derive_budget(len(selected))
+        budget_note = (f" / 予算 {budget:.1f}s = 選抜 {len(selected)} 件 × "
+                       f"{PER_ENTRY_BUDGET_SEC}s (床 {DEFAULT_BUDGET_SEC}s・"
+                       f"天井 {MAX_BUDGET_SEC}s ⇒ ★選抜 "
+                       f"{int(MAX_BUDGET_SEC / PER_ENTRY_BUDGET_SEC)} 件を超えれば"
+                       f"再び打ち切りうる★)")
+
     rang, undet, skipped = [], [], []
     for e, hit in selected:
         if time.monotonic() - t0 > budget:
@@ -242,7 +283,8 @@ def run(registry: Path, repo: Path, changed: list | None, history: Path,
     # ★出所を必ず名乗る★= 鳴った時に「何を触ったと見做して測ったのか」が読めねば、
     #   読む者は己の変更と結び付けられぬ (src を鳴りの側にも載せる — 負例 S8 が縛っておる)。
     tail = (f" — 所要 {dt:.2f}s / 選抜 {len(selected)} 件"
-            f" (台帳 {len(entries)} 件・触った file {len(changed_set)} 件・出所={src})")
+            f" (台帳 {len(entries)} 件・触った file {len(changed_set)} 件・出所={src})"
+            + budget_note)
 
     if not rang and not skipped:
         print(f"[gate-3] PASS: 触った file を持つ牙 {len(selected)} 件すべて"
@@ -266,13 +308,30 @@ def run(registry: Path, repo: Path, changed: list | None, history: Path,
     print(f"  ★正本の判定は翌朝の全数 replay である★ (本 gate は物差しB のみ・"
           f"同一行に複数箇所在る形は見えぬ)")
 
-    if rang:
-        stamp = now or datetime.datetime.now().isoformat(timespec="seconds")
-        herr = history_append(history, [dict(r, ts=stamp) for r in rang])
+    # ★cmd_1387: 鳴りだけでなく【打ち切り】も焼く★ (家老 16:48 の命(1))
+    #   ★理★= ★名乗るだけでは流れて消える★ = 「何度 打ち切ったか」を後から数えられねば、
+    #   ★予算を上げた効き目も、次に育って再び切れた事も、誰にも判らぬ★
+    #   = ★母数を印字せよ (五号 09:54) の【履歴】における顔である★。
+    records = [dict(r, ts=(now or datetime.datetime.now().isoformat(timespec="seconds")))
+               for r in rang]
+    if skipped:
+        records.append({
+            "id": "*truncated*",
+            "why": (f"★打ち切り★ 選抜 {len(selected)} 件中 {len(skipped)} 件を"
+                    f"予算 {budget:.1f}s で打ち切った (所要 {dt:.2f}s) = ★未検分は緑ではない★"),
+            "touched": sorted(changed_set),
+            "skipped_ids": skipped,
+            "declared": None,
+            "suspected_by": None,
+            "ts": now or datetime.datetime.now().isoformat(timespec="seconds"),
+        })
+    if records:
+        herr = history_append(history, records)
         if herr:
             print(f"  ⚠ 記録を焼けなんだ ({history}): {herr} = ★画面の外に何も残っておらぬ★")
         else:
-            print(f"  記録 = {history} へ {len(rang)} 件 焼いた")
+            print(f"  記録 = {history} へ {len(records)} 件 焼いた"
+                  + (f" (うち打ち切り 1 件)" if skipped else ""))
     return 2
 
 
@@ -291,14 +350,19 @@ def _mk_repo(root: Path, body: str, git: bool = False) -> Path:
     return repo
 
 
-def _reg(path: Path, anchor_sites=None, mutate: str | None = None) -> Path:
+def _reg(path: Path, anchor_sites=None, mutate: str | None = None, n: int = 1) -> Path:
     import yaml
-    e = {"id": "MUT-S-001", "desc": "遊び場の牙", "paths": ["tool.py", "check.sh"],
-         "mutate": mutate or "sed -i 's/^FLAG = 0$/FLAG = 1/' tool.py",
-         "test": "bash check.sh", "suspected_by": "ashigaru3"}
-    if anchor_sites is not None:
-        e["anchor_sites"] = anchor_sites
-    path.write_text(yaml.safe_dump({"mutations": [e]}, allow_unicode=True), encoding="utf-8")
+    def _one(i):
+        e = {"id": f"MUT-S-{i:03d}", "desc": "遊び場の牙", "paths": ["tool.py", "check.sh"],
+             "mutate": mutate or "sed -i 's/^FLAG = 0$/FLAG = 1/' tool.py",
+             "test": "bash check.sh", "suspected_by": "ashigaru3"}
+        if anchor_sites is not None:
+            e["anchor_sites"] = anchor_sites
+        return e
+    # ★n = 選抜件数を作る口★ (cmd_1387 S13): ★予算が件数へ現に追随するか★ は
+    #   件数を動かして初めて測れる = ★1 件しか無い盤面では床と見分けが付かぬ★。
+    path.write_text(yaml.safe_dump({"mutations": [_one(i) for i in range(1, n + 1)]},
+                                   allow_unicode=True), encoding="utf-8")
     return path
 
 
@@ -431,6 +495,38 @@ def selftest() -> int:
         refute(f"S10b ★速さの契約 ({dt:.2f}s < 10s)★", dt < 10.0,
                f"所要 {dt:.2f}s = 物差しA が配線された疑い (pre-commit へ置けぬ重さ)")
 
+        # ── cmd_1387 (家老 16:48): ★育つ台帳と固定の予算★ の二条 ──
+        # S12 ★打ち切りは【履歴へ焼かれる】★= 名乗るだけでは流れて消える。
+        #     ★之が無ければ「何度 打ち切ったか」を後から数えられぬ★ =
+        #     予算を上げた効き目も、次に育って再び切れた事も、誰にも判らぬ。
+        hist12 = T / "hist12.yaml"
+        repo = _mk_repo(T / "s12", _UNIQUE)
+        rc, out = _invoke(["--registry", str(_reg(T / "s12.yaml")), "--repo-root", str(repo),
+                           "--changed-file", "tool.py", "--history", str(hist12),
+                           "--budget-sec", "0"])
+        expect("S12 予算 0 なら打ち切りを名乗る", 2, rc, "打ち切った", out)
+        refute("S12b ★打ち切りが履歴へ焼かれておる★",
+               hist12.is_file() and "*truncated*" in hist12.read_text(encoding="utf-8"),
+               "履歴に打ち切りの記録が無い = 画面の外に何も残っておらぬ")
+
+        # S13 ★予算は【選抜件数】へ現に追随する★
+        #     ★★己の非 (本日 三度目)★★= 初版の S13 は ★印字の言葉だけ★ を見ており、
+        #       ★予算を固定 15.0s へ戻す変異が緑のまま生き残った★ (己の変異試験で捕えた)
+        #     ⇒ ★選抜 20 件の盤面 = 床 (15.0) と導出 (20.0) が【現に食い違う】盤面★ で撃つ。
+        #       ★1 件の盤面では床と導出が同じ数ゆえ、何を測っても見分けが付かぬ★。
+        repo = _mk_repo(T / "s13", _DULLED)
+        rc, out = _invoke(["--registry", str(_reg(T / "s13.yaml", n=20)), "--repo-root", str(repo),
+                           "--changed-file", "tool.py", "--history", str(hist)])
+        expect("S13 予算が選抜 20 件へ追随する (床 15.0 ではない)", 2, rc, "予算 20.0s", out)
+        refute("S13b ★何件で再び切れるかを名乗る★", "件を超えれば" in out,
+               "『台帳が幾つまで育てば再び切れるか』が出力に無い")
+        # S13c ★導出そのものを直に撃つ★= 床 / 比例 / 天井 の三点
+        refute("S13c 予算の導出 = 床 15.0 / 比例 55.0 / 天井 120.0",
+               (derive_budget(1) == 15.0 and derive_budget(55) == 55.0
+                and derive_budget(9999) == 120.0),
+               f"derive_budget が契約と違う: {derive_budget(1)} / {derive_budget(55)} / "
+               f"{derive_budget(9999)}")
+
         # S11 ★1 を返す道が無いこと★を契約として置く
         refute("S11 NEVER_BLOCKS_COMMIT が立っておる", NEVER_BLOCKS_COMMIT is True,
                "止めぬ契約が降ろされておる")
@@ -446,7 +542,11 @@ def main() -> int:
     ap.add_argument("--changed-file", action="append", default=None,
                     help="検分対象の file (複数可)。既定は staged file から自動で絞る")
     ap.add_argument("--history", type=Path, default=DEFAULT_HISTORY)
-    ap.add_argument("--budget-sec", type=float, default=DEFAULT_BUDGET_SEC)
+    # ★既定は None = 「盤面の大きさから導く」★ (cmd_1387)。
+    #   ★明示された値は尊ぶ★ = 撃ち直し・試験が予算を握る口を潰さぬ。
+    ap.add_argument("--budget-sec", type=float, default=None,
+                    help=(f"全体の所要上限 (既定 = 選抜件数 × {PER_ENTRY_BUDGET_SEC}s・"
+                          f"床 {DEFAULT_BUDGET_SEC}s・天井 {MAX_BUDGET_SEC}s)"))
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:

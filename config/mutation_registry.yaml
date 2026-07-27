@@ -3519,6 +3519,50 @@ mutations:
     expect: nonzero
     red_needle: not ok 1 T-SW-008
     timeout: 300
+  - id: MUT-1387-BG1
+    desc: ★予算を固定 15.0s へ戻す変異★ = ★育つ台帳と固定の予算★の族 (2026-07-27 の commit で選抜 55 件・実測 20.95s が 15.0s を超え、★牙は 1 本も鈍っておらぬのに 21 件が未検分で UNDETERMINED になった★)。★初版の試験は印字の言葉だけを見ており本変異を素通りさせた = 見本を「床と導出が食い違う盤面 (選抜 20 件)」へ作り直して捕えた★
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/gate_anchor_touched.py
+    - scripts/gate_mutation_replay.py
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_anchor_touched.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'budget = derive_budget(len(selected))'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, 'budget = DEFAULT_BUDGET_SEC', 1), encoding="utf-8")
+      PY
+    test: |
+      python3 scripts/gate_anchor_touched.py --selftest
+    expect: nonzero
+    red_needle: NG S13
+    timeout: 300
+  - id: MUT-1387-BG2
+    desc: ★打ち切りを履歴へ焼く一手を落とす変異★ = ★名乗るだけでは流れて消える★ ⇒ 「何度 打ち切ったか」を後から数えられぬ = ★予算を上げた効き目も、次に育って再び切れた事も誰にも判らぬ★ (母数を印字せよ の【履歴】における顔)
+    origin: cmd_1387
+    suspected_by: ashigaru6
+    paths:
+    - scripts/gate_anchor_touched.py
+    - scripts/gate_mutation_replay.py
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_anchor_touched.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    if skipped:\n        records.append({'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, '    if False:\n        records.append({', 1), encoding="utf-8")
+      PY
+    test: |
+      python3 scripts/gate_anchor_touched.py --selftest
+    expect: nonzero
+    red_needle: NG S12b
+    timeout: 300
 
 coverage_waivers: []
 

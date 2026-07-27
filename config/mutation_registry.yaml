@@ -3901,6 +3901,116 @@ mutations:
     red_needle: not ok 1 T-ARD-003
     timeout: 300
 
+  # ── cmd_1399 (三号の稿 §8 の登録案・書き手は六号) ────────────────────────────
+  #  ★案から 1 点だけ変えた = expect_red を「変異試験そのもの」から「働きを直に検める試験」へ移した★
+  #  三号の案は G1→T-GSW-006 / G2→T-GSW-007 / G3→T-GSW-008 / G4→T-GSW-013 であった。
+  #  この 4 本は自分の中で sed を撃って写しを壊す形ゆえ、台帳の変異を先に当てると
+  #  ★sed が当たらなくなり MUTATION-DID-NOT-APPLY で赤くなる★ (2026-07-27 23:0x 実測・4 本とも)。
+  #  = 赤くはなるが、赤の理由が「働きが壊れた」ではなく「己の sed が当たらぬ」である。
+  #  ⇒ 働きを直に検める側 (002/004/003/012) へ移した。四本とも「not ok 1 …」を実測。
+  - id: MUT-1399-G1
+    origin: cmd_1399
+    suspected_by: ashigaru3
+    desc: |
+      再帰 grep の 0 が二義である形を塞ぐチェック (scripts/grep_scope_warn.py) の変異試験。
+      未追跡側の一覧を空へ落とすと、追跡下 0 件のときに file 名で名指す働きが消える。
+      消えても緑なら T-GSW-002 は守りでなく飾りである (偽陰性の側)。
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    allp = [p for p in out.stdout.split("\\0") if p]'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, '    allp = []', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-002"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-002
+    timeout: 300
+
+  - id: MUT-1399-G2
+    origin: cmd_1399
+    suspected_by: ashigaru3
+    desc: |
+      検索器の判定 (IGNORE_AWARE) を素通しにする変異。全数を見る呼び方 (command grep) にまで
+      騒ぎ出す。騒いでも緑なら T-GSW-004 は「盲点が無い所で黙る」を守っておらぬ (偽陽性の側)。
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    if prog != os.path.basename(prog) or prog not in IGNORE_AWARE:'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, '    if False:', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-004"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-004
+    timeout: 300
+
+  - id: MUT-1399-G3
+    origin: cmd_1399
+    suspected_by: ashigaru3
+    desc: |
+      当たりの有無を見ずに「在る」と言う変異 (負の対照)。本当に無いときの「0 件」の名乗りが
+      嘘になる。嘘でも緑なら、このチェックは 0 を一義にしておらぬ = 直そうとした当の病が残る。
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = '\n    if hits:\n'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, '\n    if True:\n', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-003"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-003
+    timeout: 300
+
+  - id: MUT-1399-G4
+    origin: cmd_1399
+    suspected_by: ashigaru3
+    desc: |
+      根の .gitignore の有無を見ずに「どの dir も盲」と読ませる変異。下位 dir を根にした
+      (元より全数を見ておる) 検索にまで騒ぎ出す。騒いでも緑なら狼少年を止める側の縛りが無い。
+      三号が撃った第一案 (if not blind: return None の 1 行を潰す) は現に空振りした =
+      後段の絞り込みも blind を使うゆえ静かなまま。ゆえに変異点は判定側へ移してある。
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'if os.path.isdir(base) and os.path.isfile(os.path.join(base, ".gitignore")):'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, 'if os.path.isdir(base):', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-012"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-012
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

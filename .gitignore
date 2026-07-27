@@ -163,9 +163,14 @@ scripts/seo_qc.sh
 !scripts/stop_hook_inbox.sh
 !scripts/session_start_hook.sh
 !scripts/agent_status.sh
-!scripts/ratelimit_check.sh
 !scripts/switch_cli.sh
-!scripts/discord_post.sh
+# cmd_1447 (2026-07-28): ★!scripts/ratelimit_check.sh と !scripts/discord_post.sh を此処から落とした。★
+#   機序 = 実体は fd78d52 (2026-07-02・cmd_1159) で scripts/retired/ へ退役したが、その commit は
+#   git mv だけを撃っており .gitignore を触っておらぬ。★白名簿は指す先を失っても何も申さぬ★ゆえ
+#   26 日間 誰も気付かなんだ (指し先が消えても git は黙る = cmd_1440 と同じ族)。
+#   落とす側を選んだ理由 = ★retired 配下を指す形 (乙案) は下の cmd_1445 の註と真っ向から食い違う★。
+#   なお retired 3 本は今も追跡下である。★.gitignore は既に index に在る file を追跡外にはせぬ★
+#   (隔離した木で実測: retired/ratelimit_check.sh は check-ignore で除外と出るが、現に追跡下に在る)。
 # ★scripts/discord_channel_inventory.sh と scripts/discord_channel_delete.sh は【永久に追跡せぬ】★
 #   (家老裁定 2026-07-26・cmd_1367 軍師一号検分)。★ここに書く理由 = 次の者が迷うのは docs を
 #   読む時ではなく、この file を編む時ゆえ★ (先例 = 下記 gpu_sidecar_stop.sh の運用記録の注)。
@@ -370,7 +375,10 @@ scripts/seo_qc.sh
 #   skills/waverworks-deploy-theme/ 6 本
 #     = 殿の会社固有の deploy 道具であり、この repo の OSS 配布面ではない (上の Skills 帯は
 #       「public OSS skills」と名乗っており、この skill だけ 0 件なのは意図と読める)。
-#       同 dir の .gitignore が deploy.config.yml を名指しで拒んでおる点も、配らぬ側の証である。
+#       ★cmd_1447 (2026-07-28) 追記 = 上の二文めに在った「同 dir の .gitignore が deploy.config.yml を
+#       名指しで拒んでおる点も、配らぬ側の証である」は取り下げた。★ 其の行の側が誤りであり
+#       (頭書・中身・追加 commit の三つが揃って commit OK を指す)、cmd_1447 で落としたゆえである。
+#       ★配らぬと判ずる根拠は上の一文め (殿の会社固有ゆえ OSS 配布面ではない) だけが残る。★
 
 
 # SayTask (sample template only, not actual data)

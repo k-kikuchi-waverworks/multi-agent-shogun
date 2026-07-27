@@ -1,6 +1,11 @@
 # 機密情報・バックアップ・鍵ファイルは絶対コミットしない
 .env
-deploy.config.yml
+# cmd_1447 (2026-07-28): ★deploy.config.yml を此処から落とした。★
+#   ①頭書「機密情報なし、commit OK」②同 file を拒む此の行 — 二つが 4ebbff5 の【同じ commit】で
+#   同時に書かれ、★その commit 自身が deploy.config.yml を追跡下へ入れておる★。
+#   中身を全 23 行 読んで確かめた = 保持世代数・precheck の真偽・検証 path (/ と /wp-login.php)・
+#   snapshot の要否のみで、接続情報も鍵も無い (それらは .env と .env.sample が持つ)。
+#   ⇒ ★頭書と実際の振舞いが一致しており、誤っておるのは此の行の側である★ (鍵の帯からの写し誤りと読む)。
 backups/
 *.zip
 *.tar.gz

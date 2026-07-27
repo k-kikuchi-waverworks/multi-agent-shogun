@@ -491,6 +491,47 @@ DECLARED = {
     # ★閾 3 の根拠 = cron 180秒 × 3 = 9分 < stall_min 15分★ ゆえ、
     # ★stall_min を動かす日は此の 3 も一緒に検め直さねばならぬ★ (根拠が崩れる)。
     "DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD": 3,
+
+    # ===== ここから下は cmd_1459 (2026-07-28) で足した 17 件 =====
+    # 判断の基準 (家老 08:18 の求めに応じて先に書く):
+    #   ★その値を動かした時に「誰を起こすか / 誰へ警報を上げるか」が変わる物を契約とする。
+    #     残す量や後始末の都合だけが変わる物は契約としない。★
+    # 足すまでの状態 = 20件のうち宣言されていたのは上の2件だけで、
+    # 残り18件はどれも値を動かしてもテストが1本も赤くならなかった。
+
+    # ── /clear を撃つか撃たぬかを決める ──
+    "DEFAULT_MIN_INTERVAL_MIN": 5,        # 同じ相手へ続けて撃つまでの最短間隔 (CLAUDE.md の「5分に1回」と揃える)
+    "DEFAULT_MAX_CONSECUTIVE": 3,         # 連続で撃てる上限。超えたら撃つのをやめて家老へ知らせる
+    "DEFAULT_KARO_STALE_MIN": 20,         # 家老が止まっていると見なすまでの分数。家老への /clear は重いので長め
+    "DEFAULT_KARO_MIN_INTERVAL_MIN": 20,  # 家老へ続けて撃つまでの最短間隔 (設計 §4 が 15〜20分 以上と定める)
+    "KARO_LABOR_FUTURE_SKEW_MIN": 5,      # 時計のずれの許容。これを超えて未来の刻は無視する
+
+    # ── 警報を上げるか上げぬかを決める ──
+    "DEFAULT_ALERT_COOLDOWN_MIN": 30,          # 同じ相手・同じ任について鳴らし直すまでの間隔
+    "DEFAULT_BLACKOUT_THROTTLE_MIN": 30,       # 一斉沈黙の警告を家老へ上げる最短間隔
+    "DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN": 30, # 上流の壁の警報の最短間隔
+    "DEFAULT_GAP_WARN_FACTOR": 2.0,            # 周期の何倍 空いたら欠測と名指すか (1回の飛ばしは許す)
+
+    # ── 一斉沈黙 (停電型) と見なすかを決める ──
+    "DEFAULT_QUORUM_MIN_STALLED": 3,      # 同時に止まっている体数の下限。1〜2体では系の事故と見なさない
+    "DEFAULT_QUORUM_RATIO": 0.75,         # 走査した相手のうち、止まっている割合の下限
+
+    # ── 上流の壁が明けたと見なす刻を決める ──
+    "RESUME_GRACE_MIN": 3,                # 明ける予定を過ぎてからの余裕 (時計ずれと反映遅れを吸収)
+    "FALLBACK_RESUME_MIN": 60,            # 明ける予定が読めない時、初回検知から何分で点検を促すか
+    "MAX_RESETS_ETA_AHEAD_HOURS": 6,      # 明ける予定として受け付ける上限。これ超は古い掲示の翌日誤読と見る
+    "OUTAGE_EXPIRE_HOURS": 24,            # 台帳の episode を畳む期限。畳まないと事故が永久に居座る
+
+    # ── 「切替が説明する」と見なす窓 ──
+    "SWITCH_EXPLAINS_SLACK_SEC": 30,      # 実測の最大 1.3 秒に対する余裕。広げ過ぎると札が意味を失う (T-SW-004 が向きを縛る)
+
+    # ── 物差しそのもの ──
+    # ★この1件だけ性質が違う。本試験が守れる範囲を実際より高く書かないため、ここに書く。★
+    # 180 は「我らが決めた値」ではなく「cron が現に */3 で走っている」という他所の事実の写しである。
+    # ゆえに ★cron の周期が変わっても、この宣言は緑のまま黙って偽になる★。
+    # 本試験が守れるのは「この file の側が黙って動く」ことだけである。
+    # (2026-07-28 実測: crontab は */3 で、写しは現に合っている)
+    "DEFAULT_EXPECTED_INTERVAL_SEC": 180,
 }
 bad = []
 for name, want in DECLARED.items():
@@ -749,4 +790,87 @@ PY
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "IMPOSSIBLE_CLAIM 抑止 = 1 体 .*JUDGED=1 AGE_KNOWN=1 AGE_UNKNOWN=0"
     _refute_output "★0 の意味"
+}
+
+# ---------------------------------------------------------------------------
+# T-AGE-020 (cmd_1459・2026-07-28) — 宣言そのものが古びる形を塞ぐ
+#
+# 家老の問い: 宣言に足すだけで足りるか。答え = 足りない。
+# 上の DECLARED は人が書き足す一覧なので、明日 誰かが定数を足しても一覧は黙ったままである。
+#
+# 実測 (2026-07-28 08:3x): 本体の直下にある数値の定数は20件。
+# うち宣言されていたのは2件だけで、残り18件はどれも値を動かしてもテストが1本も赤くならなかった。
+# 同じ形を stall_watchdog_scan.py 側でも見つけている (4件中2件が野放し・T-015 で塞いだ)。
+#
+# 本試験は一覧の側を縛る。本体の直下にある数値の定数を機械で数え上げ、
+# その全部が「契約として宣言されている」か「契約ではないと明示されている」かの
+# どちらかであることを求める。どちらでもない定数が1件でもあれば赤くなる。
+#
+# 契約かどうかの判断の基準 (DECLARED の中にも同じ物を書いてある):
+#   その値を動かした時に「誰を起こすか / 誰へ警報を上げるか」が変わる物を契約とする。
+#   残す量や後始末の都合だけが変わる物は契約としない。
+#
+# 本試験が見ない範囲:
+#   1. モジュール直下の、大文字の名前の、数値そのものの代入だけを見る。
+#      式で組み立てた値・関数の既定引数・dict や tuple の中の数は見ない。
+#   2. 「宣言されている」ことしか見ない。宣言された値が正しいかは T-AGE-013 の仕事である。
+#   3. 見るのは idle_revive_scan.py だけである。
+#   4. ★他所の事実の写し (cron の周期など) が、他所の側で動いた時は見えない。★
+#      本試験が守れるのは「この file の側が黙って動く」ことだけである。
+# ---------------------------------------------------------------------------
+@test "T-AGE-020: every numeric constant is either declared as a contract or explicitly excluded (a new one goes red)" {
+    run "$PROJECT_ROOT/.venv/bin/python3" - <<'PY'
+import ast, os, re
+
+target = os.environ["SCAN_PY"]
+bats_file = os.environ["BATS_TEST_FILENAME"]
+
+# ── 本体の直下にある数値の定数を数え上げる ──
+tree = ast.parse(open(target, encoding="utf-8").read())
+found = {}
+for node in tree.body:
+    if not isinstance(node, ast.Assign):
+        continue
+    for t in node.targets:
+        if not (isinstance(t, ast.Name) and t.id.isupper()):
+            continue
+        v = node.value
+        if isinstance(v, ast.Constant) and isinstance(v.value, (int, float)) \
+           and not isinstance(v.value, bool):
+            found[t.id] = v.value
+
+# ── 宣言を、この file から読み取る (二重に書けば其方が古びるため) ──
+body = open(bats_file, encoding="utf-8").read()
+m = re.search(r"^DECLARED = \{(.*?)^\}", body, re.S | re.M)
+if not m:
+    raise SystemExit("DECLARED を読み取れなかった。書き方が変わったなら本試験の読み口も直せ")
+declared = set(re.findall(r'^\s*"([A-Z0-9_]+)"\s*:', m.group(1), re.M))
+
+# ★探し方が生きている証★ — 読み口が死ぬと「全部 宣言されている」と黙って緑を返す。先に落とす。
+if len(declared) < 10:
+    raise SystemExit(f"宣言を {len(declared)} 件しか読めなかった = 読み口が死んでいる")
+if not found:
+    raise SystemExit("本体から数値の定数を1件も拾えなかった = 読み口が死んでいる")
+
+# ── 契約ではないと明示する物 (足す時は理由を必ず書くこと) ──
+NOT_A_CONTRACT = {
+    # 台帳に残す episode の本数の上限。古い順に落とすだけで、
+    # 誰を起こすか・誰へ警報を上げるかは1つも変わらない。残す量の話である。
+    "UPSTREAM_HISTORY_MAX",
+}
+
+undeclared = sorted(set(found) - declared - NOT_A_CONTRACT)
+if undeclared:
+    raise SystemExit(
+        "契約として宣言されていない数値の定数がある "
+        "(値を動かしても、どの試験も赤くならない状態である):\n  "
+        + "\n  ".join(f"{n} = {found[n]}" for n in undeclared)
+        + "\n  ⇒ 動かせば『誰を起こすか/誰へ警報を上げるか』が変わるなら DECLARED へ足せ。"
+          "\n  ⇒ 残す量や後始末の都合だけなら NOT_A_CONTRACT へ理由つきで足せ")
+
+print(f"OK every constant is accounted for: 本体 {len(found)} 件 / "
+      f"契約 {len(declared)} 件 / 契約でないと明示 {len(NOT_A_CONTRACT)} 件")
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OK every constant is accounted for"
 }

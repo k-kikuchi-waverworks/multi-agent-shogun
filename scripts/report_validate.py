@@ -48,7 +48,20 @@
                ⇒ ★timestamp の引用符を外すと YAML が datetime へ変え、str でなくなり黙って飛ぶ★
        害 = status: done と書いてあっても not_done と読まれ、
             ★「働いておるのに idle」と判定される★ (cmd_1395 が塞いだ害の、鍵の側の面)
-       ★落とさぬ★ = R5 は書き手の画面へ ★名指すだけ★ で、CLI の rc を赤にせぬ
+       R5d/R5d2 (cmd_1450・警告のみ) ★帳面が指す稿の名と、現に在る物の食い違い★
+       R5a〜R5c が問うたのは ★報告そのものの形★ である。R5d が問うのは
+       ★報告が「畢わった」と名乗る其の刻に、帳面の指す先に物が在るか★ である。
+       出所 = 2026-07-28 未明、軍師二号が帳面の target_path (plans/cmd_1442_rules_draft.md)
+         と ★別の名★ で稿を書いた (…_rules_consolidation.md)。★捕える門が無く、
+         家老の差し戻しで人が気付いた★ (CLAUDE.md 条D-2 の二例目)。
+         同族は本夜 三度 出て ★三度とも人が気付き、機械は一度も鳴っておらぬ★。
+       ★常に鳴る門にせぬ★ = 完遂を名乗った report にのみ撃つ。実測 (2026-07-28 06:34) =
+         完遂の条件が無ければ ★走行中の任 5/5 が鳴り★、条件を付ければ ★0 件★。
+       R5d2 = target_path が ★路として読めぬ★ 時は「無い」と数えず別に名乗る。
+         黙って捨てる形は番人 (idle_revive_scan.py:1505-1536) が現に踏んでおる病である。
+       ★機械が判ずるのは綴りの突き合わせだけ★ = 註の【意味】の真偽 (「未配線である」等) は
+         此の門の外である。稿 plans/cmd_1450_annotation_gate.md §5 に分けて書いた。
+    ★落とさぬ★ = R5 は書き手の画面へ ★名指すだけ★ で、CLI の rc を赤にせぬ
             (家老 22:24 の枷「名指すまでに留めよ」)。hook 経路のみ exit 2 で書き手へ返すが、
             ★PostToolUse の exit 2 は既に済んだ書込を取り消さぬ★ = 何も落ちておらぬ。
 
@@ -71,6 +84,7 @@ import os
 import pathlib
 import re
 import sys
+import tempfile
 import time
 
 import yaml
@@ -300,16 +314,20 @@ def reader_can_parse_time(value) -> bool:
     return True
 
 
-def current_task(stem: str) -> tuple[str | None, str | None, set]:
-    """queue/tasks/{agent}.yaml の (task_id, updated_at, 前任 id の集合)。読めねば空。
+def current_task(stem: str, tasks_dir=None) -> tuple[str | None, str | None, set, str | None]:
+    """queue/tasks/{agent}.yaml の (task_id, updated_at, 前任 id の集合, target_path)。読めねば空。
+
+    tasks_dir = 帳面の在処を差し替える口。★試験が現物の queue/tasks/ へ 1 byte も
+    書かずに【帳面を読む口そのもの】を撃つために要る★ (cmd_1450 の変異4 が現に生き残った)。
 
     ★前任 id を併せて返す理由★= 新任が配られた直後に前任の完遂を書く形は ★正しい★。
     実測 (2026-07-27 22:3x) = 軍師二号が現に其の形であった (新任 22:30 / 前任の完遂 22:35)。
     task YAML は其れを prev_task_id* として自ら申告しておるゆえ、★申告に在る id では鳴らさぬ★。
     """
-    empty: tuple[str | None, str | None, set] = (None, None, set())
+    empty: tuple[str | None, str | None, set, str | None] = (None, None, set(), None)
     agent = stem.replace("_report", "")
-    ty = _SCRIPTS_DIR.parent / "queue" / "tasks" / f"{agent}.yaml"
+    base = pathlib.Path(tasks_dir) if tasks_dir else _SCRIPTS_DIR.parent / "queue" / "tasks"
+    ty = base / f"{agent}.yaml"
     if not ty.is_file():
         return empty
     try:
@@ -325,16 +343,56 @@ def current_task(stem: str) -> tuple[str | None, str | None, set]:
     upd = body.get("updated_at") or body.get("timestamp")
     prev = {v for k, v in body.items()
             if isinstance(k, str) and k.startswith("prev_task_id") and isinstance(v, str)}
+    tgt = body.get("target_path")
     return (tid if isinstance(tid, str) else None,
             upd if isinstance(upd, str) else None,
-            prev)
+            prev,
+            tgt if isinstance(tgt, str) else None)
 
 
-def warn_text(text: str, stem: str, task_lookup=None) -> list[str]:
+# ── R5d (cmd_1450) が使う口 ────────────────────────────────────────────────
+#   ★名の突き合わせ以外はせぬ★= 中身の真偽 (「この稿は規を4条 書いた」等) は
+#   機械では判ぜられぬ。判ぜられるのは ★帳面が指す綴りと、現に在る物の綴り★ だけである。
+DELIVERABLE_FIELDS = ("deliverable", "deliverables", "target_path",
+                      "artifact", "artifacts", "output", "outputs")
+#   路と読める拡張子。★此処に無い綴りは「路として読めぬ」と名乗る (黙って捨てぬ)★=
+#   黙って捨てる形こそ、番人が現に踏んでおる病である (task YAML 206-211 行の実例)。
+PATH_SUFFIXES = {".md", ".py", ".sh", ".yaml", ".yml", ".bats", ".txt",
+                 ".ts", ".tsx", ".js", ".kt", ".json", ".toml", ".log"}
+
+
+def looks_like_path(value) -> bool:
+    """★路として読めるか★。読めぬ物を「無い」と数えぬための見分け。"""
+    if not isinstance(value, str) or not value.strip() or "\n" in value:
+        return False
+    return pathlib.PurePosixPath(value.strip()).suffix in PATH_SUFFIXES
+
+
+def repo_path_exists(rel: str) -> bool:
+    """repo 根からの相対で現物が在るか。★試験は此処を差し替えて現物へ触れぬ★。"""
+    return (_SCRIPTS_DIR.parent / rel.strip()).exists()
+
+
+def named_paths(doc: dict) -> list[str]:
+    """報告が己で名乗った成果物の路を集める (deliverable 系の欄のみ)。"""
+    out: list[str] = []
+    for field in DELIVERABLE_FIELDS:
+        value = doc.get(field)
+        for item in (value if isinstance(value, list) else [value]):
+            if looks_like_path(item) and item.strip() not in out:
+                out.append(item.strip())
+    return out
+
+
+def warn_text(text: str, stem: str, task_lookup=None, path_exists=None) -> list[str]:
     """R5 = ★読み手が探す鍵を持っておるか★。返り = 警告 list (空 = 何も言うことなし)。
 
-    task_lookup = (task_id, updated_at) を返す callable。★試験が現物の queue/tasks/ を
-    書き換えずに R5c を撃てるようにする口★ (既定 = current_task)。
+    task_lookup = (task_id, updated_at, 前任 id, target_path) を返す callable。★試験が
+    現物の queue/tasks/ を書き換えずに R5c/R5d を撃てるようにする口★ (既定 = current_task)。
+    ★3 つ組を返す古い口も受ける★ (target_path 無しと読む = R5d は黙る)。
+    path_exists = 路の現物在否を返す callable (既定 = repo_path_exists)。
+    ★試験が此処を差し替える理由 = 条C「己を母数から外す」★ = 試験の作り物が
+    plans/ 等へ現物を作れば、門が数える盤面を門の試験が動かす形になる。
     """
     warnings: list[str] = []
     view = reader_view(text)
@@ -382,7 +440,10 @@ def warn_text(text: str, stem: str, task_lookup=None) -> list[str]:
     #   ★常に鳴る門にせぬ★= 単なる不一致では鳴らさぬ。前任の完遂を書いた直後に
     #   新任が配られる形は ★正しく不一致★ ゆえ (実測: 22:2x 時点で現物 9 本すべて不一致)。
     #   鳴らすのは ★現任が配られた【後に】書かれた完遂が、別の id を名乗っておる時★ のみ。
-    task_id, task_upd, prev_ids = (task_lookup or current_task)(stem)
+    looked = tuple((task_lookup or current_task)(stem))
+    task_id, task_upd, prev_ids, target_path = (looked + (None,) * 4)[:4]
+    if prev_ids is None:
+        prev_ids = set()
     if task_id and keyed:
         ids = {d.get("task_id") or d.get("primary_task") for d in keyed}
         if task_id not in ids:
@@ -405,6 +466,60 @@ def warn_text(text: str, stem: str, task_lookup=None) -> list[str]:
                     f"     読み手 = {READER}:1573-1575 は現任の id でしか探さぬ ⇒ "
                     "★此の完遂は現任の完遂として数えられぬ★\n"
                     "     (前任の報告を書いておるだけなら、之は正しい形である — 書き手が判ぜよ)"
+                )
+
+    # ── R5d = ★帳面が指す稿の名と、現に在る物が食い違う★ (cmd_1450) ──
+    #   ★出所★= 2026-07-28 未明、軍師二号が帳面の target_path
+    #   (plans/cmd_1442_rules_draft.md) と別の名 (…_rules_consolidation.md) で稿を書いた。
+    #   ★之を捕える門は無く、家老の差し戻しで人が気付いた★ (CLAUDE.md 条D-2 の二例目)。
+    #   同族は本夜 三度 出て、★三度とも人が気付き、機械は一度も鳴っておらぬ★。
+    #
+    #   ★常に鳴る門にせぬ★ (cmd_1388 の族・実測で二度 確かめた):
+    #     ・完遂の条件を付けずに撃つと ★走行中の任が悉く鳴る★
+    #       = 2026-07-28 06:34 実測で 5/5 件 (稿は書き終わる前は無いのが当たり前ゆえ)。
+    #     ・完遂の条件を付ければ同じ盤面で ★0 件★。
+    #   ゆえに鳴らすのは ★現任の完遂を己で名乗った report★ に限る。
+    #
+    #   ★退けた案 = 「同じ cmd 番号の別名の file が在れば鳴らす」★
+    #     plans/ には一つの cmd につき走査器・生の出力が並ぶ (実測 cmd_1449 = 11 本)。
+    #     ★而も此の門を作る拙者自身の probe 2 本が、其の母数へ現に入った★
+    #     = 条C「己を母数から外せ」を、判定に使えば必ず破る形ゆえ採らぬ。
+    #     ★手掛かりとしてだけ出す★= 判定には使わず、報告が名乗った路のみを並べる。
+    exists = path_exists or repo_path_exists
+    if task_id and target_path is not None:
+        done_docs = [
+            d for d in keyed
+            if (d.get("task_id") or d.get("primary_task")) == task_id
+            and isinstance(d.get("status"), str)
+            and d.get("status").strip().lower() in COMPLETION_WORDS
+        ]
+        if done_docs:
+            if not looks_like_path(target_path):
+                warnings.append(
+                    "[R5d2] 帳面の target_path が ★路として読めぬ★\n"
+                    f"     task YAML = {task_id!r} の target_path = {target_path!r}\n"
+                    "     読み手 = scripts/idle_revive_scan.py:1505-1536 (newest_output_mtime) は\n"
+                    "     ★target_path を【路として】読み、読めねば警告も出さず黙って候補から捨てる★\n"
+                    "     害 = 「出力が漸進しておれば revive せぬ」守りが、註釈 1 つで黙って外れる\n"
+                    "     ⇒ ★直すのは帳面の側★ (註は target_path_note へ書き、path 欄は路のみ)"
+                )
+            elif not exists(target_path):
+                named = []
+                for d in done_docs:
+                    for p in named_paths(d):
+                        if p != target_path and p not in named:
+                            named.append(p)
+                alive = [p for p in named if exists(p)]
+                warnings.append(
+                    "[R5d] 完遂を名乗っておるが、★帳面が指す稿の先に物が無い★\n"
+                    f"     task YAML = {task_id!r} の target_path = {target_path!r} (現物 無し)\n"
+                    f"     此の report が名乗る別の路 = {named or '(名乗り無し)'}"
+                    f" / 其のうち現物 在り = {alive or '(無し)'}\n"
+                    "     ⇒ 考えられる形は二つ。★書き手が判ぜよ★\n"
+                    "       (甲) ★名を己で付けた★= 帳面から写さず別の名で書いた (条D-2)\n"
+                    "       (乙) ★帳面の側が古い★= 任が替わった時に target_path が追随しておらぬ\n"
+                    "     ★どちらでも「稿を書いた」と「帳面の指す所に在る」は別である★\n"
+                    "     害 = 引く者が指す先を失う。★番人も此の path を出力の漸進の物差しに使う★"
                 )
     return warnings
 
@@ -575,6 +690,35 @@ def selftest() -> int:
         else:
             print(f"  ok  B2 {label} の stem を表から立て、表へ当て直して確かめた: {why}")
 
+    # ★B3 (cmd_1450) = 【帳面を読む口】そのものを撃つ★
+    #   ★何ゆえ要るか★= W5 系は task_lookup を差し替えて撃つゆえ、★current_task が
+    #   target_path を読む所は一度も走っておらぬ★。現に変異4 (読む口を切って常に None を
+    #   返す) が ★selftest 全緑のまま生き残った★ (2026-07-28 06:4x 実測)。
+    #   = ★門の判定は試験されており、門への配線は試験されておらなんだ★。
+    #   帳面は tempfile へ作る = ★現物の queue/tasks/ へ 1 byte も書かぬ★ (条C)。
+    with tempfile.TemporaryDirectory() as _td:
+        _tdir = pathlib.Path(_td)
+        (_tdir / "zz_probe.yaml").write_text(
+            "task:\n  task_id: subtask_9450\n  updated_at: '2026-07-28T05:00:00'\n"
+            "  prev_task_id: subtask_9449\n  target_path: 'plans/cmd_9450_draft.md'\n",
+            encoding="utf-8")
+        (_tdir / "zz_notarget.yaml").write_text(
+            "task:\n  task_id: subtask_9451\n  updated_at: '2026-07-28T05:00:00'\n",
+            encoding="utf-8")
+        got = current_task("zz_probe_report", tasks_dir=_tdir)
+        want = ("subtask_9450", "2026-07-28T05:00:00", {"subtask_9449"}, "plans/cmd_9450_draft.md")
+        if got == want:
+            print("  ok  B3 帳面から (task_id/updated_at/前任/target_path) を現に読めた")
+        else:
+            ok = False
+            print(f"  NG  B3 ★帳面を読む口が壊れておる★ 期待={want} / 実際={got}")
+        got2 = current_task("zz_notarget_report", tasks_dir=_tdir)
+        if got2[3] is None:
+            print("  ok  B3n target_path の無い帳面では None を返す = ★R5d は黙る★ (負の対照)")
+        else:
+            ok = False
+            print(f"  NG  B3n target_path が無いのに {got2[3]!r} を返した")
+
     for name, text, stem, needle in _cases():
         if stem is None:
             ok = False
@@ -597,7 +741,13 @@ def selftest() -> int:
     # ── R5 (cmd_1407) = ★鍵を消せば赤・正しい物では静か★ を両方向で ──
     #   ★試験の前提を焼き付けぬ★= task YAML は差し替え可能な口 (task_lookup) から与える。
     _NO_TASK = lambda _stem: (None, None, set())  # noqa: E731  R5c を黙らせる (R5a/R5b だけを撃つ)
-    for name, text, stem, lookup, needle in [
+    #   ★R5d の試験は path_exists も差し替える★= 現物の plans/ へ 1 byte も作らぬ
+    #     (条C = 門の試験が門の数える盤面を動かす形にせぬ)。
+    _NO_FILE = lambda _p: False   # noqa: E731  「其の路に物は無い」
+    _HAS_FILE = lambda _p: True   # noqa: E731  「其の路に物が在る」
+    _T = "plans/cmd_9450_draft.md"           # 帳面が指す綴り (現物には存在せぬ名)
+    _T_OTHER = "plans/cmd_9450_written.md"   # 書き手が己で付けた別の名
+    for case in [
         (
             "W1 任意名の下へ入れた task_id (三号の現物と同じ形) = 読み手から見えぬ",
             "cmd1426_two_writers:\n  task_id: subtask_1426\n  status: done\n"
@@ -653,8 +803,66 @@ def selftest() -> int:
             "ashigaru3_report",
             lambda _s: ("subtask_NEW", "2026-07-27T22:30:00", {"subtask_OLD"}), None,
         ),
+        # ── R5d (cmd_1450) = 帳面の名と現に在る物の食い違い ──
+        (
+            "W5 完遂を名乗るが帳面の指す稿が無い (軍師二号 cmd_1442 と同じ形)",
+            f"task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n"
+            f"deliverable: {_T_OTHER}\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(), _T),
+            "[R5d]", _NO_FILE,
+        ),
+        (
+            "W5h R5d は ★書き手が己で名乗った別の名★ を手掛かりに出す",
+            f"task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n"
+            f"deliverable: {_T_OTHER}\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(), _T),
+            _T_OTHER, _NO_FILE,
+        ),
+        (
+            "W5n 帳面の指す稿が現に在る = ★緑★",
+            f"task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n"
+            f"deliverable: {_T}\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(), _T),
+            None, _HAS_FILE,
+        ),
+        (
+            "W5n2 未だ走行中 (完遂を名乗っておらぬ) = ★緑★ "
+            "(2026-07-28 06:34 実測 = 完遂の条件が無ければ 5/5 の任が鳴る)",
+            "task_id: subtask_9450\nstatus: in_progress\n"
+            "timestamp: '2026-07-28T06:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(), _T),
+            None, _NO_FILE,
+        ),
+        (
+            "W5n3 書いてあるのは前任の完遂だけ = ★緑★ (R5d は現任の完遂しか見ぬ)",
+            "task_id: subtask_OLD\nstatus: done\ntimestamp: '2026-07-28T04:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", {"subtask_OLD"}, _T),
+            None, _NO_FILE,
+        ),
+        (
+            "W5p 帳面の target_path が路として読めぬ (七号の現物と同じ形) = 黙って捨てぬ",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(),
+                        "queue/reports/x_report.yaml (調査報告・実装なし)"),
+            "[R5d2]", _NO_FILE,
+        ),
+        (
+            "W5c 古い 3 つ組を返す task_lookup では R5d は ★黙る★ (後方互換)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set()),
+            None, _NO_FILE,
+        ),
     ]:
-        got = warn_text(text, stem, task_lookup=lookup)
+        name, text, stem, lookup, needle, *rest = case
+        got = warn_text(text, stem, task_lookup=lookup,
+                        path_exists=(rest[0] if rest else None))
         if needle is None:
             passed = not got
             detail = "" if passed else " / 出た警告=" + "; ".join(g.split("\n")[0] for g in got)

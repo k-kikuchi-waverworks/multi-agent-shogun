@@ -7,7 +7,7 @@
 #   D2 ★SIGKILL では名乗らぬ★ = SIGKILL → ENDED 行は出ぬ (= probe が要る証)
 #   D3 ★丁度 1 度だけ名乗る★  = 自然終了 → ENDED が ★1 行★ (2 行以上なら subshell 毎に
 #        鳴っておる = ★log を汚す新しい不具合を我らが作った★ことになるゆえ数まで見る)
-#   NC ★負の対照★             = trap を持たぬ旧版へ D1 を撃つ → ENDED 行が出ぬ
+#   NC ★負の対照★             = 被検体から trap を抜いた版へ D1 を撃つ → ENDED 行が出ぬ
 #        ⇒ ★之が無ければ D1 は「何を撃っても緑」と区別が付かぬ★
 #
 # ★枷 = 本番へ指一本 触れぬ★
@@ -137,21 +137,50 @@ BEFORE="$(board_snapshot)"
 echo "■ 事前の盤面 (pid 集合) = $BEFORE"
 echo
 
-# ── 負の対照: trap を持たぬ旧版 (HEAD) を取り出す ──
-git show HEAD:scripts/watcher_supervisor.sh > "$OLD" 2>/dev/null || { echo "SKIP不可: HEAD 版を取れぬ"; exit 1; }
+# ══════════════════════════════════════════════════════════════════
+# ── 負の対照 = ★被検体から trap の据付だけを抜いた版を、其の場で作る★ ──
+# ══════════════════════════════════════════════════════════════════
+# ★★初版は `git show HEAD:…` で旧版を取っておった = 之が誤りであった★★
+#   ⇒ ★HEAD は動く★。四号が本 trap を commit した其の瞬間、
+#     ★HEAD が trap を持つに至り、負の対照が【被検体と同じ物】に化けた★
+#     = ★対照が対照でなくなったのに、其れを報せる口が無かった★
+#     (現に commit 直後の撃ちで NC が落ち、初めて露見した)。
+#   ⇒ ★★対照は【歴史】に拠らせるな。【被検体そのもの】から作れ★★
+#     = 何時 誰が何を commit しようとも、対照は常に「trap 抜き」であることが構造で決まる。
+# ★綴りに引用符が挟まる形 (trap '_sup_on_signal TERM 15' TERM) を取り零すな★
+#   = 初手の regex は `^trap (_sup…)` と書いて ★引用符つきの 3 本を取り零した★。
+#   ★而して下の門が其の場で捕えた★ = 「対照が対照でない」を緑にせぬ口が現に働いた証。
+sed -E "s/^trap .*_sup_on_.*/# CONTROL: trap を据えておらぬ (負の対照)/" \
+    "$SUT" > "$OLD" || { echo "対照を作れぬ"; exit 1; }
 OLD_TRAPS=$(grep -c '^trap ' "$OLD" || true)
 NEW_TRAPS=$(grep -c '^trap ' "$SUT" || true)
+
+# ★★対照が対照であることを、撃つ前に機械へ言わせる★★
+#   = ★之が無ければ「対照が壊れた」が【緑】の顔で通る★ (初版が現に其の形であった)。
+if [ "$OLD_TRAPS" != "0" ]; then
+    echo "✘ ★負の対照が trap を ${OLD_TRAPS} 本 持っておる = 対照になっておらぬ★"
+    echo "  ⇒ ★判定を打ち切る★ (壊れた対照の上の緑は、何も証さぬ)"
+    exit 1
+fi
+if [ "$NEW_TRAPS" = "0" ]; then
+    echo "✘ ★被検体が trap を 1 本も持っておらぬ = 対照と同じ物★ — 判定を打ち切る"
+    exit 1
+fi
+if cmp -s "$OLD" "$SUT"; then
+    echo "✘ ★対照と被検体が byte 一致 = 同じ物を二度 撃っておる★ — 判定を打ち切る"
+    exit 1
+fi
 echo "■ 被検体 = $SUT"
-echo "■ trap の数: HEAD(旧)=${OLD_TRAPS} / 被検体(新)=${NEW_TRAPS}"
+echo "■ trap の数: 負の対照=${OLD_TRAPS} (0 であるべき) / 被検体=${NEW_TRAPS}"
 echo
 
 # ── NC: 旧版 + SIGTERM → ENDED は出ぬ筈 (試験に刃が在る証) ──
-echo "■ NC ★負の対照★ = trap 無しの旧版へ SIGTERM"
+echo "■ NC ★負の対照★ = trap を抜いた版へ SIGTERM"
 run_case "nc_old_term" "$OLD" TERM
 if grep -q "$MARKER" "$LOGF"; then
-    echo "  ✘ NC FAIL: 旧版が ENDED を刷った = ★試験が版を見分けておらぬ★"; FAIL=1
+    echo "  ✘ NC FAIL: 対照が ENDED を刷った = ★試験が版を見分けておらぬ★"; FAIL=1
 else
-    echo "  ✔ NC PASS: 旧版は名乗らぬ ⇒ ★D1 の緑は trap 由来と言える★"
+    echo "  ✔ NC PASS: 対照は名乗らぬ ⇒ ★D1 の緑は trap 由来と言える★"
 fi
 echo
 

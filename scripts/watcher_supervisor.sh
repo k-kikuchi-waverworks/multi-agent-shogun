@@ -8,7 +8,13 @@ set -euo pipefail
 # - ashigaru / gunshi 列挙は scripts/lib/agent_list.sh 経由で settings.yaml から動的取得
 # - shogun (別 pane shogun:main.0) と karo (multiagent:agents.0) は special、hardcoded retain
 # - deprecated agent (settings.yaml の deprecated:true) は自動 skip
-# - pane 不在時 (例: gunshi2 の pane 0.9 殿手動起動前) は start_watcher_if_missing 内 pane_exists guard で skip
+# - pane 不在時 (まだ起動していない pane / 廃止済み定義の pane) は start_watcher_if_missing 内
+#   pane_exists guard で skip
+#   ※ 註 (cmd_1418・2026-07-27 実測): 上の例に挙げていた「gunshi2 の pane 0.9」は古い。
+#     実際に在る pane は 0-8 の9枚だけで、内訳は karo(0) + ashigaru1-6(1-6)
+#     + gunshi1(7) + gunshi2(8)。ashigaru7 は今の盤に居ない。
+#     0.9 以降は廃止済み定義 (gunshi_a・gunshi_b、settings.yaml で deprecated: true) が
+#     一覧の並び順で当てられる席であり、pane そのものが存在しない。
 #
 # cmd_1339 (2026-07-25): 交差配達事故 (軍師一号×足軽六号 session 喪失) を受けた構造是正。
 # - pane 解決は @agent_id 正本 (scripts/lib/pane_gate.sh)。命名規約/settings.yaml は fallback。

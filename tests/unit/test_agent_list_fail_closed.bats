@@ -245,7 +245,21 @@ _sup() {
     # ★上の T-AL-012/013 は RENOTE=3600 で上書きして撃っておる★= 既定は其の射程の外。
     local declared=60
 
-    run env -u WATCHER_AGENT_LIST_RENOTE_SEC \
+    # ─── cmd_1418 (2026-07-27): 標準エラーと値が混ざって落ちた件の手当て ───
+    # 真因: cmd_1408 で watcher_supervisor.sh に EXIT trap が入り、抜ける時に
+    # 「watcher_supervisor ENDED …」を★標準エラーへ★刷るようになった
+    # (watcher_supervisor.sh:37 の sup_log が >&2)。
+    # 下の 2>/dev/null は読み込みの間だけ掛かっており、後始末は抜ける時に鳴るゆえ効かぬ。
+    # bats の run は既定で標準出力と標準エラーを1つに入れるゆえ、値と後始末が混ざって落ちた。
+    #
+    # 手当ては2段。片方だけでは足りない (2026-07-27 実測)。
+    #   (a) --separate-stderr で標準エラーを $stderr へ分ける。捨ててはいない。
+    #   (b) 値は最後に刷るゆえ、標準出力の★最終行★だけを見る。
+    #       読み込みの途中で標準出力へ何か増えても、この検めは壊れない。
+    # ※ (b) だけでは足りぬ理由: 実測では併合時の並びが「値 → 後始末」であり、
+    #    最終行は後始末の行になる。標準エラーを分けて初めて最終行が値になる。
+    bats_require_minimum_version 1.5.0
+    run --separate-stderr env -u WATCHER_AGENT_LIST_RENOTE_SEC \
             __WATCHER_SUPERVISOR_TESTING__=1 \
             SHOGUN_LOCK_DIR="$TEST_TMPDIR/locks" \
             bash -c '
@@ -253,7 +267,7 @@ _sup() {
         printf "%s\n" "$AGENT_LIST_RENOTE_SEC"
     '
     [ "$status" -eq 0 ]
-    [ "$output" = "$declared" ]
+    [ "${lines[${#lines[@]}-1]}" = "$declared" ]
 }
 
 # ─────────────────────────────────────────────────────────────

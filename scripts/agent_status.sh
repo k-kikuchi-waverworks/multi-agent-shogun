@@ -197,6 +197,10 @@ if declare -f agent_registry_multiagent_agents >/dev/null 2>&1; then
     done < <(agent_registry_multiagent_agents)
 fi
 if [ "${#AGENTS[@]}" -eq 0 ]; then
+    # 最後の手段。settings.yaml が読めない時だけ使う旧構成 (OSS 素の陣容) の名前で、
+    # 今の盤の陣容ではない。今の盤は pane 0-8 = karo + ashigaru1-6 + gunshi1(pane 7)
+    # + gunshi2(pane 8) (2026-07-27 実測。ashigaru7 と 名無しの gunshi は居ない)。
+    # 旧構成の盤でも点呼が落ちないよう、この一覧そのものは減らさない。
     AGENTS=("karo" "ashigaru1" "ashigaru2" "ashigaru3" "ashigaru4" "ashigaru5" "ashigaru6" "ashigaru7" "gunshi")
 fi
 

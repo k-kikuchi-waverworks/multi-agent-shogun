@@ -255,6 +255,20 @@ def validate_text(text: str, stem: str) -> list[str]:
 READER = "scripts/idle_revive_scan.py"
 COMPLETION_WORDS = {"done", "completed", "complete", "finished"}
 
+# ★門が「今は警告である」と「いつ赤へ変えるか」を己の口で名乗る★ (cmd_1407・軍師一号 22:4x)
+#   理 = 軍師一号が本日 二度「警告は出るが読む者が居らぬ」を名指した。R5a の読み手は現に
+#   居る (報告を書く者) ゆえ、★据え置きの理由と期日の条件★ を門自身に言わせる。
+#   条件を「日付」でなく ★数★ で書くのは、日付は黙って過ぎるが数は撃てば出るゆえ。
+RED_PLAN = (
+    "★今は警告 = rc を動かさぬ。いつ赤へ変えるか★ = "
+    "現物の report (queue/reports/*_report.yaml) で R5a が名指す物が ★0 本★ になった時、"
+    "R5a を R1-R4 と同じ赤 (CLI rc=1) へ上げる。\n"
+    "     今の本数は `python3 scripts/report_validate.py --selftest` の N3 行が刷る "
+    "(2026-07-27 22:5x 実測 = 9 本中 1 本)。\n"
+    "     ★0 を待つ理由★ = 0 でない間に赤へ上げると、既に居る書き手の報告が門で止まる "
+    "(門が直す物を、門が書けなくする)。上げる時は此の行も併せて書き換えよ。"
+)
+
 
 def reader_view(text: str) -> list[dict] | None:
     """★読み手が見る高さ★ の mapping を並べて返す (idle_revive_scan.py:1569-1572 の写し)。
@@ -340,7 +354,8 @@ def warn_text(text: str, stem: str, task_lookup=None) -> list[str]:
             f"     此の report の最上位の鍵 = {tops[:6]}\n"
             "     ⇒ 任意の名 (例 cmd1426_xxx:) の下へ入れた task_id は ★見えぬ★。\n"
             f"     害 = {READER}:1573-1575 で全 document が continue され、"
-            "status: done と書いても ★not_done と読まれる★ = 【働いておるのに idle】"
+            "status: done と書いても ★not_done と読まれる★ = 【働いておるのに idle】\n"
+            f"     {RED_PLAN}"
         )
 
     # ── R5b = 鍵は在るが timestamp が解けぬ ──
@@ -588,6 +603,15 @@ def selftest() -> int:
             "cmd1426_two_writers:\n  task_id: subtask_1426\n  status: done\n"
             "  timestamp: '2026-07-27T20:42:00'\n",
             "ashigaru3_report", _NO_TASK, "[R5a]",
+        ),
+        (
+            # ★軍師一号 22:4x「警告は出るが読む者が居らぬ」への手当て★=
+            #   R5a が鳴る其の場で ★据え置きの理由と、赤へ上げる条件★ を門が名乗る。
+            #   (負の対照は W1n/W1n2 = 正しい report では此の行も出ぬ)
+            "W1r R5a は ★いつ赤へ変えるか★ を己の口で名乗る",
+            "cmd1426_two_writers:\n  task_id: subtask_1426\n  status: done\n"
+            "  timestamp: '2026-07-27T20:42:00'\n",
+            "ashigaru3_report", _NO_TASK, "いつ赤へ変えるか",
         ),
         (
             "W1n report: の直下へ置けば ★緑★ (読み手が見る高さ)",

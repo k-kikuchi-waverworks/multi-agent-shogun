@@ -799,6 +799,44 @@ def copy_paths(repo: Path, paths: list[str], dst: Path) -> str | None:
     return None
 
 
+def copy_paths_snapshot(repo: Path, paths: list[str], dsts: list[Path]) -> str | None:
+    """★同じ瞬間の写しを配る★ (cmd_1387・2026-07-27 に実物で捕えた)。
+
+    何を塞ぐか = ★変異が起こしておらぬ差を、着弾として数える道★。
+      旧い形は pristine / base / mut を ★別々に写しておった★ =
+      写しと写しの【間】に他人が同じ木へ書けば、其の差が変異の産物と見分けが付かぬ。
+      本 runner は着弾数を「変異の前後の木の差」で数えるゆえ、他人の 1 行が
+      ★着弾 +1★ として数えられ、牙が「2 箇所で発火」と誤って名指される。
+
+    実測 (2026-07-27 18:5x・六号が sandbox で決定的に再現):
+      paths に dir を持つ entry (例 tests/) の写しの間に他人が tests/ の中の 1 行を書いたら、
+      行の塊 = 2 と出て「同一の綴り置換が 2 箇所で発火」と鳴った。
+      変異自身は 1 file しか書いておらず、其の file の中では綴りは 1 箇所である。
+      ★静かな盤面では再現せぬ★ゆえ、鳴らされた持ち主が撃ち直しても PASS しか見えぬ。
+
+    ★之は本日ずっと狩ってきた族の一員である★ =
+      「共有 file の世で、二つの瞬間に測った物を突き合わせるな」(軍師一号 13:48 の条②の系)。
+
+    処方 = ★1 度だけ写し、其の写しを複製する★ = 配る木は悉く【同じ瞬間】の物になる。
+      写している最中に他人が書く形は猶 残る (それは写しが 1 度でも起こる) が、
+      ★其の時も配る木は互いに一致する★ = 変異の産物と見分けが付く。
+    """
+    if not dsts:
+        return "写す先が 0 件"
+    first = dsts[0]
+    first.mkdir(parents=True, exist_ok=True)
+    err = copy_paths(repo, paths, first)
+    if err:
+        return err
+    purge_pycache(first)
+    for d in dsts[1:]:
+        try:
+            shutil.copytree(first, d)
+        except OSError as exc:
+            return f"写しを複製できぬ: {d} ({exc})"
+    return None
+
+
 def tree_digest(root: Path) -> dict[str, str]:
     out: dict[str, str] = {}
     for p in sorted(root.rglob("*")):
@@ -854,13 +892,12 @@ def evaluate_entry(e, repo: Path, work: Path):
     expect = str(e.get("expect", "nonzero"))
 
     pristine, base, mut = work / "pristine", work / "base", work / "mut"
-    for d in (pristine, base, mut):
-        d.mkdir(parents=True)
-        err = copy_paths(repo, e["paths"], d)
-        if err:
-            return UNDET, err
-        # ★写した直後に消す★ = paths が .pyc を名指して挙げておっても持ち込まれぬ
-        purge_pycache(d)
+    # ★1 度だけ写し、其の写しを複製する★ = 三つの木が悉く【同じ瞬間】の物になる。
+    #   別々に写せば、写しの間に他人が書いた 1 行が【着弾 +1】として数えられる (cmd_1387)。
+    #   .pyc の掃除は copy_paths_snapshot が写しの側で済ませる (複製ゆえ三つとも同じ)。
+    err = copy_paths_snapshot(repo, e["paths"], [pristine, base, mut])
+    if err:
+        return UNDET, err
 
     # ① baseline: 変異前に test は緑であること (赤なら検出力を測れぬ)
     rc, out = run_sh(e["test"], base, timeout)
@@ -2929,6 +2966,77 @@ def selftest() -> int:
         rc, out = _invoke(["--sanity", "--registry", str(neg_reg_bare),
                            "--repo-root", str(r57)])
         expect("T64 sanity 触っておらぬ=対象なしで通す", 0, rc, "1 file も触っておらぬ", out)
+
+        # ─────────────────────────────────────────────────────────────────
+        # T65: ★写しは【同じ瞬間】の物でなければならぬ★ (cmd_1387・2026-07-27)
+        #   機序 = pristine / base / mut を別々に写すと、写しと写しの【間】に
+        #   他人が同じ木へ書いた 1 行が ★変異の産物と見分けが付かぬ★ =
+        #   物差しB (行の塊) が之を +1 と数え、1 箇所しか撃たぬ牙を
+        #   「2 箇所で発火 = 過小申告」と誤って名指す。
+        #   ★静かな盤面では再現せぬ★ゆえ、鳴らされた持ち主が撃ち直しても PASS しか見えぬ
+        #   (足軽五号が現に 3 回 撃ち直して 3 回とも PASS を見た = 18:48 の便)。
+        #   ⇒ 処方 = ★1 度だけ写し、其の写しを複製する★ = 配る木は悉く同じ瞬間の物になる。
+        #
+        #   ★此処を両側から縛る (家老 18:44 の条件)★:
+        #     (a) 他人の 1 行を着弾と数えぬ  (b) ★現に 2 箇所を撃つ変異は猶 2 と数える★
+        #   片側だけでは「絞りすぎて見落とす」へ倒れたのが判らぬ。
+        r65 = T / "snap65" / "repo"
+        (r65 / "src").mkdir(parents=True)
+        (r65 / "src" / "a.py").write_text("x = 'anchor here'\ny = 2\n", encoding="utf-8")
+        (r65 / "src" / "b.py").write_text("# bystander\n", encoding="utf-8")
+
+        # ★写しの【最中】に他人が書く盤面を作る★ = copy_paths を包んで、
+        #   1 回 写るたびに repo へ 1 行 足す。別々に写す形なら之を掴んでしまう。
+        _orig_copy = globals()["copy_paths"]
+        _calls: list[Path] = []
+
+        def _spy_copy(repo_, paths_, dst_):
+            err_ = _orig_copy(repo_, paths_, dst_)
+            _calls.append(dst_)
+            (r65 / "src" / "b.py").write_text(
+                "# bystander\n" + "# 他人の 1 行\n" * len(_calls), encoding="utf-8")
+            return err_
+
+        globals()["copy_paths"] = _spy_copy
+        try:
+            d65 = T / "snap65" / "out"
+            p65, b65, m65 = d65 / "pristine", d65 / "base", d65 / "mut"
+            err65 = copy_paths_snapshot(r65, ["src"], [p65, b65, m65])
+        finally:
+            globals()["copy_paths"] = _orig_copy
+
+        check("T65a 写しは 1 度だけ (三つ配っても repo は 1 度しか読まぬ)",
+              err65 is None and len(_calls) == 1,
+              f"err={err65} 写した回数={len(_calls)} (期待 1)")
+        dig_p, dig_b, dig_m = tree_digest(p65), tree_digest(b65), tree_digest(m65)
+        check("T65b 三つの木は互いに一致する (同じ瞬間の物)",
+              dig_p == dig_b == dig_m,
+              f"pristine={len(dig_p)} base={len(dig_b)} mut={len(dig_m)} 件で食い違う")
+
+        # (a) 変異は a.py の 1 箇所だけを書く ⇒ 他人が b.py へ書いた行を数えてはならぬ
+        _f65 = m65 / "src" / "a.py"
+        _f65.write_text(_f65.read_text(encoding="utf-8")
+                        .replace("anchor here", "ANCHOR HERE"), encoding="utf-8")
+        _a65, _ = anchor_firings(p65, m65)
+        _b65 = changed_line_hunks(p65, m65)
+        check("T65c ★他人の 1 行を着弾と数えぬ (1 箇所の変異は 1)★",
+              max(_a65, _b65) == 1, f"物差しA={_a65} 物差しB={_b65} (期待 採用=1)")
+
+        # (b) ★逆向き★ = 現に 2 箇所を撃つ変異は猶 2 と数える (絞りすぎて見落とさぬ)
+        r65b = T / "snap65b" / "repo"
+        (r65b / "src").mkdir(parents=True)
+        (r65b / "src" / "a.py").write_text(
+            "x = 'anchor here'\ny = 'anchor here'\n", encoding="utf-8")
+        d65b = T / "snap65b" / "out"
+        p65b, m65b = d65b / "pristine", d65b / "mut"
+        check("T65d 写しの下拵え", copy_paths_snapshot(r65b, ["src"], [p65b, m65b]) is None)
+        _f65b = m65b / "src" / "a.py"
+        _f65b.write_text(_f65b.read_text(encoding="utf-8")
+                         .replace("anchor here", "ANCHOR HERE"), encoding="utf-8")
+        _a65b, _ = anchor_firings(p65b, m65b)
+        _b65b = changed_line_hunks(p65b, m65b)
+        check("T65e ★現に 2 箇所を撃つ変異は猶 2 と数える (見落としへ倒れておらぬ)★",
+              max(_a65b, _b65b) == 2, f"物差しA={_a65b} 物差しB={_b65b} (期待 採用=2)")
 
         # T50: ★gate の実出力の語が docs に在ること★ (cmd_1382 差し戻し・軍師二号)
         #   ★書いた場所と読まれる場所を揃える★ = 赤を見た者が docs を grep して辿り着けるか。

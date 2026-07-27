@@ -150,12 +150,13 @@ def screen_entry(e, repo: Path, work: Path):
         return f"台帳の形が立っておらぬ: {err}"
 
     pristine, mut = work / "pristine", work / "mut"
-    for d in (pristine, mut):
-        d.mkdir(parents=True)
-        cerr = R.copy_paths(repo, e["paths"], d)
-        if cerr:
-            return f"paths を写せぬ: {cerr}"
-        R.purge_pycache(d)
+    # ★1 度だけ写し、其の写しを複製する★ (cmd_1387)。
+    #   別々に写せば、写しと写しの【間】に他人が同じ木へ書いた 1 行が
+    #   【着弾 +1】として数えられ、無実の牙を「2 箇所で発火」と名指す。
+    #   本 gate は commit の度に走り、paths に dir を持つ entry が多いゆえ現に踏んだ。
+    cerr = R.copy_paths_snapshot(repo, e["paths"], [pristine, mut])
+    if cerr:
+        return f"paths を写せぬ: {cerr}"
 
     rc, out = R.run_sh(e["mutate"], mut, PER_ENTRY_TIMEOUT)
     if rc is None:

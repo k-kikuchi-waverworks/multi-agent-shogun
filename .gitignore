@@ -213,6 +213,14 @@ scripts/seo_qc.sh
 #   ★追跡外のまま登録しておれば、毎朝の gate は worktree を読むゆえ緑を返し続け、
 #     fresh clone では paths 欠で落ちる★ = ★「手元では通る」の最も静かな形★。
 !scripts/claude_md_boundary_probe.py
+# cmd_1411 (2026-07-27): 「process を殺す力」を綴りでなく力の形で禁ずる関所 (PreToolUse hook)。
+# ★本日 同型の 8 度目★ = .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
+#   ★此度は上の cmd_1363 の註が名指しで警めておる其の形である★ =
+#   ★追跡外のまま settings.json へ hook を宣言すれば、fresh clone では
+#     【呼ぶ相手の居らぬ番人】が残り、殺す力は素通しに戻る★
+#   = ★而も「手元では塞がっておる」ゆえ、誰も気付かぬ★。
+#   ⇒ ★配線 (settings.json) より先に、追跡下へ入れる方が順として正しい★。
+!scripts/process_signal_guard.py
 # cmd_1339/1354 (2026-07-25夜〜07-26朝): 恋の本番TTS(port 9100)を構造的に守る道具。
 # 保護portを実測判定して拒否し、意図的停止は3条件 (意思明示 + 20字以上の理由 + port名指し承認)
 # でのみ通す。★家老裁定 2026-07-26 10:43 = 追跡下へ入れよ★ = fresh clone に渡らねば

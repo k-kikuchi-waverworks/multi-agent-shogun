@@ -41,8 +41,19 @@ out3="$(python3 "$SCRIPT_DIR/scripts/gate_anchor_touched.py" 2>&1)"; rc3=$?
 #   ★既定は 1 を返さぬ (UNDETERMINED=2 で警告するのみ)★ / REGISTRY_APPEND_STRICT=1 で commit を止める。
 #   ★所要 = 触った台帳のみ・実測 0.2 秒級 (6 冊 全数でも 0.20s)★。
 out4="$(python3 "$SCRIPT_DIR/scripts/gate_registry_append.py" 2>&1)"; rc4=$?
+# gate-5 (cmd_1435): ★正本 (CLAUDE.md ほか) と、そこから作る生成物のずれを見る★。
+#   ★2026-07-27 実害★= CLAUDE.md が 10:40 と 17:36 の2度 変わり、写しは1度も追いつかなんだ。
+#   作業ツリーに残っておった写しは 02:17 版で、★10:40 に「言い過ぎ」として訂正された記述★を持っており、
+#   そのまま commit すれば訂正前の版だけが Codex / Copilot / 既定エージェントへ配られる所であった。
+#   ★気づけたのは、たまたま未 commit として git に見えておったからである★=
+#   02:17 に commit されておれば、写しは古いまま緑になり、誰も気付かなんだ。
+#   ★探し方★= 一時の場所へ index の中身だけで作り直し、index の生成物と1バイト単位で比べる
+#   (mtime やコミット時刻は見ぬ。★時刻は「誰が書いたか」を答えぬ★)。
+#   ★1 を返す = commit を止める★ (生成物は1行で作り直せるゆえ書き手を止める費えが小さい)。
+#   ★所要★= 正本にも生成物にも触れぬ commit では 0.05 秒で黙る。触れた時のみ 4 秒級 (実測)。
+out5="$(bash "$SCRIPT_DIR/scripts/gate_generated_sync.sh" 2>&1)"; rc5=$?
 
-for pair in "gate-1:$rc1" "gate-2:$rc2" "gate-3:$rc3" "gate-4:$rc4"; do
+for pair in "gate-1:$rc1" "gate-2:$rc2" "gate-3:$rc3" "gate-4:$rc4" "gate-5:$rc5"; do
     rc="${pair#*:}"
     if [ "$rc" -eq 1 ]; then worst=1
     elif [ "$rc" -eq 2 ] && [ "$worst" -ne 1 ]; then worst=2; fi
@@ -55,6 +66,7 @@ if [ "$worst" -eq 1 ]; then
     [ "$rc2" -ne 0 ] && printf '%s\n' "$out2"
     [ "$rc3" -ne 0 ] && printf '%s\n' "$out3"
     [ "$rc4" -ne 0 ] && printf '%s\n' "$out4"
+    [ "$rc5" -ne 0 ] && printf '%s\n' "$out5"
     echo "  詳細と処方: docs/content/ops/cmd_1352_silent_pitfall_gates.md"
     echo "  緊急回避 (理由必須): SHOGUN_GATE_SKIP=1 git commit ..."
     echo "════════════════════════════════════════════════════════════════"
@@ -67,10 +79,11 @@ if [ "$worst" -eq 2 ]; then
     [ "$rc2" -ne 0 ] && printf '%s\n' "$out2"
     [ "$rc3" -ne 0 ] && printf '%s\n' "$out3"
     [ "$rc4" -ne 0 ] && printf '%s\n' "$out4"
+    [ "$rc5" -ne 0 ] && printf '%s\n' "$out5"
     echo "  gate_nightly.sh (cron) が家老へ警告する。今直せるなら今直せ。"
     echo "  ★但し gate-4 (台帳の呑まれ) だけは翌朝の門にも見えぬ★ = 此処で直さねば誰も気付かぬ。"
     echo "════════════════════════════════════════════════════════════════"
     exit 0
 fi
-echo "[gate] PASS: gate-1 (manifest捕捉) + gate-2 (台帳sanity) + gate-3 (牙の着弾) + gate-4 (台帳の呑まれ) 緑"
+echo "[gate] PASS: gate-1 (manifest捕捉) + gate-2 (台帳sanity) + gate-3 (牙の着弾) + gate-4 (台帳の呑まれ) + gate-5 (正本と生成物のずれ) 緑"
 exit 0

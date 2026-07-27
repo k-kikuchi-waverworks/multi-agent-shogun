@@ -950,21 +950,22 @@ for task in queue/tasks/*.yaml; do
   # 上記 table の threshold と比較
 done
 
-# (B) 🚨 MANDATORY: gunshi inbox の未処理 report_received scan (QC dispatch 漏れ検出)
-#    2026-04-22 両 stall 実戦教訓 (msg_130618 + msg_142500): ash 完遂報告が gunshi inbox に
+# (B) 🚨 MANDATORY: QC dispatch 漏れの検め (10 分規律)
+#    2026-04-22 両 stall 実戦教訓 (msg_130618 + msg_142500): ash 完遂報告が軍師の inbox に
 #    stale のまま残り、Karo が QC task YAML 起票+clear_command を発行し忘れる再発パターン。
-#    Watchdog 毎回この scan を実行し、hit があれば即 QC dispatch (10 分以上放置禁)。
-python3 -c '
-import yaml, sys, datetime
-with open("queue/inbox/gunshi.yaml") as f: data = yaml.safe_load(f) or {}
-now = datetime.datetime.now()
-for m in (data.get("messages") or []):
-    if m.get("read") or m.get("type") != "report_received": continue
-    ts = datetime.datetime.fromisoformat(m["timestamp"])
-    elapsed = (now - ts).total_seconds() / 60
-    if elapsed > 10:
-        print(f"STALE gunshi inbox: {m[\"id\"]} from={m.get(\"from\")} elapsed={elapsed:.0f}min — QC dispatch REQUIRED NOW")
-' || true
+#    (C) と同じく scripts/stall_watchdog_scan.sh が撃つ (1 度で両方 走る)。下の 1 行で足りる。
+#    試すだけなら --dry-run。母数は必ず印字される (走査 file 数・便の数・未読の報告族の数)。
+#
+#    ★2026-07-28 削除: ここに埋まっていた python の一節★
+#      理由 = ★走らせても構造上 必ず 0 を返す形であった★ (軍師二号が cmd_1454 で実測)。
+#      ① 読んでいた queue/inbox/gunshi.yaml は 0 便。現の往来は gunshi1/gunshi2 の側
+#      ② 型も食い違い、report_received は足軽の報告族 23 通のうち 1 通しか当たらぬ
+#      ⇒ 二重に外しており、★「見ていない 0」を「無かった 0」と同じ顔で返していた★。
+#      ★直った本体の傍らに盲目な写しを残す方が危うい★ = 「fallback が在るから安心」と
+#      思わせて実は同じ穴を持つ。同じ理由で (C) の写しも 2026-07-26 に落としてある (下の註)。
+#      本体 = scripts/stall_watchdog_scan.py の scan_qc_dispatch()。canary を検めの中へ持ち、
+#      報告族が既読を含めて 0 通なら「探し方が当たっておらぬ疑い」と自ら名乗る。
+bash scripts/stall_watchdog_scan.sh
 
 # (C) 🚨 MANDATORY: report↔task YAML 突合 scan (bookkeeping 漏れ false negative 根絶)
 #    2026-04-22 本日 stall 3 連発実戦教訓 (ash1 MT_G 5950574 / ash5 Phase 1a 2053cdc /

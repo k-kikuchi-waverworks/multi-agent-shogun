@@ -337,6 +337,14 @@ DECLARED = {
     "DEFAULT_THRESHOLD_MIN": 30,
     # 「同じ漏れを鳴らし直すまで N 分 待つ」= ★常に赤い検知は無視されて死ぬ★ (cmd_1359)。
     "DEFAULT_COOLDOWN_MIN": 360,
+    # ここから下は cmd_1450 (2026-07-28) で足した。
+    # どちらも instructions/karo.md の「10分規律」から来ている。
+    # 規律の中身 = 足軽の完遂報告が着いたら、家老は10分以内に軍師へ QC の任を起こす。
+    # 10 は我らが決めた契約の値なので、動けば赤くなるのが正しい。
+    # 足すまでの状態 = どちらもテストに一度も見られておらず、
+    # 値を変えても全部 緑のままだった (軍師二号が cmd_1459 の検分で実測)。
+    "QC_DEFAULT_THRESHOLD_MIN": 10,          # 軍師の inbox に未読のまま何分で鳴らすか (cmd_1454)
+    "QC_LEDGER_DEFAULT_THRESHOLD_MIN": 10,   # 着地した report が台帳に載らないまま何分で鳴らすか (cmd_1459)
 }
 bad = []
 for name, want in DECLARED.items():
@@ -353,4 +361,86 @@ print("OK contract values match:", DECLARED)
 PY
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "OK contract values match"
+}
+
+# =============================================================================
+# T-015 (cmd_1450・2026-07-28) — 宣言そのものが古びる形を塞ぐ
+#
+# 家老の問い: 「宣言に足す」だけで足りるか、宣言そのものが古びる形か。
+# 答え = 古びる形である。T-014 の DECLARED は人が書き足す一覧なので、
+# 明日 誰かが新しい定数を足しても、一覧の側は黙ったままになる。
+#
+# 実測 (2026-07-28 08:1x): 本体の直下にある数値の定数は4件。
+# うち T-014 が見ていたのは2件だけだった。残り2件 (QC_DEFAULT_THRESHOLD_MIN /
+# QC_LEDGER_DEFAULT_THRESHOLD_MIN) は、どちらも値を変えても全部 緑のままだった。
+# 2件とも今日 足された物で、足した当人 (二号・三号) が一覧を直していない。
+#
+# これは今日ずっと出ている「名簿が古びる」と同じ族である。T-014 は
+# 「値が動いたか」を見るが、「見るべき物が増えたか」は見ていなかった。
+#
+# ゆえに本試験は一覧の側を縛る。本体の直下にある数値の定数を機械で数え上げ、
+# その全部が「契約として宣言されている」か「契約ではないと明示されている」かの
+# どちらかであることを求める。どちらでもない定数が1件でもあれば赤くなる。
+#
+# 本試験が見ない範囲:
+#   1. モジュール直下の、大文字の名前の、数値そのものの代入だけを見る。
+#      式で組み立てた値・関数の既定引数・dict や tuple の中の数は見ない。
+#   2. 「宣言されている」ことしか見ない。宣言された値が正しいかは T-014 の仕事である。
+#   3. 見るのは stall_watchdog_scan.py だけである。
+# =============================================================================
+@test "T-015: every numeric constant is either declared as a contract or explicitly excluded (a new one goes red)" {
+    run "$PROJECT_ROOT/.venv/bin/python3" - <<'PY'
+import ast, os, re
+
+scan_py = os.environ["SCAN_PY"]
+bats_file = os.environ["BATS_TEST_FILENAME"]
+
+# ── 本体の直下にある数値の定数を数え上げる ──
+tree = ast.parse(open(scan_py, encoding="utf-8").read())
+found = {}
+for node in tree.body:
+    if not isinstance(node, ast.Assign):
+        continue
+    for target in node.targets:
+        if not (isinstance(target, ast.Name) and target.id.isupper()):
+            continue
+        v = node.value
+        if isinstance(v, ast.Constant) and isinstance(v.value, (int, float)) \
+           and not isinstance(v.value, bool):
+            found[target.id] = v.value
+
+# ── T-014 の宣言を、この file から読み取る (二重に書けば其方が古びるため) ──
+body = open(bats_file, encoding="utf-8").read()
+m = re.search(r"^DECLARED = \{(.*?)^\}", body, re.S | re.M)
+if not m:
+    raise SystemExit("T-014 の DECLARED を読み取れなかった。"
+                     "書き方が変わったなら本試験の読み口も直せ")
+declared = set(re.findall(r'^\s*"([A-Z0-9_]+)"\s*:', m.group(1), re.M))
+
+# ★探し方が生きている証★ — 0 件しか読めなければ、この試験は
+# 「全部 宣言されている」と黙って緑を返してしまう。先に落とす。
+if len(declared) < 2:
+    raise SystemExit(f"宣言を {len(declared)} 件しか読めなかった = 読み口が死んでいる")
+if not found:
+    raise SystemExit("本体から数値の定数を1件も拾えなかった = 読み口が死んでいる")
+
+# ── 契約ではないと明示する物 (足す時は理由を必ず書くこと) ──
+NOT_A_CONTRACT = set()   # 空の集合。{} と書くと dict になるので set() で書く
+# 今は1件も無い。契約でない数値の定数を足す時は、ここへ名前と理由を書く。
+# 例: NOT_A_CONTRACT.add("BUF_SIZE")  # 読み込みの塊の大きさ。振舞いを決めない
+
+undeclared = sorted(set(found) - declared - NOT_A_CONTRACT)
+if undeclared:
+    raise SystemExit(
+        "契約として宣言されていない数値の定数がある "
+        "(値を動かしても、どの試験も赤くならない状態である):\n  "
+        + "\n  ".join(f"{n} = {found[n]}" for n in undeclared)
+        + "\n  ⇒ 契約なら T-014 の DECLARED へ足せ。"
+          " 契約でないなら T-015 の NOT_A_CONTRACT へ理由つきで足せ")
+
+print(f"OK every constant is accounted for: 本体 {len(found)} 件 / "
+      f"宣言 {len(declared)} 件 / 契約でないと明示 {len(NOT_A_CONTRACT)} 件")
+PY
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "OK every constant is accounted for"
 }

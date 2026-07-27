@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # gate_generated_sync.sh — cmd_1435 (2026-07-28 足軽四号)
+#   cmd_1437 で3箇所 直した（軍師一号の検分）。
+#     ・出口の一覧が門の中に二度 手書きで在った → 1箇所へ寄せた
+#     ・新しい生成物が増えた日を、出口 5 口のうち 3 口で数えなんだ → 数える形へ替えた
+#     ・「作り直しが作った物」を機械で数えるようにした（手書きの find を消した）
 #
 # ■ 何を見る門か
 #   CLAUDE.md などの正本から scripts/build_instructions.sh が作る生成物が、
@@ -59,7 +63,11 @@ SOURCES=(
     scripts/build_instructions.sh
 )
 
-# 作られる物の置き場（出口）。この下の git 追跡ファイルが検分の母数になる。
+# 作られる物の置き場（出口）。「追跡されているのに作られなくなった物」を見るための母数。
+# ★cmd_1437: この一覧は門の中でここ1箇所だけに在る。★
+#   以前は extra 検知の find にも同じ一覧が手で書いてあり、置き場を足す日に片方だけ直せば
+#   比べる側は見て extra 側は見ぬ片肺になる形であった（軍師一号の指摘3）。
+#   今は「砂場で作り直した物」を撃つ前後の差で機械に数えさせるため、第二の写しが要らない。
 OUTPUT_ROOTS=(
     AGENTS.md
     .github/copilot-instructions.md
@@ -67,6 +75,26 @@ OUTPUT_ROOTS=(
     instructions/generated
     .opencode/agents
 )
+
+# build が作るが、意図して git へ載せぬ物。★ここに書いた物だけが「増えても黙る」★
+#   cmd_1437: 以前は git check-ignore で握り潰していた。だがこの repo の .gitignore は
+#   白名簿（既定で全て無視）ゆえ、★新しい生成物はどこに増えても「無視される」と読まれ、
+#   門は黙った★。軍師一号の実測では出口 5 口のうち 3 口が盲であった
+#   （agents/default 直下・.github 直下・repo 直下）。
+#   ゆえに「無視されるか」でなく「あらかじめ宣言したか」で黙らせる形へ替えた。
+UNTRACKED_BY_DESIGN=(
+    'agents/default/agent.yaml'        # 中身は CLAUDE.md に依らぬ固定文（heredoc）ゆえ正本とずれる形が無い
+    '.opencode/agents/*-runtime.md'    # git 管理外の config/settings.yaml に依り機械ごとに変わる
+)
+
+untracked_by_design() {
+    local p="$1" pat
+    for pat in "${UNTRACKED_BY_DESIGN[@]}"; do
+        # shellcheck disable=SC2254
+        case "$p" in $pat) return 0 ;; esac
+    done
+    return 1
+}
 
 # ── 引数 ──────────────────────────────────────────────────────────────
 MODE=staged
@@ -84,7 +112,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo "[gate-5] git repo でない" 
 print_scope() {
     local tracked
     tracked="$(git ls-files -- "${OUTPUT_ROOTS[@]}" | wc -l)"
-    echo "=== gate_generated_sync — 母数と射程 (cmd_1435) ==="
+    echo "=== gate_generated_sync — 母数と射程 (cmd_1435 / cmd_1437 で盲点3件を直した) ==="
     echo
     echo "[入口] 触れば作り直しが要る物 ${#SOURCES[@]} 口:"
     printf '  %s\n' "${SOURCES[@]}"
@@ -96,21 +124,33 @@ print_scope() {
         echo "  $r  … ${n} 本"
     done
     echo
+    echo "[増えても黙る物 — 宣言した ${#UNTRACKED_BY_DESIGN[@]} 口だけ]"
+    printf '  %s\n' "${UNTRACKED_BY_DESIGN[@]}"
+    echo
     echo "[この門が見ない範囲 — 緑と同じ大きさで書く]"
     cat <<'EOS'
-  1. agents/default/agent.yaml — build が作るが .gitignore で外してある。
+  1. agents/default/agent.yaml — build が作るが、上のとおり宣言して黙らせてある。
      中身は CLAUDE.md に依らぬ固定文（heredoc）ゆえ、正本とずれる形が無い。
-  2. .opencode/agents/*-runtime.md — build が作るが .gitignore で外してある。
+     ★宣言した以上、この1本が壊れても門は何も言わぬ。★
+  2. .opencode/agents/*-runtime.md — 同じく宣言して黙らせてある。
      git 管理外の config/settings.yaml に依るため機械ごとに中身が変わる。
      検分の砂場へは settings.yaml を渡さぬゆえ、この門は1本も作らず、1本も見ない。
   3. git add していない変更 — この門は index を見る。作業ツリーだけの変更は見えぬ。
      （commit されぬ物は配られぬゆえ、これは意図した射程である）
   4. --no-verify で越えた commit / SHOGUN_GATE_SKIP=1 — hook そのものが走らぬ。
-  5. 出口の置き場が増えた時 — 上の OUTPUT_ROOTS は手で書いてある。
-     build_instructions.sh に新しい出力先が足された日、この門は其れを見ない。
-     （置き場の下の新しいファイル自体は検知する。増えるのは「置き場」の方だけが盲点）
+  5. 出口の置き場が増えた時（cmd_1437 で狭めた）—
+     ★新しい置き場へ生成物が増えた事自体は検知する★（作り直しが作った物を機械で数え、
+     追跡下にも宣言にも無ければ名指す）。残る盲点は2つだけである。
+       (a) staged の絞り: 新しい置き場の file だけを stage し、入口にも既存の出口にも
+           触れぬ commit では、この門は発火せぬ（--all なら見る）。
+           ただし置き場が増えるには build_instructions.sh を触る要があり、それは入口ゆえ普通は発火する。
+       (b) 新しい置き場の物が「作られなくなった」形は見えぬ。OUTPUT_ROOTS に無いためである。
   6. 他の repo（engine 等）— この門はこの repo の中だけを見る。
   7. 生成物が「正しいか」は見ない。見るのは「正本から作り直した物と同じか」だけである。
+  8. build_instructions.sh が毎回 同じ物を作ることを前提にしている。
+     時刻や乱数を混ぜる作りに変われば、この門は毎回 赤くなる（其の時は門でなく build を疑え）。
+  9. path に改行を含む生成物は数えぬ（作り直した物の一覧を行で数えるため）。
+     今は1本も無い。
 EOS
 }
 
@@ -154,15 +194,6 @@ if ! git ls-files -z -- "${SOURCES[@]}" | git checkout-index --prefix="$SB/" -f 
     exit "$UNDETERMINED"
 fi
 
-# 比べる相手（index の生成物）も同じ口から出す。
-# ★片側だけ git の改行変換を通る形にせぬため★ — 今日は .md に変換が掛からぬが、
-# 明日 .gitattributes が1行 増えた時に、この門が静かに誤り出す形を作らない。
-if ! git ls-files -z -- "${OUTPUT_ROOTS[@]}" | git checkout-index --prefix="$SB_IDX/" -f -z --stdin 2>"$TMPROOT/co2.err"; then
-    echo "[gate-5] ⚠ index から生成物を取り出せなんだ:"
-    sed 's/^/    /' "$TMPROOT/co2.err" >&2
-    exit "$UNDETERMINED"
-fi
-
 if [ ! -f "$SB/scripts/build_instructions.sh" ]; then
     echo "[gate-5] ⚠ index に scripts/build_instructions.sh が無い。判じられぬ。" >&2
     exit "$UNDETERMINED"
@@ -170,6 +201,11 @@ fi
 
 # PyYAML を持つ python が要る。repo の .venv が在れば読ませる（読むだけ）。
 [ -d "$ROOT/.venv" ] && ln -s "$ROOT/.venv" "$SB/.venv" 2>/dev/null
+
+# ★作り直す前の姿を控える★ — 撃つ前と後の差が、そのまま「build が作った物」になる。
+# 一覧を手で書かぬのはこのためである（置き場を足す日に片方だけ直す形を無くす）。
+list_sandbox() { ( cd "$SB" && find . \( -type f -o -type l \) -printf '%P\n' | sort ); }
+list_sandbox > "$TMPROOT/sb_before"
 
 # config/settings.yaml は渡さない。git 管理外で機械ごとに変わり、
 # *-runtime.md（これも git 管理外）だけを左右するためである。
@@ -179,40 +215,73 @@ if ! bash "$SB/scripts/build_instructions.sh" >"$TMPROOT/build.log" 2>&1; then
     exit "$UNDETERMINED"
 fi
 
+list_sandbox > "$TMPROOT/sb_after"
+comm -13 "$TMPROOT/sb_before" "$TMPROOT/sb_after" > "$TMPROOT/produced"
+n_produced="$(grep -c . "$TMPROOT/produced")"
+
+# 作り直しが1本も作らなんだ時に「ずれ 0 本」と読ませぬため。
+if [ "${n_produced:-0}" -eq 0 ]; then
+    echo "[gate-5] ⚠ 作り直しが生成物を1本も作らなんだ。門が当たっておらぬ疑い。" >&2
+    exit "$UNDETERMINED"
+fi
+
 # ── index の生成物と1バイト単位で比べる ──────────────────────────────
 stale=()   # 中身がずれている
 missing=() # index に在るが作り直しでは出来なかった
-extra=()   # 作り直しでは出来るが index に無い
+extra=()   # 作り直しでは出来るが index に無く、宣言もされておらぬ
 
+# 追跡下の全 file。★出口の一覧に依らずに突き合わせるため★ =
+# 新しい置き場が増えて commit された日も、中身のずれは見える。
+tracked_all="$TMPROOT/tracked_all"
+git ls-files > "$tracked_all"
+
+# 出口として宣言した置き場の追跡 file。「作られなくなった物」を見るための母数。
 tracked_list="$TMPROOT/tracked"
 git ls-files -- "${OUTPUT_ROOTS[@]}" > "$tracked_list"
 
-total=0
-while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    total=$((total + 1))
-    if [ ! -f "$SB/$p" ]; then
-        missing+=("$p")
-        continue
-    fi
-    if ! cmp -s "$SB_IDX/$p" "$SB/$p"; then
-        stale+=("$p")
-    fi
-done < "$tracked_list"
-
 # 母数が 0 なら「見ていない」を「0件」と読ませぬため判じられぬとする。
-if [ "$total" -eq 0 ]; then
+if [ "$(grep -c . "$tracked_list")" -eq 0 ]; then
     echo "[gate-5] ⚠ 検分すべき生成物が index に1本も無い。門が当たっておらぬ疑い。" >&2
     exit "$UNDETERMINED"
 fi
 
-# 作り直しでは出来るのに index に無い物（新しい出力先が commit されておらぬ形）
-while IFS= read -r f; do
-    rel="${f#"$SB"/}"
-    grep -Fxq "$rel" "$tracked_list" && continue
-    git check-ignore -q "$rel" 2>/dev/null && continue   # 意図して外してある物は数えぬ
-    extra+=("$rel")
-done < <(find "$SB/AGENTS.md" "$SB/.github" "$SB/agents" "$SB/instructions/generated" "$SB/.opencode" -type f 2>/dev/null)
+# 作り直した物を3つへ分ける: 追跡下 / 宣言して黙らせる物 / それ以外（＝ extra）
+to_check=()
+while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    if grep -Fxq "$p" "$tracked_all"; then
+        to_check+=("$p")
+    elif untracked_by_design "$p"; then
+        :
+    else
+        extra+=("$p")
+    fi
+done < "$TMPROOT/produced"
+
+# 比べる相手（index の生成物）も同じ口から出す。
+# ★片側だけ git の改行変換を通る形にせぬため★ — 今日は .md に変換が掛からぬが、
+# 明日 .gitattributes が1行 増えた時に、この門が静かに誤り出す形を作らない。
+if [ "${#to_check[@]}" -gt 0 ]; then
+    if ! printf '%s\0' "${to_check[@]}" | git checkout-index --prefix="$SB_IDX/" -f -z --stdin 2>"$TMPROOT/co2.err"; then
+        echo "[gate-5] ⚠ index から生成物を取り出せなんだ:"
+        sed 's/^/    /' "$TMPROOT/co2.err" >&2
+        exit "$UNDETERMINED"
+    fi
+fi
+
+total=0
+for p in ${to_check[@]+"${to_check[@]}"}; do
+    total=$((total + 1))
+    if ! cmp -s "$SB_IDX/$p" "$SB/$p"; then
+        stale+=("$p")
+    fi
+done
+
+# 追跡されておるのに、作り直しでは出来なくなった物
+while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    grep -Fxq "$p" "$TMPROOT/produced" || missing+=("$p")
+done < "$tracked_list"
 
 n_bad=$(( ${#stale[@]} + ${#missing[@]} + ${#extra[@]} ))
 

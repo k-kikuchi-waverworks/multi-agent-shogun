@@ -35,8 +35,28 @@ setup_file() {
     cp "$REPO/config/opencode-permissions.yaml" "$TPL/config/"
     cp "$REPO/scripts/build_instructions.sh" "$REPO/scripts/gate_generated_sync.sh" "$TPL/scripts/"
 
-    # 本 repo と同じく、意図して git から外してある2つを外す
-    printf '%s\n' 'agents/default/agent.yaml' '.opencode/agents/*-runtime.md' > "$TPL/.gitignore"
+    # ★本 repo と同じ「白名簿」の形にする（cmd_1437）★
+    #   以前ここは黒名簿（外す物だけを書く形）であった。本 repo は逆で、
+    #   既定で全て無視し、許す物だけを名指す。★形が違えば、白名簿ゆえに起きる病は
+    #   この試験に一度も映らない。★ 現に「新しい生成物が増えても門が黙る」件を
+    #   16本 すべて緑のまま見逃していた（軍師一号が本 repo 側で実測して掘り当てた）。
+    cat > "$TPL/.gitignore" <<'IGN'
+*
+!*/
+!.gitignore
+!CLAUDE.md
+!AGENTS.md
+!instructions/*.md
+!instructions/roles/*.md
+!instructions/common/*.md
+!instructions/cli_specific/*.md
+!instructions/generated/*.md
+!config/*.yaml
+!scripts/*.sh
+!.opencode/agents/*.md
+.opencode/agents/*-runtime.md
+!docs/content/ops/*.md
+IGN
 
     cd "$TPL" || return 1
     git init -q .
@@ -53,6 +73,9 @@ HOOK
 
     bash scripts/build_instructions.sh >/dev/null 2>&1 || return 1
     git add -A
+    # ★本 repo と同じく、この2本は白名簿に無いまま追跡下に在る★（実測: git check-ignore -v --no-index
+    #   が .gitignore:7 の * を返すが、git ls-files には出る）。ゆえに -f で入れる。
+    git add -f agents/default/system.md .github/copilot-instructions.md || return 1
     git -c core.hooksPath=/dev/null commit -qm "base" || return 1
 }
 
@@ -112,13 +135,40 @@ stale_by_touching_source() {
     [ -z "$output" ]
 }
 
-@test "N4 検分は本 repo の作業ツリーを汚さない（撃つ前と後で git status が同じ）" {
-    local before after
-    before="$(cd "$REPO" && git status --porcelain | md5sum)"
+# 追跡の有無に関わらず file の増減を見る数え方（.git は git 自身が書くゆえ外す）
+repo_file_list() { find . -path ./.git -prune -o -type f -print | sort; }
+
+@test "N4 検分は本 repo を汚さない（追跡外の file が増える形まで見る）" {
+    local st_before st_after f_before f_after
+    st_before="$(cd "$REPO" && git status --porcelain | md5sum)"
+    f_before="$(cd "$REPO" && repo_file_list)"
+
     run bash "$REPO/scripts/gate_generated_sync.sh" --all
     [ "$status" -eq 0 ]
-    after="$(cd "$REPO" && git status --porcelain | md5sum)"
-    [ "$before" = "$after" ]
+
+    st_after="$(cd "$REPO" && git status --porcelain | md5sum)"
+    f_after="$(cd "$REPO" && repo_file_list)"
+
+    # ①追跡下の変わり（git status で見える形）
+    [ "$st_before" = "$st_after" ]
+    # ②追跡外まで含む file の増減（cmd_1437 で足した。本 repo の .gitignore は白名簿ゆえ、
+    #   新しい file は git status に1本も出ない＝①だけでは半分しか見ておらぬ）
+    if [ "$f_before" != "$f_after" ]; then
+        echo "★file が増減した★" >&2
+        diff <(printf '%s\n' "$f_before") <(printf '%s\n' "$f_after") >&2
+        return 1
+    fi
+}
+
+@test "N5 N4 の数え方に牙が在る（git status に出ぬ file を、一覧の比べは現に捕える）" {
+    # 本 repo は触らぬ。同じ白名簿を持つ砂場で撃つ。
+    local before after
+    before="$(repo_file_list)"
+    : > .gate5_canary_probe
+    run git status --porcelain
+    [[ "$output" != *"gate5_canary_probe"* ]]   # 現に git status では見えぬ
+    after="$(repo_file_list)"
+    [ "$before" != "$after" ]                   # 一覧の比べなら見える
 }
 
 # ── 陽性（赤になるべき側。赤の理由まで名指させる） ──────────────────
@@ -193,6 +243,65 @@ stale_by_touching_source() {
     [[ "$output" == *"cursor-shogun.md"* ]]
 }
 
+# ── 新しい生成物が増えた日（cmd_1437・軍師一号の指摘2） ──────────────
+#
+# 軍師一号の実測: 門は出口 5 口のうち 3 口で「file が増えた日」を数えなんだ。
+# 機序は白名簿である。門は「無視される物は数えぬ」と書いていたが、この repo では
+# 新しい file は既定で無視される。ゆえに ★新しい生成物はどこに増えても黙って通った★。
+# 以下は盲であった3口それぞれを、現物で撃つ。
+
+add_extra_output() {
+    local rel="$1"
+    mkdir -p "$(dirname "$rel")"
+    cat >> scripts/build_instructions.sh <<ADD
+
+# cmd_1437 試験用: 新しい生成物を1本 足す
+mkdir -p "\$(dirname "\$ROOT_DIR/$rel")"
+printf 'zz\n' > "\$ROOT_DIR/$rel"
+ADD
+    git add scripts/build_instructions.sh
+}
+
+@test "P7 盲であった agents/default 直下 — 新しい生成物が commit 対象へ入らぬ形を捕える" {
+    add_extra_output "agents/default/zz_new.md"
+    bash scripts/build_instructions.sh >/dev/null 2>&1
+
+    # まず病そのものを示す: 現に file は出来ておるのに、git status には1本も出ない
+    [ -f agents/default/zz_new.md ]
+    run git status --porcelain
+    [[ "$output" != *"zz_new.md"* ]]
+
+    run bash "$GATE"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"commit 対象に無い"* ]]
+    [[ "$output" == *"agents/default/zz_new.md"* ]]
+}
+
+@test "P8 盲であった .github 直下 — 同じく捕える" {
+    add_extra_output ".github/zz_new.md"
+    run bash "$GATE"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *".github/zz_new.md"* ]]
+}
+
+@test "P9 盲であった repo 直下 — 同じく捕える" {
+    add_extra_output "AGENTS_zz_new.md"
+    run bash "$GATE"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"AGENTS_zz_new.md"* ]]
+}
+
+@test "P10 宣言して黙らせた物は、増えても鳴らぬ（鳴り過ぎぬ側の対照）" {
+    # agent.yaml は build が毎回 作るが、意図して git へ載せぬと門が宣言しておる。
+    # ★P7〜P9 が赤いのは「新しいから」ではなく「宣言が無いから」である★ことを示す。
+    [ -f agents/default/agent.yaml ]
+    run git status --porcelain
+    [[ "$output" != *"agent.yaml"* ]]
+    run bash "$GATE" --all
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"PASS"* ]]
+}
+
 # ── 判じられぬ側（緑に混ぜぬこと） ──────────────────────────────────
 
 @test "U1 作り直す道具が commit 対象から消えたら『判じられぬ』を名乗り、緑と言わない" {
@@ -249,6 +358,26 @@ assert_mutation_kills_the_gate() {
     [ "$status" -eq 1 ]                                   # 対照
     sed -i 's|^FAIL=1$|FAIL=0|' "$GATE"
     assert_mutation_kills_the_gate "FAIL=0"
+}
+
+@test "M6 宣言の照合を常に真にする変異を当てると、P7 の赤が消える" {
+    add_extra_output "agents/default/zz_new.md"
+    run bash "$GATE"
+    [ "$status" -eq 1 ]                                   # 対照: 変異なしでは赤
+    sed -i 's|^untracked_by_design() {$|untracked_by_design() { return 0|' "$GATE"
+    assert_mutation_kills_the_gate "宣言の照合を常に真"
+}
+
+@test "M7 作り直した物を数える所を空にする変異を当てると、緑にならず『判じられぬ』へ落ちる" {
+    stale_by_touching_source
+    run bash "$GATE"
+    [ "$status" -eq 1 ]                                   # 対照
+    sed -i 's|^comm -13 "\$TMPROOT/sb_before" "\$TMPROOT/sb_after" > "\$TMPROOT/produced"$|: > "$TMPROOT/produced"|' "$GATE"
+    assert_mutation_kills_the_gate "作り直した物を数える所を空に"
+    # ★0本を緑と読ませぬこと★
+    run bash "$GATE"
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"1本も作らなんだ"* ]]
 }
 
 @test "M5 母数を数える所を空にする変異を当てると、赤が消え『判じられぬ』へ落ちる" {

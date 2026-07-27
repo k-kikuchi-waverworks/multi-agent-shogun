@@ -25,12 +25,53 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_TASKS_DIR = REPO_ROOT / "queue" / "tasks"
 DEFAULT_REPORTS_DIR = REPO_ROOT / "queue" / "reports"
+DEFAULT_INBOX_DIR = REPO_ROOT / "queue" / "inbox"
 INBOX_WRITE_SH = REPO_ROOT / "scripts" / "inbox_write.sh"
 
 COMPLETION_STATUSES = {"done", "completed", "success"}
 DEFAULT_THRESHOLD_MIN = 30
 SCANNED_AGENT_PREFIXES = ("ashigaru",)
 SCANNED_AGENT_NAMES = {"gunshi"}
+
+# ── 10 分規律の検め (cmd_1454) ──────────────────────────────────────────
+# 規の出所 = instructions/karo.md の節
+#   「🚨 MANDATORY: Ash Report Receipt → Karo MUST Dispatch QC Task Explicitly」の
+#   **Rule** (絶対遵守)「Every ash report … within ≤10 min of arrival」と、
+#   同節末の「Stall Watchdog integration: every Watchdog pass MUST scan …」。
+# ★行番号で引かぬ★ = 2026-07-28 06:40〜06:44 の間に此の file の行番号が現に動いた
+#   (四号が同 file を書き替えておる最中であった。1400 → 1376)。★動いておる file の
+#   行番号を出所として写すな★ — 条D-3 が刻について申す所と同じ族である。
+# 之を撃つ機械が【本 script に無かった】。karo.md の Watchdog 節「(B) 🚨 MANDATORY:
+# gunshi inbox の未処理 report_received scan」に python の一節が埋まっておるが、
+# ★queue/inbox/gunshi.yaml を読む★ — 此の file の messages は 0 件で、
+# 現の往来は gunshi1.yaml (45 便) / gunshi2.yaml (44 便) の側に在る
+# (2026-07-28 06:40 に己で数え直した)。
+# 併せて型も食い違う = 一節は report_received のみを見るが、足軽→軍師の現の型は
+# ★report が 18 件・task_completed が 4 件・report_received は 1 件★
+# (gunshi1・from 別に実測。gunshi2 側の報告族は 0 件で、悉く家老の便であった)。
+# ⇒ file 名と型の二重の食い違いゆえ、走らせても必ず 0 を返す =「見ておらぬ 0」。
+#
+# ★射程を先に名乗る (条6)★:
+#   本検めが見ておるのは「軍師の inbox に、足軽の報告が未読のまま N 分 居る」ことだけ。
+#   ★「家老が QC の任を起こしたか」を直に見てはおらぬ★ (queue/tasks/gunshi*.yaml を
+#   突き合わせてはおらぬ)。家老が任を配り、軍師がまだ読んでおらぬ間も鳴る。
+#   即ち ★偽陽性の向きへ倒してある★ — 沈黙を潰す任ゆえ之を選んだ。
+QC_INBOX_GLOB = "gunshi*.yaml"
+QC_DEFAULT_THRESHOLD_MIN = 10
+# 型は ★現物から採った★ (推測でない)。report_received だけを見る形が
+# 現に 0 を返す元凶であったゆえ、報告族を束で見る。
+QC_REPORT_TYPES = {"report", "report_received", "task_completed"}
+# 差出人は足軽に限る = 家老/inbox_watcher の便 (task_assigned・note 等) を母数に混ぜぬ。
+# ★之が【己を母数から外す】(条C) の実体でもある★ — 本番人が名乗る from は
+# "stall_watchdog" ゆえ、足軽の prefix を通らぬ。構造の側で外れておる。
+#
+# ★ここに元は QC_SELF_SENDERS = {"stall_watchdog"} という第二の錠を置いておった。
+#   2026-07-28 06:41 の変異試験で【落としても赤が 1 本も出ぬ】と実測し、外した。★
+#   理由 = 二つの錠が互いを隠し、どちらを壊しても試験が緑のまま通った
+#   (M5 = 自錠を潰す → 赤 0 本 / M7 = prefix を潰す → 赤 0 本)。
+#   ★「錠が二つ在るゆえ安心」は、片方ずつ壊れても誰も気付かぬ形であった。★
+#   家老が 06:36 に karo.md の盲目な写しへ下した裁 (直さず落とす) を、己の錠へ当てた。
+QC_SENDER_PREFIXES = ("ashigaru",)
 
 
 # status は機械 token ([a-z_]) — 最初の ASCII 語 run が status 本体。装飾は何であれ語ではない。
@@ -256,6 +297,133 @@ def scan(tasks_dir: Path, reports_dir: Path, threshold_min: int, now=None):
     return hits, assigned_count, redispatch_skipped, unreadable_reports
 
 
+def scan_qc_dispatch(inbox_dir: Path, threshold_min: int, now=None):
+    """10 分規律 (karo.md L1319) を撃つ検め — cmd_1454。
+
+    見る物 = 軍師の inbox に居る【足軽の報告】で、未読のまま threshold_min を超えた物。
+
+    戻り値: (hits, stats)
+      stats は ★母数★ である。hit 0 の時に之を印字せねば、
+      「見た上で 0」と「そもそも見ておらぬ 0」が log 上で見分けられぬ (条1)。
+    """
+    if now is None:
+        now = datetime.datetime.now()
+    hits = []
+    stats = {
+        "files": 0, "messages": 0, "unread": 0, "report_family": 0,
+        # ★canary (家老 06:36 の下命・本任の芯)★:
+        #   read の別を問わぬ報告族の総数。0 件なら ★探し方 (file 名か型) が
+        #   当たっておらぬ疑い★ = 之こそ karo.md の一節が陥っておった形である
+        #   (gunshi.yaml を読み report_received だけを見る ⇒ 恒久に 0)。
+        #   ★之を置かねば「見ておらぬ 0」と「無かった 0」が同じ顔で返る。★
+        "report_family_all": 0,
+        "unreadable_files": [], "undated": [],
+    }
+    for path in sorted(inbox_dir.glob(QC_INBOX_GLOB)):
+        stats["files"] += 1
+        try:
+            with path.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError) as e:
+            # ★読めなんだ物を健全側へ混ぜぬ★ (parse_report_latest と同じ考え方)。
+            print(f"[stall_watchdog] WARN: gunshi inbox parse failed: {path}: {e}",
+                  file=sys.stderr)
+            stats["unreadable_files"].append(path.name)
+            continue
+        messages = (data or {}).get("messages") or []
+        if not isinstance(messages, list):
+            stats["unreadable_files"].append(path.name)
+            continue
+        stats["messages"] += len(messages)
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            sender = str(m.get("from") or "")
+            is_report_family = (
+                any(sender.startswith(p) for p in QC_SENDER_PREFIXES)
+                and m.get("type") in QC_REPORT_TYPES
+            )
+            # canary は ★read の別を問わず★ 数える (既読も母数に入る)。
+            if is_report_family:
+                stats["report_family_all"] += 1
+            if m.get("read"):
+                continue
+            stats["unread"] += 1
+            if not is_report_family:
+                continue
+            stats["report_family"] += 1
+            dt = parse_iso_to_naive_local(m.get("timestamp"))
+            if dt is None:
+                # ★刻が読めぬ物を黙って落とさぬ★ = 落とした事実を名乗る口を持たせる。
+                stats["undated"].append({
+                    "inbox": path.name, "id": m.get("id"), "from": sender,
+                })
+                continue
+            elapsed_min = int((now - dt).total_seconds() // 60)
+            if elapsed_min < threshold_min:
+                continue
+            hits.append({
+                "inbox": path.name,
+                "msg_id": m.get("id"),
+                "from": sender,
+                "msg_type": m.get("type"),
+                "elapsed_min": elapsed_min,
+            })
+    return hits, stats
+
+
+def format_qc_alert_message(hit, threshold_min):
+    return (f"🚨 QC dispatch 漏れの疑い: {hit['inbox']} に {hit['from']} の報告 "
+            f"({hit['msg_type']}, {hit['msg_id']}) が未読のまま {hit['elapsed_min']} 分。"
+            f"karo.md の 10 分規律 (閾値 {threshold_min} 分) を超えておる。"
+            f"軍師へ QC の任 (queue/tasks/gunshi*.yaml + clear_command) を起こされたい。"
+            f"  ※★本検めが見ておるのは【軍師が未読である】ことのみ★ — "
+            f"任を既に配っておるなら、軍師が読めば止む。")
+
+
+def qc_alert_key(hit):
+    return f"qc|{hit['inbox']}|{hit['msg_id']}"
+
+
+def notify_karo_qc(hit, threshold_min):
+    proc = subprocess.run(
+        ["bash", str(INBOX_WRITE_SH), "karo",
+         format_qc_alert_message(hit, threshold_min),
+         "stall_watchdog_qc_dispatch_alert", "stall_watchdog"],
+        capture_output=True, text=True,
+    )
+    return proc
+
+
+def print_qc_result(qc_hits, stats, threshold_min):
+    """10 分規律の検めの結果を印字する。★母数を必ず載せる (条1)★。"""
+    for u in stats["unreadable_files"]:
+        print(f"ACTION=gunshi_inbox_unreadable INBOX={u} "
+              f"⇒ ★読めなんだゆえ QC dispatch 漏れを判じられぬ★ = ★健全と読むな★")
+    for u in stats["undated"]:
+        print(f"ACTION=gunshi_msg_undated INBOX={u['inbox']} MSG_ID={u['id']} "
+              f"FROM={u['from']} ⇒ ★刻が読めぬゆえ経過を測れぬ (hits に載らぬ)★")
+    for h in qc_hits:
+        print(f"QC_DISPATCH_LATE INBOX={h['inbox']} MSG_ID={h['msg_id']} "
+              f"FROM={h['from']} MSG_TYPE={h['msg_type']} "
+              f"ELAPSED_MIN={h['elapsed_min']}")
+    if not qc_hits:
+        # ★canary (家老 06:36)★ = 「見ておらぬ 0」と「無かった 0」を分ける。
+        if stats["report_family_all"] == 0:
+            canary = (" ★★canary 赤 = 報告族が既読も含めて 1 通も無い ⇒ "
+                      "探し方 (file 名か型) が当たっておらぬ疑い。"
+                      "此の 0 を『漏れ無し』と読むな★★")
+        else:
+            canary = (f" (canary 緑 = 既読も含めた報告族 "
+                      f"{stats['report_family_all']} 通を現に見ておる)")
+        print(f"[stall_watchdog] QC dispatch 漏れ hit なし。"
+              f"閾値={threshold_min}分 走査file={stats['files']} "
+              f"便={stats['messages']} 未読={stats['unread']} "
+              f"未読の報告族={stats['report_family']} "
+              f"読めぬinbox除外={len(stats['unreadable_files'])} "
+              f"刻の読めぬ便除外={len(stats['undated'])}" + canary)
+
+
 def format_alert_message(hit):
     base = (f"🚨 bookkeeping 漏れ検出: {hit['agent']} task YAML "
             f"({hit['task_id']}, {hit['parent_cmd']}) status=assigned のまま、"
@@ -330,8 +498,13 @@ def main(argv=None):
     ap.add_argument("--json", action="store_true",
                     help="Emit hits as JSON (skeleton for future dashboard wiring).")
     ap.add_argument("--queue-root", type=Path, default=None,
-                    help="Override queue root (expects tasks/ and reports/ subdirs). "
+                    help="Override queue root (expects tasks/, reports/, inbox/ subdirs). "
                          "Primarily for tests.")
+    ap.add_argument("--qc-threshold-min", type=int, default=QC_DEFAULT_THRESHOLD_MIN,
+                    help=f"10 分規律の閾値 (default {QC_DEFAULT_THRESHOLD_MIN})。"
+                         f"karo.md L1319 の ≤10 min に合わせてある。")
+    ap.add_argument("--no-qc-scan", action="store_true",
+                    help="10 分規律の検めを走らせぬ (帳簿漏れ scan だけを撃つ時)。")
     ap.add_argument("--cooldown-min", type=int, default=DEFAULT_COOLDOWN_MIN,
                     help=f"同一 (agent, task_id) の再警報を抑える分数 "
                          f"(default {DEFAULT_COOLDOWN_MIN})。★常に赤い検知は無視されて死ぬ★")
@@ -340,12 +513,18 @@ def main(argv=None):
     if args.queue_root is not None:
         tasks_dir = args.queue_root / "tasks"
         reports_dir = args.queue_root / "reports"
+        inbox_dir = args.queue_root / "inbox"
     else:
         tasks_dir = DEFAULT_TASKS_DIR
         reports_dir = DEFAULT_REPORTS_DIR
+        inbox_dir = DEFAULT_INBOX_DIR
 
     hits, assigned_count, redispatch_skipped, unreadable_reports = scan(
         tasks_dir, reports_dir, args.threshold_min)
+
+    qc_hits, qc_stats = ([], None)
+    if not args.no_qc_scan:
+        qc_hits, qc_stats = scan_qc_dispatch(inbox_dir, args.qc_threshold_min)
 
     if args.json:
         print(json.dumps(hits, ensure_ascii=False))
@@ -355,6 +534,12 @@ def main(argv=None):
             print(f"[stall_watchdog] WARN: ACTION=report_unreadable "
                   f"AGENT={u['agent']} TASK_ID={u['task_id']} "
                   f"⇒ ★判じられぬゆえ hits に載らぬ (健全ではない)★", file=sys.stderr)
+        # ★json の口でも 10 分規律を落とさぬ★ = 口ごとに射程が違えば、
+        # 読み手は「json には出ぬ = 無い」と読む (同じ穴が口を変えて戻る)。
+        if qc_stats is not None:
+            print(json.dumps({"qc_dispatch_late": qc_hits,
+                              "qc_stats": {k: v for k, v in qc_stats.items()}},
+                             ensure_ascii=False))
     else:
         # ★黙った件は黙って黙らぬ★ = 再dispatchと見て鳴らさなかった分を必ず印字する。
         # これが見えねば「再dispatch判定が効きすぎて全部握り潰す」状態と
@@ -389,6 +574,8 @@ def main(argv=None):
             print(f"AGENT={h['agent']} TASK_ID={h['task_id']} "
                   f"PARENT_CMD={h['parent_cmd']} ELAPSED_MIN={h['elapsed_min']} "
                   f"REPORT_STATUS={h['report_status']}")
+        if qc_stats is not None:
+            print_qc_result(qc_hits, qc_stats, args.qc_threshold_min)
 
     if args.dry_run or args.queue_root is not None:
         return 0
@@ -410,6 +597,23 @@ def main(argv=None):
             continue
         state[alert_key(h)] = {"last_alert": now.isoformat(timespec="seconds"),
                                "task_id": h["task_id"]}
+    # ── 10 分規律の警報 (cmd_1454) ──────────────────────────────────
+    # cooldown は帳簿漏れと同じ簿を使う (key に "qc|" を冠して衝突を避ける)。
+    for h in qc_hits:
+        key = qc_alert_key(h)
+        last = parse_iso_to_naive_local(state.get(key, {}).get("last_alert"))
+        if last is not None and (now - last).total_seconds() < args.cooldown_min * 60:
+            print(f"[stall_watchdog] cooldown 中ゆえ再警報せず: "
+                  f"{key} (cooldown={args.cooldown_min}分)")
+            continue
+        proc = notify_karo_qc(h, args.qc_threshold_min)
+        if proc.returncode != 0:
+            print(f"[stall_watchdog] ERROR: inbox_write failed for QC alert "
+                  f"{key}: {proc.stderr.strip()}", file=sys.stderr)
+            exit_code = 1
+            continue
+        state[key] = {"last_alert": now.isoformat(timespec="seconds"),
+                      "msg_id": h["msg_id"]}
     _save_alert_state(state)
     return exit_code
 

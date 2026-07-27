@@ -207,13 +207,27 @@ fi
 #   (4) 文語調の語 … 申し／ござ／而して／拙者／貴殿／候／なされ が在るとき言う
 #   (5) 比喩を用語に使った語 … 門／牙／関所／番人／錨／伏せ札／秤 が在るとき言う
 #       （殿には通じない身内の言い回しである）
-_style_len() { printf '%s' "${1-}" | wc -m | tr -d ' '; }
+# ★字数は locale に依らせない★（家老 18:00 の名指しを受けて撃ち直したら、別の鳴りすぎが出た）
+#   実測: `wc -m` は locale 次第で byte を数える。LC_ALL=C の下では日本語 20 字が 60 と出て、
+#   ★平易な題でも必ず鳴る★ = 全部で鳴る警告は読む者が無視するようになる。
+#   ⇒ python3 でコードポイントを数える。python3 が無い機では★数えず、その旨を出す★
+#     （黙って通すと「検めた」と読まれるため）。
+_style_len() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import sys; print(len(sys.argv[1]))' "${1-}"
+  else
+    echo "unknown"
+  fi
+}
 
 _STYLE_FLAGS=""
 _style_say() { echo "[ntfy] 文体: $1" >&2; _STYLE_FLAGS="${_STYLE_FLAGS:+$_STYLE_FLAGS,}$2"; }
 
 _TITLE_LEN=$(_style_len "$TITLE")
-if [ "${_TITLE_LEN:-0}" -gt 20 ]; then
+if [ "$_TITLE_LEN" = "unknown" ]; then
+  echo "[ntfy] 文体: 題の字数は検めていない（python3 が無く、locale に依らない数え方ができない）。" >&2
+  _STYLE_FLAGS="${_STYLE_FLAGS:+$_STYLE_FLAGS,}len_unknown"
+elif [ "${_TITLE_LEN:-0}" -gt 20 ]; then
   _style_say "題が ${_TITLE_LEN} 字ある（20 字以内が殿の基準）。短くできないか。" "len"
 fi
 _BODY_LINES=$(printf '%s' "$BODY" | grep -c '' || true)

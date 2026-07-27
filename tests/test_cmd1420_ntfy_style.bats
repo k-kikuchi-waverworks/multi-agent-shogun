@@ -178,3 +178,67 @@ make_tree() {
   NTFY_LOG_FILE="$TMP/mut2/after.log" run bash "$TMP/mut2/scripts/ntfy.sh" "完了しました" "終わってござる"
   [[ "$output" != *"文語調"* ]]
 }
+
+# ── 鳴りすぎを捕える側（家老 18:00 の名指し）──────────────────────────
+# 「全部で鳴る警告は、読む者が必ず無視するようになる。鳴らぬのと同じか、それより悪い」
+
+@test "Q1 平易な題ではひとつも鳴らない（鳴りすぎの対照）" {
+  local t
+  for t in "テスト題" "engine 常駐化 5分" "完了しました" "朝の報告 — 殿の作業 5 件" \
+           "✅ 株 T3 完了（データ不足 56%）" "処理が終わりました。" "🔑 殿の作業 2 件（2時間以内）"; do
+    run bash "$REPO/scripts/ntfy.sh" "$t" "本文は一行です"
+    [ "$status" -eq 0 ]
+    if [[ "$output" == *"[ntfy] 文体:"* ]]; then
+      echo "鳴りすぎ: 題=$t / 出力=$output" >&2
+      return 1
+    fi
+  done
+}
+
+@test "Q2 本当に記号を並べた題では鳴る（Q1 が牙を鈍らせていないこと）" {
+  local t
+  for t in "★★★ 完了" "!!! 急ぎ" "完了！！" "【重要】完了"; do
+    run bash "$REPO/scripts/ntfy.sh" "$t" "本文"
+    if [[ "$output" != *"記号"* ]]; then
+      echo "鳴らなすぎ: 題=$t" >&2
+      return 1
+    fi
+  done
+}
+
+@test "Q3 字数は locale に依らない（LC_ALL=C でも同じ判定）" {
+  # ★実測: wc -m は locale 次第で byte を数え、日本語 20 字が 60 と出た★
+  #   = 平易な題でも必ず鳴る形であった。python3 でコードポイントを数える形に直した。
+  local t20="あいうえおかきくけこさしすせそたちつて完"
+  local t21="あいうえおかきくけこさしすせそたちつてと完"
+  run env LC_ALL=C bash "$REPO/scripts/ntfy.sh" "$t20" "本文"
+  [[ "$output" != *"題が"* ]]        # 20字は鳴らない
+  run env LC_ALL=C bash "$REPO/scripts/ntfy.sh" "$t21" "本文"
+  [[ "$output" == *"題が 21 字ある"* ]]   # 21字は鳴る。数も同じ
+}
+
+@test "Q4 行数と語の判定も locale に依らない" {
+  run env LC_ALL=C bash "$REPO/scripts/ntfy.sh" "完了しました" "$(printf '一行\n二行\n三行')"
+  [[ "$output" != *"本文が"* ]]
+  run env LC_ALL=C bash "$REPO/scripts/ntfy.sh" "完了しました" "$(printf '一行\n二行\n三行\n四行')"
+  [[ "$output" == *"本文が 4 行ある"* ]]
+  run env LC_ALL=C bash "$REPO/scripts/ntfy.sh" "完了しました" "終わってござる"
+  [[ "$output" == *"文語調"* ]]
+}
+
+@test "M3 字数を byte で数える形に戻すと、平易な日本語題で鳴る（鳴りすぎを捕える牙）" {
+  make_tree "$TMP/mut3"
+  # 変異前: 20字の日本語題では鳴らない
+  NTFY_LOG_FILE="$TMP/mut3/before.log" run bash "$TMP/mut3/scripts/ntfy.sh" "あいうえおかきくけこさしすせそたちつて完" "本文"
+  [[ "$output" != *"題が"* ]]
+  # byte 数え（locale 依存の wc -m）へ戻す
+  python3 - "$TMP/mut3/scripts/ntfy.sh" <<'PY'
+import sys, pathlib, re
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+s = s.replace("""    python3 -c 'import sys; print(len(sys.argv[1]))' "${1-}\"""",
+              """    printf '%s' "${1-}" | LC_ALL=C wc -m | tr -d ' '""")
+p.write_text(s, encoding="utf-8")
+PY
+  NTFY_LOG_FILE="$TMP/mut3/after.log" run bash "$TMP/mut3/scripts/ntfy.sh" "あいうえおかきくけこさしすせそたちつて完" "本文"
+  [[ "$output" == *"題が 60 字ある"* ]]   # 現に鳴る = Q1/Q3 は牙を持っている
+}

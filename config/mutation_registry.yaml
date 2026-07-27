@@ -3104,6 +3104,167 @@ mutations:
     red_needle: "not ok 1 T-NA-009"
     timeout: 300
 
+  # ── cmd_1392「二族の刻」の牙 6 本 (MUT-1392-007〜012) ───────────────────────
+  # ★案の出所 = 足軽五号★ / ★台帳への代筆 = 足軽六号★ (本任の間、台帳の単独書き手)。
+  # ★受け渡し = plans/registry_entries_cmd1392_ash5.yaml (md5 e14c91a1acb36b782b489e59e0533b35)★
+  #   = ★前の受け渡しは queue/reports/ashigaru5_report.yaml に置かれ、次の任の報告で黙って消えた★
+  #     ⇒ 家老 11:58 の規「登録案の受け渡しは plans/ の file で行う」の第一号である。
+  # ★6/6 PASS を機械が申した刻 = 2026-07-27 11:18:29★
+  #   (008/009 は初版では「同一綴りが 2 箇所で発火・申告 1」= UNDETERMINED であり、
+  #    錨を一意へ絞った fix2 で赤を見た ⇒ ★「見てから出した」の刻は後ろへずれる★)。
+  # ★六号自身の replay (別走・12:08:19 完走) でも 6/6 PASS = 赤の名指しまで一致★。
+  # ★註★= MUT-1392-001〜006 は【別の 6 本】(的 = T-AGE-001〜006) であり台帳に載っておらぬ。
+  #   ★本登録では畳まれぬ = 幽霊 6 件は別の借財として残る★ (家老の裁を仰いでおる)。
+  - id: MUT-1392-007
+    desc: 齢の口を【mtime 一族】から【ps 一族】へ戻す変異 = ★二族の刻を較べる形が帰ってくる★。cmd_1392 の是正そのものを反転させる牙
+    origin: cmd_1392
+    suspected_by: gunshi2
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_proc_age.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'pgrep -P "$ppid" 2>/dev/null || true'
+      new = 'for c in $(pgrep -P "$ppid"); do ps -o etimes= -p "$c"; done'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats tests/unit/test_idle_revive_proc_age.bats
+    expect: nonzero
+    red_needle: not ok 16 T-AGE-016
+    timeout: 300
+  - id: MUT-1392-008
+    desc: pid の数字を【秒】として読む変異 = ★族の混線の実体★。stdout の token を齢と誤読すれば、pid が大きいほど齢が長いと申す計器になる
+    origin: cmd_1392
+    suspected_by: ashigaru5
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_proc_age.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = ('starts = [m for m in (_proc_start_mtime(tok) for tok in stdout_text.split())\n'
+             '              if m is not None]')
+      new = ('starts = []\n'
+             '    _secs = [int(v) for v in stdout_text.split() if v.isdigit()]\n'
+             '    if _secs:\n'
+             '        return max(_secs)')
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats tests/unit/test_idle_revive_proc_age.bats
+    expect: nonzero
+    red_needle: not ok 2 T-AGE-002
+    timeout: 300
+  - id: MUT-1392-009
+    desc: 齢の起点を【定義されておらぬ名】から採る変異 = ★NameError の地雷★。齢の口が now_ts を渡されずに呼ばれた其の瞬間に落ちる形を捕える
+    origin: cmd_1392
+    suspected_by: ashigaru5
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_proc_age.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = "now_ts = datetime.datetime.now().timestamp()"
+      new = "now_ts = _wall_clock()"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      assert "_wall_clock" not in s, "★_wall_clock が既に在れば地雷にならぬ★ = 牙の前提が崩れておる"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats tests/unit/test_idle_revive_proc_age.bats
+    expect: nonzero
+    red_needle: not ok 17 T-AGE-017
+    timeout: 300
+  - id: MUT-1392-010
+    desc: 母数を数え損なう変異 = ★JUDGED が永久に 0★。印字の形は残るゆえ、抑止 0 の朝に「判定へ入った者が居らぬ」と毎回 名乗る = ★0 が再び読めなくなる★
+    origin: cmd_1392
+    suspected_by: karo
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_proc_age.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'IMPOSSIBLE_JUDGE_STATS["judged"] += 1'
+      new = 'pass'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats tests/unit/test_idle_revive_proc_age.bats
+    expect: nonzero
+    red_needle: not ok 19 T-AGE-019
+    timeout: 300
+  - id: MUT-1392-011
+    desc: 0 の三義を分ける枝を潰す変異 = ★門が盲であっても『現に問うて、成らなんだ』と名乗る★。★『検めた』と『検められなんだ』を同じ 0 に戻す形★
+    origin: cmd_1392
+    suspected_by: ashigaru5
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_proc_age.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'if _st["judged"] == 0:'
+      new = 'if False:'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats tests/unit/test_idle_revive_proc_age.bats
+    expect: nonzero
+    red_needle: not ok 19 T-AGE-019
+    timeout: 300
+  - id: MUT-1392-012
+    desc: 抑止を二倍へ広げる変異 = ★守りを減らす向き★。★真に固着した agent (沈黙 60 分・真の齢 85 分) が revive を受けられなくなる★ = 害の形そのものを縛る牙。★anchor は M13/M14 と同じ 1 行★ = 其の行を触る者は三本とも撃ち直せ
+    origin: cmd_1392
+    suspected_by: gunshi1
+    paths:
+    - scripts/idle_revive_scan.py
+    - tests/unit/test_idle_revive_proc_age.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/idle_revive_scan.py")
+      s = p.read_text(encoding="utf-8")
+      old = "if age_sec is not None and age_sec < claimed_silence_sec:"
+      new = "if age_sec is not None and age_sec < claimed_silence_sec * 2:"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3
+      bats tests/unit/test_idle_revive_proc_age.bats
+    expect: nonzero
+    red_needle: not ok 18 T-AGE-018
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

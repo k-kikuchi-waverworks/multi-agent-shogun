@@ -30,7 +30,7 @@ setup_file() {
     cp "$REPO/CLAUDE.md" "$TPL/CLAUDE.md"
     cp "$REPO/instructions/shogun.md" "$REPO/instructions/karo.md" \
        "$REPO/instructions/ashigaru.md" "$REPO/instructions/gunshi.md" "$TPL/instructions/"
-    cp -r "$REPO/instructions/roles" "$REPO/instructions/common" \
+    cp -r "$REPO/instructions/common" \
           "$REPO/instructions/cli_specific" "$TPL/instructions/"
     cp "$REPO/config/opencode-permissions.yaml" "$TPL/config/"
     cp "$REPO/scripts/build_instructions.sh" "$REPO/scripts/gate_generated_sync.sh" "$TPL/scripts/"
@@ -47,7 +47,6 @@ setup_file() {
 !CLAUDE.md
 !AGENTS.md
 !instructions/*.md
-!instructions/roles/*.md
 !instructions/common/*.md
 !instructions/cli_specific/*.md
 !instructions/generated/*.md
@@ -187,7 +186,7 @@ repo_file_list() { find . -path ./.git -prune -o -type f -print | sort; }
     [[ "$named" == *".github/copilot-instructions.md"* ]]
     [[ "$named" == *"agents/default/system.md"* ]]
     # 波及先を取り違えていないか: CLAUDE.md はこの3本にしか流れ込まない。
-    # instructions/generated/*.md は instructions/roles ほかの部品から作られるため動かない。
+    # instructions/generated/*.md は instructions/{role}.md ほかの部品から作られるため動かない。
     [[ "$named" != *"instructions/generated/"* ]]
     [ "$(printf '%s\n' "$named" | grep -c .)" -eq 3 ]
 }

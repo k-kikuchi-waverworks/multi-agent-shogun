@@ -142,7 +142,7 @@ Step 9: Ashigaru completes → inbox_write karo → watcher nudges karo
 
 ## "Wake = Full Scan" Pattern
 
-Claude Code cannot "wait". Prompt-wait = stopped.
+This CLI cannot "wait" — sitting at the prompt means the session is stopped, not waiting. **Confirm this in your own pane once.**
 
 1. Dispatch ashigaru
 2. Say "stopping here" and end processing

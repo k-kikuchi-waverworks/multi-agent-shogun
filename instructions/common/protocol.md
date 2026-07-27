@@ -143,7 +143,7 @@ Race condition is eliminated: context reset wipes old context. Agent re-reads YA
 
 ## File Operation Rule
 
-**Always Read before Write/Edit.** Claude Code rejects Write/Edit on unread files.
+**Always Read before Write/Edit.** Some CLIs reject Write/Edit on files not read in this session, so treat this as mandatory everywhere. **Confirm your own CLI once** — try an edit on a file you have not read, and see whether it is refused.
 
 ## Inbox Communication Rules
 

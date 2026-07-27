@@ -56,7 +56,6 @@ SOURCES=(
     instructions/karo.md
     instructions/ashigaru.md
     instructions/gunshi.md
-    instructions/roles
     instructions/common
     instructions/cli_specific
     config/opencode-permissions.yaml

@@ -22,7 +22,6 @@ setup_file() {
     export OUTPUT_DIR="$PROJECT_ROOT/instructions/generated"
 
     # パーツディレクトリの存在確認（前提条件）
-    [ -d "$PROJECT_ROOT/instructions/roles" ] || return 1
     [ -d "$PROJECT_ROOT/instructions/common" ] || return 1
     [ -d "$PROJECT_ROOT/instructions/cli_specific" ] || return 1
 

@@ -306,6 +306,22 @@ For ambiguous inputs (e.g., 「Acmeさんの件」):
 
 **Streak counting is unified**: both cmd completions (by Karo) and VF task completions (by Shogun) update the same `saytask/streaks.yaml`. `today.total` and `today.completed` include both types.
 
+## Critical Thinking (Lightweight — Steps 2-3)
+
+Before presenting any conclusion involving resource estimates, feasibility, or model selection to the Lord:
+
+### Step 2: Recalculate Numbers
+- Never trust your own first calculation. Recompute from source data
+- Especially check multiplication and accumulation: if you wrote "X per item" and there are N items, compute X × N explicitly
+- If the result contradicts your conclusion, your conclusion is wrong
+
+### Step 3: Runtime Simulation
+- Trace state not just at initialization, but after N iterations
+- "File is 100K tokens, fits in 400K context" is NOT sufficient — what happens after 100 web searches accumulate in context?
+- Enumerate exhaustible resources: context window, API quota, disk, entry counts
+
+Do NOT present a conclusion to the Lord without running these two checks. If in doubt, route to Gunshi for full 5-step review (Steps 1-5) before committing.
+
 ## Compaction Recovery
 
 Recover from primary data sources:

@@ -53,11 +53,16 @@ plans/**/README.md
 #   build_instructions.sh:111 がこの file を読んで antigravity 向け 4 本を組み立てる。
 !instructions/cli_specific/antigravity_tools.md
 
-# Multi-CLI: Build template parts (roles, common sections)
-!instructions/roles/
-!instructions/roles/*.md
+# Multi-CLI: Build template parts (common sections)
 !instructions/common/
 !instructions/common/*.md
+
+# cmd_1451 (2026-07-28): instructions/roles/ を退役させ instructions/retired/ へ移した。
+#   build はもう読まぬ (scripts/build_instructions.sh は instructions/{role}.md のみを見る)。
+#   ★白名簿へ足す理由★= 追跡下に置きながら白名簿に無い形は、index から外して add し直す日に
+#   「add できぬ」へ化ける (cmd_1445 で現物を実演した族)。移した先も同じ罠を持つゆえ塞ぐ。
+!instructions/retired/
+!instructions/retired/*.md
 
 # Multi-CLI: Generated instruction files (built by build_instructions.sh)
 !instructions/generated/

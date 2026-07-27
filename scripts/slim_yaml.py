@@ -42,9 +42,31 @@ CANONICAL_REPORTS = ({f'ashigaru{i}_report' for i in range(1, 9)}
                      | {'gunshi_report', 'gunshi1_report', 'gunshi2_report'})
 IDLE_STUB = {'task': {'status': 'idle'}}
 TOP_LEVEL_IDLE_STUB = {'status': 'idle'}
-TERMINAL_STATUSES = {'done', 'cancelled', 'paused'}
-ACTIVE_STATUSES = {'pending', 'in_progress', 'blocked'}
-TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'pending_blocked'}
+# ★status の語彙は【ファイル種別ごとに別】である (cmd_1463)★
+# 正本 = instructions/common/task_flow.md:9-20「Status is defined per YAML file type」。
+# 台帳の 8 値は instructions/karo.md:1803 (schema v2) と scripts/cmd_id_alloc.sh:238 が綴りまで同一。
+# 台帳の終端の別は instructions/common/task_flow.md:58-78 と instructions/karo.md:1853。
+#
+# ★2026-07-28 まで、此の道具は【1 組の語彙を 3 種の file へ当てておった】★:
+#   旧 TERMINAL = {done, cancelled, paused} / 旧 ACTIVE = {pending, in_progress, blocked}
+#   ・paused と blocked は台帳の 8 値に無い (paused は文書から消えた後も機械に残っておった)
+#   ・superseded / archived / dispatched / deferred は 8 値に在るのに機械が知らず、
+#     ★正本どおりに書かれた entry を機械が "non-canonical" と刷った★ (実測 105 件・2026-07-28 08:0x)
+#   ・害の向きは 2 つ = ①終端 (superseded/archived) が剪定されず積む
+#     ②同じ集合が active の計算にも使われ、終端 cmd を「まだ active」と数える
+#     (= その cmd の報告が slim_reports の剪定から外れ続ける)
+#
+# ★分けねばならぬ理由 (此処が本件の芯)★= 台帳の 8 値をそのまま task file へ当てると
+#   status='archived' の task file (karo.yaml / ashigaru7.yaml / gunshi_a.yaml / gunshi_b.yaml) が
+#   ★終端と読まれて file ごと archive へ移る★。下の CANONICAL_TASKS の註が「archived ゆえ当たっておらぬ」と
+#   書いておるのは其の事であり、語彙を 1 組のまま直せば ★家老の task file が消える★。
+CMD_TERMINAL_STATUSES = {'done', 'superseded', 'cancelled', 'archived'}
+CMD_ACTIVE_STATUSES = {'pending', 'in_progress', 'deferred', 'dispatched'}
+# 足軽 task file (task_flow.md:100-123)。idle は task_id: null の置き札のみ許される値。
+TASK_TERMINAL_STATUSES = {'done', 'failed'}
+TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'blocked', 'pending_blocked'}
+# ntfy_inbox (task_flow.md:18)。
+NTFY_TERMINAL_STATUSES = {'processed'}
 INVENTORY_AGE_SECONDS = 30 * 86400
 
 
@@ -143,7 +165,7 @@ def get_active_cmd_ids():
             continue
         if cmd.get('id') is None:
             continue
-        if get_item_status(cmd) in TERMINAL_STATUSES:
+        if get_item_status(cmd) in CMD_TERMINAL_STATUSES:
             continue
         active.add(cmd.get('id'))
     return active
@@ -157,9 +179,9 @@ def inventory_commands(commands):
             continue
         status = get_item_status(cmd) or 'unknown'
         cmd_id = cmd.get('id', '<missing-id>')
-        if status not in TERMINAL_STATUSES and status not in ACTIVE_STATUSES:
+        if status not in CMD_TERMINAL_STATUSES and status not in CMD_ACTIVE_STATUSES:
             unknown.append(f"{cmd_id}:{status}")
-        if status in ACTIVE_STATUSES and is_old_timestamp(cmd.get('timestamp')):
+        if status in CMD_ACTIVE_STATUSES and is_old_timestamp(cmd.get('timestamp')):
             old_active.append(f"{cmd_id}:{status}:{cmd.get('timestamp')}")
 
     if unknown:
@@ -189,7 +211,7 @@ def inventory_ntfy_inbox(dry_run=False):
         status = get_item_status(item) or 'unknown'
         item_id = item.get('id', '<missing-id>')
         if is_old_timestamp(item.get('timestamp')):
-            if status in TERMINAL_STATUSES:
+            if status in NTFY_TERMINAL_STATUSES:
                 old_terminal.append(f"{item_id}:{status}")
             else:
                 old_pending.append(f"{item_id}:{status}")
@@ -241,7 +263,7 @@ def slim_tasks(dry_run=False):
 
         stem = filepath.stem
         if stem in CANONICAL_TASKS:
-            if status not in TERMINAL_STATUSES:
+            if status not in TASK_TERMINAL_STATUSES:
                 if status not in TASK_ACTIVE_STATUSES:
                     print_inventory(f"canonical task {filepath.name} has non-canonical status '{status}'")
                 continue
@@ -258,8 +280,8 @@ def slim_tasks(dry_run=False):
                 return False
             continue
 
-        if status not in TERMINAL_STATUSES:
-            if status not in TASK_ACTIVE_STATUSES and status not in ACTIVE_STATUSES:
+        if status not in TASK_TERMINAL_STATUSES:
+            if status not in TASK_ACTIVE_STATUSES:
                 print_inventory(f"task file {filepath.name} has non-canonical status '{status}'")
             continue
 
@@ -408,7 +430,7 @@ def slim_shugun_to_karo(dry_run=False):
 
     for cmd in queue:
         status = get_item_status(cmd) or 'unknown'
-        if status in TERMINAL_STATUSES:
+        if status in CMD_TERMINAL_STATUSES:
             archived.append(cmd)
         else:
             active.append(cmd)

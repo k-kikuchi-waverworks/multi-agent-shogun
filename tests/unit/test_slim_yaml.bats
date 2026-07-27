@@ -87,8 +87,11 @@ assert data["queue"][0]["id"] == "cmd_done"
 PY
 }
 
-@test "archives terminal commands using canonical statuses and keeps non-terminal commands" {
-    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_done\n  status: done\n- id: cmd_cancelled\n  status: cancelled\n- id: cmd_paused\n  status: paused\n- id: cmd_pending\n  status: pending\n- id: cmd_in_progress\n  status: in_progress\n- id: cmd_blocked\n  status: blocked\n'
+# ★cmd_1463★ 台帳の語彙は instructions/common/task_flow.md:58-78 の 8 値である。
+# 此の試験は 2026-07-28 まで paused を終端・blocked を非終端として釘付けにしておった
+# (どちらも 8 値に無い綴りである) = 試験が誤りを固定する側に回っておった形。
+@test "archives the four terminal ledger statuses and keeps the four non-terminal ones" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_done\n  status: done\n- id: cmd_superseded\n  status: superseded\n- id: cmd_cancelled\n  status: cancelled\n- id: cmd_archived\n  status: archived\n- id: cmd_pending\n  status: pending\n- id: cmd_in_progress\n  status: in_progress\n- id: cmd_deferred\n  status: deferred\n- id: cmd_dispatched\n  status: dispatched\n'
 
     run run_slim karo
     assert_success
@@ -98,10 +101,74 @@ PY
 import sys, yaml
 data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 ids = [item["id"] for item in data["queue"]]
-assert ids == ["cmd_pending", "cmd_in_progress", "cmd_blocked"], ids
+assert ids == ["cmd_pending", "cmd_in_progress", "cmd_deferred", "cmd_dispatched"], ids
+PY
+    "$TEST_PYTHON" - "$(find "$SHOGUN_QUEUE_DIR/archive" -name 'shogun_to_karo_*.yaml')" <<'PY'
+import sys, yaml
+data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
+ids = sorted(item["id"] for item in data["queue"])
+assert ids == ["cmd_archived", "cmd_cancelled", "cmd_done", "cmd_superseded"], ids
 PY
     archive_count="$(find "$SHOGUN_QUEUE_DIR/archive" -name 'shogun_to_karo_*.yaml' | wc -l)"
     [ "$archive_count" -eq 1 ]
+}
+
+# ★陽性と陰性を対で撃つ★= 8 値どおりに書いた entry は名指されず、8 値に無い綴りは名指される。
+# 陰性側の綴りは実台帳に現に居る 1 件 (cmd_1463 の実測) を写した物である。
+@test "canonical ledger statuses are not reported as non-canonical but an unknown spelling still is" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_pending\n  status: pending\n- id: cmd_in_progress\n  status: in_progress\n- id: cmd_deferred\n  status: deferred\n- id: cmd_dispatched\n  status: dispatched\n- id: cmd_done\n  status: done\n- id: cmd_superseded\n  status: superseded\n- id: cmd_cancelled\n  status: cancelled\n- id: cmd_archived\n  status: archived\n'
+
+    run run_slim karo --dry-run
+    assert_success
+    refute_output --partial "non-canonical command status"
+
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" $'queue:\n- id: cmd_bogus\n  status: superseded_by_17_30_correction\n'
+    run run_slim karo --dry-run
+    assert_success
+    assert_output --partial "non-canonical command status: cmd_bogus:superseded_by_17_30_correction"
+}
+
+# ★此の試験が守るのは家老の state そのものである★= 台帳の 8 値をそのまま task file へ当てると
+# status: archived の task file (karo.yaml 等) が終端と読まれ、file ごと archive へ移って idle stub に化ける。
+# task file の語彙は task_flow.md:100-123 の別語彙であり、archived は其処に無い = 触らず名指すのが正しい。
+@test "task file with status archived is named but never archived or stubbed" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" "queue: []"
+    write_yaml "$SHOGUN_QUEUE_DIR/tasks/karo.yaml" $'worker_id: karo\ntask_id: subtask_karo\nstatus: archived\n'
+    write_yaml "$SHOGUN_QUEUE_DIR/tasks/gunshi_a.yaml" $'task_id: subtask_legacy_gunshi\nstatus: archived\n'
+
+    run run_slim karo
+    assert_success
+    assert_output --partial "canonical task karo.yaml has non-canonical status 'archived'"
+    assert_output --partial "task file gunshi_a.yaml has non-canonical status 'archived'"
+
+    [ "$(yaml_value "$SHOGUN_QUEUE_DIR/tasks/karo.yaml" "status")" = "archived" ]
+    [ "$(yaml_value "$SHOGUN_QUEUE_DIR/tasks/karo.yaml" "task_id")" = "subtask_karo" ]
+    [ -f "$SHOGUN_QUEUE_DIR/tasks/gunshi_a.yaml" ]
+    [ ! -d "$SHOGUN_QUEUE_DIR/archive/tasks" ]
+}
+
+# task file の終端は done と failed の二つである (task_flow.md:112-118)。
+@test "failed task file is terminal and canonical task is reset to idle" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" "queue: []"
+    write_yaml "$SHOGUN_QUEUE_DIR/tasks/ashigaru3.yaml" $'worker_id: ashigaru3\ntask_id: subtask_failed\nstatus: failed\n'
+
+    run run_slim karo
+    assert_success
+
+    [ "$(yaml_value "$SHOGUN_QUEUE_DIR/tasks/ashigaru3.yaml" "status")" = "idle" ]
+    [ "$(find "$SHOGUN_QUEUE_DIR/archive/tasks" -name 'ashigaru3_*.yaml' | wc -l)" -eq 1 ]
+}
+
+# task file の blocked は「まだ始めるな」= 非終端。台帳の語彙には元より無い綴りである。
+@test "blocked task file is kept as active and not reported as non-canonical" {
+    write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" "queue: []"
+    write_yaml "$SHOGUN_QUEUE_DIR/tasks/ashigaru4.yaml" $'worker_id: ashigaru4\ntask_id: subtask_blocked\nstatus: blocked\n'
+
+    run run_slim karo
+    assert_success
+    refute_output --partial "ashigaru4.yaml has non-canonical status"
+
+    [ "$(yaml_value "$SHOGUN_QUEUE_DIR/tasks/ashigaru4.yaml" "status")" = "blocked" ]
 }
 
 @test "supports current top-level task status and resets canonical task to top-level idle" {
@@ -160,7 +227,7 @@ PY
 
 @test "ntfy inbox old pending entries are inventoried but not deleted" {
     write_yaml "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" "queue: []"
-    write_yaml "$SHOGUN_QUEUE_DIR/ntfy_inbox.yaml" $'inbox:\n- id: pending-old\n  status: pending\n  timestamp: "2000-01-01T00:00:00+09:00"\n- id: done-old\n  status: done\n  timestamp: "2000-01-01T00:00:00+09:00"\n'
+    write_yaml "$SHOGUN_QUEUE_DIR/ntfy_inbox.yaml" $'inbox:\n- id: pending-old\n  status: pending\n  timestamp: "2000-01-01T00:00:00+09:00"\n- id: processed-old\n  status: processed\n  timestamp: "2000-01-01T00:00:00+09:00"\n'
 
     run run_slim karo --dry-run
     assert_success
@@ -172,6 +239,6 @@ PY
 import sys, yaml
 data = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 ids = [item["id"] for item in data["inbox"]]
-assert ids == ["pending-old", "done-old"], ids
+assert ids == ["pending-old", "processed-old"], ids
 PY
 }

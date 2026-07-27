@@ -26,6 +26,10 @@ esac
 FAKE
   chmod +x "$TMP/bin/curl"
   export PATH="$TMP/bin:$PATH"
+  # cmd_1419 その5: bats の中では既定で送信そのものを止める（殿の端末を鳴らさぬため）。
+  # ★本 suite は偽 curl を PATH に置いて 500 や接続失敗を作る★ = curl を呼ぶ経路自体を試したい。
+  # ゆえにここでは明示で逃げ道を開ける。矢は飛ばない（偽 curl ゆえ本物の宛先へは繋がらない）。
+  export NTFY_DRY_RUN=0
 }
 
 teardown() {

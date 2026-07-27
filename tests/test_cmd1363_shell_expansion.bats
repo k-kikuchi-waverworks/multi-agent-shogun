@@ -197,7 +197,9 @@ print(len(ms), "NEL" in "".join(m["content"] for m in ms))
     mkdir -p "$TESTDIR/bin"
     printf '#!/bin/sh\necho 500\n' > "$TESTDIR/bin/curl"
     chmod +x "$TESTDIR/bin/curl"
-    run env PATH="$TESTDIR/bin:$PATH" bash "$NTFY" "テスト" "本文"
+    # cmd_1419 その5: bats の中では既定で送信を止める（殿の端末を鳴らさぬため）。
+    #   本 test は偽 curl で 500 を作り、curl を呼ぶ経路そのものを試すゆえ明示で逃げ道を開ける。
+    run env NTFY_DRY_RUN=0 PATH="$TESTDIR/bin:$PATH" bash "$NTFY" "テスト" "本文"
     [ "$status" -ne 0 ]
     [[ "$output" == *"HTTP=500"* ]]
 }
@@ -206,6 +208,6 @@ print(len(ms), "NEL" in "".join(m["content"] for m in ms))
     mkdir -p "$TESTDIR/bin"
     printf '#!/bin/sh\necho 200\n' > "$TESTDIR/bin/curl"
     chmod +x "$TESTDIR/bin/curl"
-    run env PATH="$TESTDIR/bin:$PATH" bash "$NTFY" "テスト" "本文"
+    run env NTFY_DRY_RUN=0 PATH="$TESTDIR/bin:$PATH" bash "$NTFY" "テスト" "本文"
     [ "$status" -eq 0 ]
 }

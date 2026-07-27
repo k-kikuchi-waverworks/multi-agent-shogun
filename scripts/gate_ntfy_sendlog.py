@@ -80,6 +80,7 @@ LINE_RE = re.compile(
     r"(?: caller=(?P<caller>\S+))?"
     r"(?: fp=(?P<fp>\S+))?"
     r"(?: dup_age=(?P<dup_age>\S+))?"
+    r"(?: mode=(?P<mode>\S+))?"
     r" title=(?P<title>.*)$"
 )
 

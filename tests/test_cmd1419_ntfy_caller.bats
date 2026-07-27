@@ -202,3 +202,89 @@ make_tree() {
   run grep -c 'dup_age=' "$TMP/mut2/after.log"
   [ "$output" = "0" ]        # 印が消える = D1 の主張は現に落ちる
 }
+
+# ── その5: 試験の送信が殿の端末を鳴らさない ──────────────────────────────
+
+# 本物の curl が呼ばれたら痕跡が残る偽 curl（呼ばれたこと自体を捕える）
+plant_tracer_curl() {
+  cat > "$TMP/bin/curl" <<FAKE
+#!/usr/bin/env bash
+echo called >> "$TMP/curl_called"
+printf '200'; exit 0
+FAKE
+  chmod +x "$TMP/bin/curl"
+}
+
+@test "S1 bats の中では curl そのものを呼ばない（矢が飛ばない）" {
+  plant_tracer_curl
+  run bash "$REPO/scripts/ntfy.sh" "S1 試験送信"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP/curl_called" ]        # 一度も呼ばれていない
+}
+
+@test "S2 送らなかったことと宛先を画面に出す（黙って送らない形にしない）" {
+  plant_tracer_curl
+  run bash "$REPO/scripts/ntfy.sh" "S2 画面に出す"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"送っていない"* ]]
+  [[ "$output" == *"https://ntfy.sh/"* ]]   # どこへ送らなかったかが分かる
+}
+
+@test "S3 ログにも mode=dryrun として残る（記録からも後で分かる）" {
+  plant_tracer_curl
+  bash "$REPO/scripts/ntfy.sh" "S3 記録" >/dev/null 2>&1
+  run grep -cE ' mode=dryrun ' "$NTFY_LOG_FILE"
+  [ "$output" = "1" ]
+  run grep -c 'HTTP=DRYRUN' "$NTFY_LOG_FILE"
+  [ "$output" = "1" ]
+}
+
+@test "S4 bats の外でも NTFY_DRY_RUN=1 で止まる（他の枠組み用の逃げ道）" {
+  plant_tracer_curl
+  run env -u BATS_TEST_FILENAME -u BATS_TEST_TMPDIR -u BATS_RUN_TMPDIR \
+      NTFY_DRY_RUN=1 NTFY_LOG_FILE="$TMP/s4.log" bash "$REPO/scripts/ntfy.sh" "S4 明示"
+  [ "$status" -eq 0 ]
+  [ ! -f "$TMP/curl_called" ]
+  run grep -c 'HTTP=DRYRUN' "$TMP/s4.log"
+  [ "$output" = "1" ]
+}
+
+@test "S5 読み手は dryrun の行も読め、成功とも失敗とも数えられる形で残る" {
+  plant_tracer_curl
+  bash "$REPO/scripts/ntfy.sh" "S5 読み手" >/dev/null 2>&1
+  run python3 - "$REPO" "$NTFY_LOG_FILE" <<'PY'
+import importlib.util, pathlib, sys
+repo, log = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+spec = importlib.util.spec_from_file_location("g", repo / "scripts/gate_ntfy_sendlog.py")
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+line = log.read_text(encoding="utf-8").splitlines()[0]
+g = m.LINE_RE.match(line)
+assert g, f"読めない: {line}"
+assert g.group("mode") == "dryrun", g.groupdict()
+assert g.group("http") == "DRYRUN", g.groupdict()
+print("ok")
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "M3 試験モードの判定を外せば curl が現に呼ばれる（S1 の主張が落ちる）" {
+  make_tree "$TMP/mut3"
+  plant_tracer_curl
+  # 変異前の写しでは呼ばれない
+  NTFY_LOG_FILE="$TMP/mut3/before.log" bash "$TMP/mut3/scripts/ntfy.sh" "M3 変異前" >/dev/null 2>&1
+  [ ! -f "$TMP/curl_called" ]
+  # 判定を外す（bats の env を見なくする）
+  sed -i 's/elif \[ -n "\${BATS_TEST_FILENAME:-}\${BATS_TEST_TMPDIR:-}\${BATS_RUN_TMPDIR:-}" \]; then/elif false; then/' "$TMP/mut3/scripts/ntfy.sh"
+  NTFY_LOG_FILE="$TMP/mut3/after.log" bash "$TMP/mut3/scripts/ntfy.sh" "M3 変異後" >/dev/null 2>&1
+  [ -f "$TMP/curl_called" ]          # 変異下では現に呼ばれる = S1 は牙を持っている
+  run grep -c 'HTTP=200' "$TMP/mut3/after.log"
+  [ "$output" = "1" ]
+}
+
+@test "S6 逃げ道（NTFY_DRY_RUN=0）を使うと、使ったことが画面に出る（黙っては通らない）" {
+  plant_tracer_curl
+  NTFY_DRY_RUN=0 run bash "$REPO/scripts/ntfy.sh" "S6 逃げ道"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"NTFY_DRY_RUN=0 が明示されている"* ]]
+  [ -f "$TMP/curl_called" ]          # 経路は現に通っている（偽 curl ゆえ矢は飛ばない）
+}

@@ -172,9 +172,47 @@ if [ "$_DUP_WINDOW_SEC" -gt 0 ] && [ "$_FP" != "nosha" ] && [ -f "$LOG_FILE" ]; 
   fi
 fi
 
+# ══ cmd_1419 その5 — 試験の送信が殿の端末を鳴らす形を塞ぐ ══════════════════
+#
+# 実測（軍師二号が本日の通知30本を点検）: 試験由来の送信6本が殿の端末へ実際に飛んでいた
+#   （01:20 に4本、07:23 と 12:09 に1本ずつ）。
+#   cmd_1400 で★ログの向き先★は tmp へ逃がしたが、★送信そのもの★は本番の宛先へ飛んでいた。
+#   = 「記録を汚さない」と「鳴らさない」は別の守りである。片方だけでは足りなかった。
+#
+# 塞ぎ方: 試験の中では curl を呼ばない。★ただし黙って送らない形にはしない★ =
+#   どこへ送らなかったかを画面（stderr）に出し、ログにも mode=dryrun として残す。
+# 判じ方: bats が立てる env、または明示の NTFY_DRY_RUN=1。★自分で「試験か」を推し量らない★。
+# 答えない問い: bats 以外の枠組み（素の bash 試験・pytest）はこれでは捕まらない。
+#   そちらは NTFY_DRY_RUN=1 を明示すること。cmd_1400 の log guard と同じ射程である。
+#
+# 逃げ道: NTFY_DRY_RUN=0 を明示すれば試験の中でも本物の経路を通る。
+#   ★これは黙っては通らない★ = 通る時は画面にそう出す。
+#   要る場面: 偽 curl を PATH に置いて 500 や接続失敗を作る試験（cmd_1381）。
+#   そこでは矢は飛ばないが、curl を呼ぶ経路そのものを試したいためである。
+_DRY_RUN=0
+if [ "${NTFY_DRY_RUN:-}" = "1" ]; then
+  _DRY_RUN=1
+  _DRY_WHY="NTFY_DRY_RUN=1 が立っている"
+elif [ "${NTFY_DRY_RUN:-}" = "0" ]; then
+  _DRY_RUN=0
+  echo "[ntfy] NTFY_DRY_RUN=0 が明示されている = 試験の中でも送信の経路を通る。" >&2
+elif [ -n "${BATS_TEST_FILENAME:-}${BATS_TEST_TMPDIR:-}${BATS_RUN_TMPDIR:-}" ]; then
+  _DRY_RUN=1
+  _DRY_WHY="bats の中で走っている"
+fi
+
 _curl_rc=0
+if [ "$_DRY_RUN" = "1" ]; then
+  echo "[ntfy] 送っていない（$_DRY_WHY）。宛先は https://ntfy.sh/$TOPIC であった。" >&2
+  echo "[ntfy]   題=$(_log_title "$TITLE")" >&2
+  echo "[ntfy]   本物へ送るなら NTFY_DRY_RUN=0 を明示し、bats の外で撃つこと。" >&2
+  _http_status="DRYRUN"
+  _DUP_FIELD="$_DUP_FIELD mode=dryrun"
+fi
 # shellcheck disable=SC2086
-if [ -n "$BODY" ]; then
+if [ "$_DRY_RUN" = "1" ]; then
+  :   # 試験の中では curl を呼ばない（呼ばないことが本件の守りそのもの）
+elif [ -n "$BODY" ]; then
   _http_status=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_ARGS[@]}" -H "Title: $TITLE" -H "Tags: outbound" -d "$BODY" "https://ntfy.sh/$TOPIC" 2>/dev/null) || _curl_rc=$?
 else
   _http_status=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_ARGS[@]}" -H "Tags: outbound" -d "$TITLE" "https://ntfy.sh/$TOPIC" 2>/dev/null) || _curl_rc=$?
@@ -203,6 +241,8 @@ fi
 #   家老が本日 ntfy の送信失敗に気付けなんだのは、この沈黙が理由である。
 case "$_http_status" in
     2??) ;;  # 届いた
+    DRYRUN)  # 試験ゆえ送っていない。★失敗ではない★ = 上で既に画面へ名乗ってある
+        exit 0 ;;
     *)
         # ★同じ helper を通す★= stderr も ★多byteを途中で切って化けさせぬ・改行で行を割らせぬ★
         #   (60→80 byte へ揃えた。同じ瑕疵が二箇所に在ったゆえ、二箇所とも塞ぐ)

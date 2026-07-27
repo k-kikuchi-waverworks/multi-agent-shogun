@@ -368,11 +368,78 @@ try:
 
     # Overflow protection: keep max 50 messages
     if len(data["messages"]) > 50:
+        import tempfile as _tf, datetime as _dt
         msgs = data["messages"]
         unread = [m for m in msgs if not m.get("read", False)]
         read = [m for m in msgs if m.get("read", False)]
         # Keep all unread + newest 30 read messages
-        data["messages"] = unread + read[-30:]
+        keep_read = read[-30:]
+        dropped = read[:len(read) - len(keep_read)]
+        if dropped:
+            # 捨てる前に必ず退避する。
+            # ★退避が書けなければ「切り詰めるのをやめる」だけにし、配達は通す★ (家老 20:10 の裁)。
+            #   fail-closed (配達ごと止める) は「消さぬ」を守る代わりに ★届かぬ★ を作る。
+            #   警告に留めるだけでは ★黙って消える★ が残る。これが直そうとしておる当の穴である。
+            #   切り詰めを見送れば両方 守れる。代わりに inbox が 50 を越えて育つが、
+            #   育っておる事は下の名乗りで見えるし、後から slim_yaml.sh で縮められる。
+            _arc = None
+            _why = None
+            arc = None
+            try:
+                arc_dir = os.path.join(os.path.dirname(os.path.dirname(inbox)), "archive")
+                os.makedirs(arc_dir, exist_ok=True)
+                agent = os.path.basename(inbox)
+                if agent.endswith(".yaml"):
+                    agent = agent[:-5]
+                stamp = _dt.datetime.now().strftime("%Y%m%d%H%M%S")
+                arc = os.path.join(arc_dir, "inbox_%s_%s_overflow.yaml" % (agent, stamp))
+                _n = 1
+                while os.path.exists(arc):
+                    arc = os.path.join(arc_dir, "inbox_%s_%s_overflow_%d.yaml" % (agent, stamp, _n))
+                    _n += 1
+                a_fd, a_tmp = _tf.mkstemp(dir=arc_dir, suffix=".tmp")
+                try:
+                    with os.fdopen(a_fd, "w") as af:
+                        yaml.dump({"messages": dropped}, af, default_flow_style=False,
+                                  allow_unicode=True, indent=2)
+                    os.replace(a_tmp, arc)
+                except BaseException:
+                    if os.path.exists(a_tmp):
+                        os.unlink(a_tmp)
+                    raise
+                # 退避した物が現に読めるかを確かめてから捨てる (書けたつもりを許さぬ)
+                with open(arc) as af:
+                    back = yaml.safe_load(af) or {}
+                saved = back.get("messages") or []
+                if len(saved) != len(dropped):
+                    raise RuntimeError("退避を読み戻したら数が合わぬ: saved=%d dropped=%d -> %s"
+                                       % (len(saved), len(dropped), arc))
+                _arc = arc
+            except Exception as _e:
+                _why = "%s: %s" % (type(_e).__name__, _e)
+                # 中途半端な退避 file を残さぬ (捨てておらぬのに「捨てた分」の顔をする物を置かぬ)
+                try:
+                    if arc is not None and os.path.exists(arc):
+                        os.unlink(arc)
+                except Exception:
+                    pass
+            if _arc is not None:
+                data["messages"] = unread + keep_read
+                print("[inbox_write] overflow: 既読 %d 通を退避してから落とした -> %s"
+                      % (len(dropped), _arc), file=sys.stderr)
+            else:
+                # ★切り詰めを見送る。1通も捨てぬ。配達は通す。黙って見送らぬ★
+                _over = len(data["messages"]) - 50
+                print("[inbox_write] overflow: ★切り詰めを見送った★ — 退避が書けなんだ (%s)。"
+                      % _why, file=sys.stderr)
+                print("[inbox_write]        1通も捨てておらぬ。配達は通す。"
+                      "今 %d 通 = 上限 50 を %d 通 越えておる (見送った既読 %d 通)。"
+                      % (len(data["messages"]), _over, len(dropped)), file=sys.stderr)
+                print("[inbox_write]        退避が書ける様になったら "
+                      "`bash scripts/slim_yaml.sh %s` で縮めよ。"
+                      % os.path.basename(inbox)[:-5], file=sys.stderr)
+        else:
+            data["messages"] = unread + keep_read
 
     # Atomic write: tmp file + rename (prevents partial reads)
     import tempfile

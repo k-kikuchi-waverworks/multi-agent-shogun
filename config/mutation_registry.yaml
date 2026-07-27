@@ -4011,26 +4011,29 @@ mutations:
     red_needle: not ok 1 T-GSW-012
     timeout: 300
 
-  # ── T-GSW-006 に entry を置かぬ理由 (家老 23:35 の下命で此処へ焼く) ────────
-  #  gate-2 の段2 は「T-GSW-006 の負の主張を台帳の誰も証しておらぬ」と名指し続ける。
-  #  之は怠りではなく、種類として撃てぬ側 (⑦-b) である。六号が 23:2x に実測した:
+  # ── T-GSW-006 の顛末 (家老 23:35 の下命で焼く。★六号の先の見立ては覆った★) ──
+  #  ★先に訂正を書く★= 六号は 23:3x に「門をどう変異させても 006 は偽にできぬ =
+  #  種類として撃てぬ側 (⑦-b)」と書いた。★之は 4e92553 より前の 006 についてのみ真であった★。
+  #  三号が 23:33 に 006 を直した後、同じ測りをやり直したら覆った。以下は両方の実測である。
   #
-  #  (1) 台帳の 4 件を 1 つずつ当てて 006 だけを走らせた
-  #      G1 → 006 は赤くなるが理由は MUTATION-DID-NOT-APPLY (三号の sed の当て先が消えた)
-  #      G2 / G3 / G4 → 006 は緑のまま
-  #  (2) 006 の変異体が現に何を吐くかを素で測った
-  #      原本    rc=2 / 出力 132 byte (plans/untracked_a.md を名指す)
-  #      変異A後 rc=0 / 出力 0 byte (何も言わぬ)
+  #  (甲) 4e92553 より前の 006 (主張が「名指さぬ」だけ) — 六号 23:2x 実測
+  #    ・台帳 4 件を 1 つずつ当てた: G1 → 赤だが理由は MUTATION-DID-NOT-APPLY
+  #      (三号の sed の当て先が消えただけ) / G2・G3・G4 → 006 は緑のまま
+  #    ・006 の変異体を素で撃った: 原本 rc=2 / 132 byte (plans/untracked_a.md を名指す)
+  #      変異A後 rc=0 / ★0 byte (何も言わぬ)★
+  #    ⇒ 主張「出力に plans/untracked_a.md が無い」は ★空の出力でも満たされる★ =
+  #      門が丸ごと壊れても 006 は緑のまま通る。cmp を刃と数えても此の穴は塞がらぬ。
   #
-  #  ⇒ 006 の唯一の主張「出力に plans/untracked_a.md が無い」は ★空の出力でも満たされる★。
-  #    ゆえに cmp (MUTATION-DID-NOT-APPLY) を刃と数えれば段2 は緑になるが、穴は開いたままになる。
-  #  ⇒ 門の側をどう変異させても此の主張は偽にできぬ。変異Aで盲の一覧が空になった時点で
-  #    build_message が files 無しで途中 return する = 名指す経路がそもそも無い
-  #    (scripts/grep_scope_warn.py の blind_files → build_message を読んで確かめた)。
+  #  (乙) 4e92553 の後の 006 (① 原本が名指すことを先に確かめる形) — 六号 23:4x 実測
+  #    ・台帳 G1 → ★赤。落ちる所は ① の `[ "$status" -eq 2 ]` = 働きの側★
+  #      (MUTATION-DID-NOT-APPLY ではない。前は wrong reason であった物が right reason へ変わった)
+  #    ・G2・G3・G4 → 006 は緑のまま (此の筋を通らぬ変異ゆえ道理に適う)
+  #    ・門を即 return 0 へ潰す変異 → ★赤。落ちる所は同じく ①★
+  #    ⇒ ★①が陽性の対照として働き、門側の壊れが 006 へ届くようになった★。
+  #      ゆえに 006 は ⑦-b (種類として撃てぬ) ではない。下の MUT-1399-H で登録する。
   #
-  #  ★ゆえに黙らせる為だけの entry は置かぬ★。段2 は UNDETERMINED 止まりで
-  #  「壊れておるという意味ではない」と自ら名乗る作りゆえ、名指されたまま残す方が正しい。
-  #  006 を空振りせぬ形にする処方 (test の中で原本と変異体を 2 回 撃つ) は三号へ回してある。
+  #  ★教訓★= 「撃てぬ」は試験の書き方に依る性質であって、試験の題目に依る性質ではない。
+  #  試験が変われば「撃てぬ」も覆る。⑦-b と書いた物は、相手が動いたら測り直せ。
   #
   # ── cmd_1399 続き (三号 f11af21・軍師一号が名指した3つの穴) ──────────────
   #  ★E/F/G は G1〜G4 と違い「己では sed を撃たぬ素の試験」を宛てておる★ =
@@ -4120,6 +4123,39 @@ mutations:
       bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-019"
     expect: nonzero
     red_needle: not ok 1 T-GSW-019
+    timeout: 300
+
+  - id: MUT-1399-H
+    origin: cmd_1399
+    suspected_by: ashigaru6
+    desc: |
+      門を入口で即 return 0 へ潰す変異 = 何も検めず何も言わぬ形。
+      之が守るのは T-GSW-006 の ★陽性の対照★ である。006 は「変異体が名指さぬこと」を
+      言う試験だが、其の主張だけなら門が丸ごと壊れて何も吐かぬ時にも満たされる
+      (六号が 23:2x に実測: 変異体 rc=0・出力 0 byte)。三号が 4e92553 で
+      「先に原本を撃ち名指すことを確かめる」を足したゆえ、門側の壊れが 006 へ届くようになった。
+      本 entry は其の ① が現に生きておることを毎日 検める。
+      実測 (六号 23:4x・隔離木): 原本で 006 は緑 / 本変異で赤 /
+      落ちる所は ① の `[ "$status" -eq 2 ]` = 働きの側であり MUTATION-DID-NOT-APPLY ではない。
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = 'def run_hook(payload: dict) -> int:\n    root = (payload.get("cwd")'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(
+          old, 'def run_hook(payload: dict) -> int:\n    return 0\n    root = (payload.get("cwd")', 1),
+          encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-006"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-006
     timeout: 300
 
 coverage_waivers: []

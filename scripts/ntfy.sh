@@ -42,6 +42,18 @@ done < <(ntfy_get_auth_args "$SCRIPT_DIR/config/ntfy_auth.env")
 TITLE="${1:-}"
 BODY="${2:-}"
 
+# cmd_1420: 型を読む口。★呼び手が一番 読むのは【警告が出た其の時】ゆえ、道具から直に読める形にした★
+#   （docs にも同じ物が在る: docs/content/ops/cmd_1420_ntfy_templates.md）。
+if [ "$TITLE" = "--templates" ] || [ "$TITLE" = "--types" ]; then
+  _T="$SCRIPT_DIR/docs/content/ops/cmd_1420_ntfy_templates.md"
+  if [ -f "$_T" ]; then
+    cat "$_T"
+    exit 0
+  fi
+  echo "[ntfy] 型の紙が無い: $_T" >&2
+  exit 2
+fi
+
 # ── cmd_1363: shell に食われぬ本文の受け口 (inbox_write.sh と同じ綴り) ──────
 # ★家老が 2026-07-26 に本 script で同型を踏んだ★ = 本文の backtick を shell が先に
 #   評価し、送信そのものが失敗した。綴りは scripts/shell_expansion_guard.py の
@@ -176,6 +188,58 @@ if [ "$_DUP_WINDOW_SEC" -gt 0 ] && [ "$_FP" != "nosha" ] && [ -f "$LOG_FILE" ]; 
   fi
 fi
 
+# ══ cmd_1420 — 送る前に題と本文を検める（殿の指示を通知の側で守らせる）══════
+#
+# 実測（軍師二号 plans/cmd_1420_ntfy_readability.md）: 本日の実送信 24 本のうち、
+#   殿の基準（題 20 字以内・本文 3 行以内・平易語・記号を並べない）を満たしたのは 3 本だけ。
+#   題の平均は 26 字、最長 41 字（基準の 2 倍超）。
+#
+# 拒まず警告にする理由: ★止めると急ぎの blocker が文体のせいで届かなくなる★。
+#   文体は直せるが、届かなかった知らせは取り返せない。ゆえに送り、必ず画面に出す。
+#
+# 検める中身（5つ）。★どれも文字列をそのまま見る★ =
+#   ★バッククォートで囲めば通る、のような素通りの道を作らない★（本日 engine 側で現に踏んだ形）。
+#   (1) 題の字数 … 20 字を超えたら言う。
+#       ★数え方 = コードポイント単位。絵文字は 1 字と数える★
+#       （ZWJ で繋いだ絵文字は複数字になる。軍師二号の点検も同じ数え方である）
+#   (2) 本文の行数 … 3 行を超えたら言う
+#   (3) 記号の並び … 題に 【】★ が在る、または同じ記号が 2 つ以上 続くとき言う
+#   (4) 文語調の語 … 申し／ござ／而して／拙者／貴殿／候／なされ が在るとき言う
+#   (5) 比喩を用語に使った語 … 門／牙／関所／番人／錨／伏せ札／秤 が在るとき言う
+#       （殿には通じない身内の言い回しである）
+_style_len() { printf '%s' "${1-}" | wc -m | tr -d ' '; }
+
+_STYLE_FLAGS=""
+_style_say() { echo "[ntfy] 文体: $1" >&2; _STYLE_FLAGS="${_STYLE_FLAGS:+$_STYLE_FLAGS,}$2"; }
+
+_TITLE_LEN=$(_style_len "$TITLE")
+if [ "${_TITLE_LEN:-0}" -gt 20 ]; then
+  _style_say "題が ${_TITLE_LEN} 字ある（20 字以内が殿の基準）。短くできないか。" "len"
+fi
+_BODY_LINES=$(printf '%s' "$BODY" | grep -c '' || true)
+if [ "${_BODY_LINES:-0}" -gt 3 ]; then
+  _style_say "本文が ${_BODY_LINES} 行ある（3 行以内が殿の基準）。" "lines"
+fi
+case "$TITLE" in
+  *【*|*】*|*★*) _style_say "題に記号（【】★）が入っている。" "sym" ;;
+  *) case "$TITLE" in
+       # ★引用符で囲む★= ? は glob の 1 文字扱いゆえ、裸で書くと何にでも当たる
+       #   （現に最初の版が当たり、正しい題まで外れと言った。撃って気付いた）
+       *"——"*|*"!!"*|*"！！"*|*"??"*|*"？？"*|*"・・"*) _style_say "題に同じ記号が続いている。" "sym" ;;
+     esac ;;
+esac
+for _w in 申し ござ 而して 拙者 貴殿 候 なされ; do
+  case "$TITLE$BODY" in *"$_w"*) _style_say "文語調の語がある（$_w）。普通の言い方にできないか。" "arch"; break ;; esac
+done
+for _w in 伏せ札 秤 関所 番人 錨 牙 門; do
+  case "$TITLE$BODY" in *"$_w"*) _style_say "身内の言い回しがある（$_w）。殿には通じない。" "jargon"; break ;; esac
+done
+if [ -n "$_STYLE_FLAGS" ]; then
+  echo "[ntfy]   送信は止めない。型は docs/content/ops/cmd_1420_ntfy_templates.md（bash scripts/ntfy.sh --templates でも読める）。" >&2
+fi
+_STYLE_FIELD=" style=${_STYLE_FLAGS:-ok}"
+_MODE_FIELD=""
+
 # ══ cmd_1419 その5 — 試験の送信が殿の端末を鳴らす形を塞ぐ ══════════════════
 #
 # 実測（軍師二号が本日の通知30本を点検）: 試験由来の送信6本が殿の端末へ実際に飛んでいた
@@ -211,7 +275,7 @@ if [ "$_DRY_RUN" = "1" ]; then
   echo "[ntfy]   題=$(_log_title "$TITLE")" >&2
   echo "[ntfy]   本物へ送るなら NTFY_DRY_RUN=0 を明示し、bats の外で撃つこと。" >&2
   _http_status="DRYRUN"
-  _DUP_FIELD="$_DUP_FIELD mode=dryrun"
+  _MODE_FIELD=" mode=dryrun"
 fi
 # shellcheck disable=SC2086
 if [ "$_DRY_RUN" = "1" ]; then
@@ -231,7 +295,7 @@ fi
 #   ■ ★失うた物も名乗る★= 段4 で得た「成功行は従前と byte 一致」は ★本改修で意図して手放した★ =
 #     ★機械可読の方が値打ちが上と判じたゆえ★ (家老の下命が其れを求めておる)。
 _log_line() {
-  echo "[$(date '+%Y-%m-%dT%H:%M:%S%:z')] HTTP=${_http_status:-NONE} curl_rc=$_curl_rc caller=$_CALLER fp=$_FP${_DUP_FIELD} title=$(_log_title "$TITLE")" >> "$LOG_FILE"
+  echo "[$(date '+%Y-%m-%dT%H:%M:%S%:z')] HTTP=${_http_status:-NONE} curl_rc=$_curl_rc caller=$_CALLER fp=$_FP${_DUP_FIELD}${_STYLE_FIELD}${_MODE_FIELD} title=$(_log_title "$TITLE")" >> "$LOG_FILE"
 }
 _log_line
 if [ "$_curl_rc" -ne 0 ]; then

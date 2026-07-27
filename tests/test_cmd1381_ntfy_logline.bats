@@ -49,8 +49,8 @@ teardown() {
   FAKE_CURL_MODE=ok run bash "$REPO/scripts/ntfy.sh" "試験 A1"
   [ "$status" -eq 0 ]
   [ "$(wc -l < "$NTFY_LOG_FILE")" -eq 1 ]
-  # cmd_1419 で caller= と fp= が curl_rc と title の間に入った（title は常に最後）。
-  run grep -cE '^\[[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}\+[0-9]{2}:[0-9]{2}\] HTTP=200 curl_rc=0 caller=\S+ fp=\S+ title=' "$NTFY_LOG_FILE"
+  # cmd_1419 で caller= と fp=、cmd_1420 で style= が curl_rc と title の間に入った（title は常に最後）。
+  run grep -cE '^\[[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}\+[0-9]{2}:[0-9]{2}\] HTTP=200 curl_rc=0 caller=\S+ fp=\S+ style=\S+ title=' "$NTFY_LOG_FILE"
   [ "$output" = "1" ]
 }
 

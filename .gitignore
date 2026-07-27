@@ -12,6 +12,10 @@
 # Step 3: OSS公開対象ファイルを許可
 !.gitignore
 !.gitattributes
+# cmd_1445 (2026-07-28): submodule の宣言。追跡下に在ったが白名簿には無かった。
+#   これが配られぬと fresh clone で git submodule update --init が何も見つけられず、
+#   tests/test_helper 配下の bats 補助が入らぬ = テストが一本も走らぬ形になる。
+!.gitmodules
 !.gitleaks.toml
 !CLAUDE.md
 !LICENSE
@@ -45,6 +49,9 @@ plans/**/README.md
 !instructions/cli_specific/kimi_tools.md
 !instructions/cli_specific/opencode_tools.md
 !instructions/cli_specific/cursor_tools.md
+# cmd_1445 (2026-07-28): antigravity だけ白名簿に無かった (兄弟 6 本は在る)。
+#   build_instructions.sh:111 がこの file を読んで antigravity 向け 4 本を組み立てる。
+!instructions/cli_specific/antigravity_tools.md
 
 # Multi-CLI: Build template parts (roles, common sections)
 !instructions/roles/
@@ -70,6 +77,9 @@ plans/**/README.md
 #   これも .gitignore:7 の * に黙って弾かれる。白名簿へ入れねば fresh clone に無く、
 #   agent_status.sh の実体欄が全部「不明」になる (在るが配られておらぬ形)。
 !lib/pane_cli_liveness.sh
+# cmd_1445 (2026-07-28): branch 方針の 3 script (auto_merge / branch_drift / pre_deploy) が
+#   source する共有部品。これが欠けると 3 本とも起動時に落ちる。
+!lib/branch_policy.sh
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md
@@ -341,6 +351,26 @@ scripts/seo_qc.sh
 # cmd_1339 (2026-07-25): lifetime lock 契約 + pane 解決正本 lib
 !scripts/lib/proc_lock.sh
 !scripts/lib/pane_gate.sh
+# cmd_1445 (2026-07-28): branch 方針の道具 4 本。tests/unit/test_branch_policy_scripts.bats が
+#   3 本を名指しており、配られねば fresh clone でそのテストが落ちる。
+#   setup_cron.sh は残り 2 本を crontab へ仕込む口で、下の cmd_1367 の註が現に名指しておる。
+!scripts/auto_merge_short_lived.sh
+!scripts/branch_drift_check.sh
+!scripts/pre_deploy_verify.sh
+!scripts/setup_cron.sh
+# cmd_1445 (2026-07-28): 変異テストの守備範囲を数え直す口 (cmd_1394)。
+#   config/mutation_registry.yaml と scripts/gate_nightly.sh が呼び、
+#   tests/unit/test_gate_census_wiring.bats が配線を見張っておる。毎朝の門が使う道具である。
+!scripts/fang_domain_census.py
+
+# cmd_1445 (2026-07-28): 追跡下だが白名簿へ足さぬと判じた 9 本 (次の者が同じ判断を繰り返さぬための覚書)。
+#   規則は書かぬ。書けば配る側へ回るゆえ、ここは註のみである。
+#   scripts/retired/ 3 本 (dashboard-viewer.py / discord_post.sh / ratelimit_check.sh)
+#     = 退役済み。追跡下の .sh/.py から呼ぶ者は 0 本。index から外れる日が来たなら、それは撤去である。
+#   skills/waverworks-deploy-theme/ 6 本
+#     = 殿の会社固有の deploy 道具であり、この repo の OSS 配布面ではない (上の Skills 帯は
+#       「public OSS skills」と名乗っており、この skill だけ 0 件なのは意図と読める)。
+#       同 dir の .gitignore が deploy.config.yml を名指しで拒んでおる点も、配らぬ側の証である。
 
 
 # SayTask (sample template only, not actual data)

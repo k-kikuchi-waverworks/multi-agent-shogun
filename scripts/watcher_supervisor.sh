@@ -117,6 +117,52 @@ if [ "${__WATCHER_SUPERVISOR_TESTING__:-}" != "1" ]; then
     sup_log "watcher_supervisor started (pid=$$, lifetime lock acquired)"
 fi
 
+# ══════════════════════════════════════════════════════════════════
+# cmd_1408 (2026-07-27): 番人に「己の死を名乗る口」を足す
+# ──────────────────────────────────────────────────────────────────
+# 由来 = 2026-07-27 09:18:06〜09:21:05 の窓で supervisor (pid=5533) が消えた。
+# ★log に終いの行が一つも無く、死んだ pid の lock だけが居座った★。
+#
+# ★★射程を並べて書く = どちらか一方を「之で足りる」と読ませぬため★★
+#   ┌ trap (本 block)  = ★己で畳む死★を名乗る口。
+#   │   拾える = 正常終了 / SIGTERM / SIGINT / SIGHUP / set -e による異常終了。
+#   │   ★拾えぬ = SIGKILL・電断・OOM killer・カーネルごと落ちる形★。
+#   └ probe (idle_revive_scan の 3 分毎 lock 検分) = ★外から見る口★。
+#       拾える = ★上で拾えぬ族すべて★ (process が消えた事実のみを見るゆえ)。
+#       拾えぬ = 検知まで最大 3 分・家老への警告は 30 分に一度 (throttle)。
+#
+# ⇒ ★★trap を足しても probe を捨てる理由には【一切ならぬ】★★。
+#   ★逆も同じ = probe が在るゆえ trap は要らぬ、とも読むな★
+#   (probe は「死んだ」しか言わぬ。trap は「どう死んだか (signal / rc)」を言う)。
+#
+# ★本行が【無い】ことを【死んでおらぬ】の証に使うな★ =
+#   ★不在は証にならぬ★ — 之は本 repo が 2026-07-27 に何度も踏んだ形である。
+# ══════════════════════════════════════════════════════════════════
+# ★trap は lock 取得の【後】に張る★ = DUPLICATE 退場 (上の exit 0) で
+# 「終了した」と名乗らせぬため (起動しておらぬ者は死ねぬ)。
+_sup_signal=""
+
+_sup_on_signal() {
+    _sup_signal="$1"
+    exit $(( 128 + $2 ))
+}
+
+_sup_on_exit() {
+    local rc=$?
+    local how
+    if [ -n "$_sup_signal" ]; then
+        how="signal=${_sup_signal} rc=${rc}"
+    else
+        how="signal=なし (己で畳んだか set -e による異常終了) rc=${rc}"
+    fi
+    sup_log "watcher_supervisor ENDED (pid=$$, ${how}) — ★己で畳む死ゆえ名乗れた★。★本行が【無い】ことは【死んでおらぬ】の証にならぬ★= SIGKILL・電断・OOM では本行は出ぬゆえ、其の族を拾うのは外から見る口 (idle_revive_scan の lock probe・3 分毎検知/30 分毎警告) である。★両方 要る★。復旧= nohup bash scripts/watcher_supervisor.sh >> logs/watcher_supervisor.log 2>&1 &"
+}
+
+trap '_sup_on_signal TERM 15' TERM
+trap '_sup_on_signal INT 2' INT
+trap '_sup_on_signal HUP 1' HUP
+trap _sup_on_exit EXIT
+
 get_multiagent_pane_base() {
     if [ -n "${SHOGUN_PANE_BASE:-}" ]; then
         echo "$SHOGUN_PANE_BASE"

@@ -288,3 +288,55 @@ PY
   [[ "$output" == *"NTFY_DRY_RUN=0 が明示されている"* ]]
   [ -f "$TMP/curl_called" ]          # 経路は現に通っている（偽 curl ゆえ矢は飛ばない）
 }
+
+@test "F3 指紋は欄として読む（題の中に同じ綴りがあっても過去の送信と混同しない）" {
+  # 軍師一号 17:51 の名指し: 綴りをログ全文から探すと、題に fp=… を含む行を送信と読む。
+  bash "$REPO/scripts/ntfy.sh" "F3 下ごしらえ" "本文" >/dev/null 2>&1
+  local fp
+  fp=$(grep -oE ' fp=[0-9a-f]{8}' "$NTFY_LOG_FILE" | head -1 | sed 's/ fp=//')
+  : > "$NTFY_LOG_FILE"
+  # 題の中に指紋の綴りを含む行だけを置く（送信の記録ではない）
+  printf '[%s] HTTP=200 curl_rc=0 caller=zzz fp=00000000 title=偽 fp=%s を題に含む行\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%:z')" "$fp" > "$NTFY_LOG_FILE"
+  run bash "$REPO/scripts/ntfy.sh" "F3 下ごしらえ" "本文"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"警告"* ]]              # 題の中の綴りを過去の送信と読んでいない
+  run grep -c 'dup_age=' "$NTFY_LOG_FILE"
+  [ "$output" = "0" ]
+}
+
+@test "F4 欄として置かれた過去の送信はちゃんと拾う（F3 が牙を鈍らせていないこと）" {
+  bash "$REPO/scripts/ntfy.sh" "F4 題" "本文" >/dev/null 2>&1
+  run bash "$REPO/scripts/ntfy.sh" "F4 題" "本文"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"警告"* ]]
+}
+
+# ── 警告が家老に届く形（軍師一号 17:51 の名指し）────────────────────────
+
+@test "G1 読み手が重ね送りを数えて出す（--dup-only は1行、rc は常に 0）" {
+  bash "$REPO/scripts/ntfy.sh" "G1 題" "同じ本文" >/dev/null 2>&1
+  bash "$REPO/scripts/ntfy.sh" "G1 題" "同じ本文" >/dev/null 2>&1
+  run python3 "$REPO/scripts/gate_ntfy_sendlog.py" --log-file "$NTFY_LOG_FILE" --dup-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"[NTFY-SEND-DUP]"* ]]
+  [[ "$output" == *"1 件"* ]]
+  [[ "$output" == *"呼び手="* ]]        # 誰が撃ったかも出る
+}
+
+@test "G2 重ね送りが無ければ 0 件と出る（常に鳴る警告ではない）" {
+  bash "$REPO/scripts/ntfy.sh" "G2 題" "本文 A" >/dev/null 2>&1
+  bash "$REPO/scripts/ntfy.sh" "G2 題" "本文 B" >/dev/null 2>&1
+  run python3 "$REPO/scripts/gate_ntfy_sendlog.py" --log-file "$NTFY_LOG_FILE" --dup-only
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"0 件"* ]]
+}
+
+@test "G3 重ね送りは判定を赤にしない（届いていないことではないため）" {
+  NTFY_DRY_RUN=0 FAKE_MODE=ok bash "$REPO/scripts/ntfy.sh" "G3 題" "同じ本文" >/dev/null 2>&1
+  NTFY_DRY_RUN=0 bash "$REPO/scripts/ntfy.sh" "G3 題" "同じ本文" >/dev/null 2>&1
+  run python3 "$REPO/scripts/gate_ntfy_sendlog.py" --log-file "$NTFY_LOG_FILE"
+  [ "$status" -eq 0 ]                    # PASS のまま
+  [[ "$output" == *"[NTFY-SEND-DUP]"* ]] # 而して重ね送りは必ず出る
+  [[ "$output" == *"[NTFY-SEND-OK]"* ]]
+}

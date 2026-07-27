@@ -156,7 +156,11 @@ fi
 _DUP_WINDOW_SEC="${NTFY_DUP_WINDOW_SEC:-120}"
 _DUP_FIELD=""
 if [ "$_DUP_WINDOW_SEC" -gt 0 ] && [ "$_FP" != "nosha" ] && [ -f "$LOG_FILE" ]; then
-  _prev=$(grep -F " fp=$_FP " "$LOG_FILE" 2>/dev/null | tail -n 1 || true)
+  # ★指紋は【欄として】読む★（軍師一号 17:51 の名指し）。
+  #   綴りをログ全文から探すと、題の中に同じ綴りを含む行を過去の送信と読んでしまう。
+  #   下の並びは読み手（gate_ntfy_sendlog.py の LINE_RE）の欄順と同じ。
+  #   ★片方を変えたら他方も変えること★＝この一致は試験（F3）で固定してある。
+  _prev=$(grep -E "^\[[^]]+\] HTTP=[^ ]+( curl_rc=[^ ]+)?( caller=[^ ]+)? fp=$_FP( |$)" "$LOG_FILE" 2>/dev/null | tail -n 1 || true)
   if [ -n "$_prev" ]; then
     _prev_ts=${_prev#\[}
     _prev_ts=${_prev_ts%%\]*}

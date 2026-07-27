@@ -94,10 +94,13 @@ _CURL_RC_NAMES = {
 
 
 class Event:
-    __slots__ = ("at", "http", "rc", "kind", "naive")
+    __slots__ = ("at", "http", "rc", "kind", "naive", "caller", "fp", "dup_age")
 
-    def __init__(self, at: _dt.datetime, http: str, rc: str | None, kind: str, naive: bool):
+    def __init__(self, at: _dt.datetime, http: str, rc: str | None, kind: str, naive: bool,
+                 caller: str | None = None, fp: str | None = None, dup_age: str | None = None):
         self.at, self.http, self.rc, self.kind, self.naive = at, http, rc, kind, naive
+        # cmd_1419: 呼び手・本文の指紋・重複の齢。旧行には無いゆえ None を許す。
+        self.caller, self.fp, self.dup_age = caller, fp, dup_age
 
     def label(self) -> str:
         if self.kind == "die":
@@ -175,7 +178,8 @@ def parse_lines(text: str, local_tz: _dt.tzinfo | None) -> tuple[list[Event], in
         if kind == "shape":
             unparsed += 1
             continue
-        events.append(Event(at, m.group("http"), m.group("rc"), kind, naive=off is None))
+        events.append(Event(at, m.group("http"), m.group("rc"), kind, naive=off is None,
+                            caller=m.group("caller"), fp=m.group("fp"), dup_age=m.group("dup_age")))
     return events, unparsed, total
 
 
@@ -300,6 +304,24 @@ def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
         )
         return UNDET, out
 
+    # ── cmd_1419: 二度 鳴った事を【読む者に届ける】 ─────────────────────────
+    #   元の事件は「殿のスマホが2回 鳴った」ことである。気付く必要があるのは送り手ではなく家老と将軍。
+    #   送り手の画面（stderr）は前面で走らせた者しか読めず、ログの欄は残っても読む者が居なかった。
+    #   ⇒ 窓の内の dup_age 行をここで数えて必ず出す。
+    #   ★判定（PASS/FAIL）は動かさない★ = 重複は「届いていない」ことではないため。
+    #     鳴らす先を増やすのではなく、既に鳴る所へ載せる。
+    dup = [e for e in win if e.dup_age]
+    if dup:
+        who = ", ".join(sorted({e.caller or "呼び手不明" for e in dup}))[:120]
+        out.append(
+            f"[NTFY-SEND-DUP] 注意: ★同じ題と本文が短時間に重ねて送られた行が {len(dup)} 件★ "
+            f"(呼び手={who}) — 殿の端末はその数だけ鳴っている。"
+            "★これは判定を赤にしない★ (届いていないことではないゆえ) が、"
+            "★呼び手が二度 撃っていないかを確かめること★"
+        )
+    else:
+        out.append(f"[NTFY-SEND-DUP] 重ね送りは窓の内に 0 件 (見た件数 {len(win)})")
+
     ok = [e for e in win if e.kind == "ok"]
     die = [e for e in win if e.kind == "die"]
     rej = [e for e in win if e.kind == "reject"]
@@ -340,6 +362,11 @@ def run(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-fail", type=int, default=MAX_FAIL)
     ap.add_argument("--now", default=None, help="試験用: ISO8601 (既定は撃って写す=規律(7))")
     ap.add_argument("--selftest", action="store_true")
+    # cmd_1419: 家老が inbox 処理のたびに呼ぶための口。
+    #   重ね送りの1行だけを出し、★rc は常に 0★ = 家老の流れを止めないため
+    #   （通知路の生死は従前どおり引数なしの呼び方で判ずる）。
+    ap.add_argument("--dup-only", action="store_true",
+                    help="重ね送りの行だけを出す (rc は常に 0)")
     a = ap.parse_args(argv)
 
     if a.selftest:
@@ -366,6 +393,13 @@ def run(argv: list[str] | None = None) -> int:
         ]
     # ★出口も受け皿の内へ (差し戻し F-3)★= ★flush まで内へ入れねば、失敗は我らの手を離れた後に出る★
     #   (無buffer なら rc=1・buffer なら rc=120 = ★己の死ぬ色を CPython の終了規約に委ねる形★)。
+    if a.dup_only:
+        dup_lines = [l for l in out if "[NTFY-SEND-DUP]" in l]
+        for line in (dup_lines or ["[NTFY-SEND-DUP] 判ずるに足る行が無い (窓の内に送信が無い)"]):
+            print(line)
+        sys.stdout.flush()
+        return 0
+
     try:
         for line in out:
             print(line)

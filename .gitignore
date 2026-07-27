@@ -136,6 +136,10 @@ plans/**/README.md
 !config/mutation_registry.ml.yaml
 !config/artifact_manifests/
 !config/artifact_manifests/*.manifest
+# cmd_1455: 置換が触れる行の名簿。門 (scripts/gate_cli_substitution_roster.py) が読む。
+#   この 1 行を落とすと fresh clone に名簿が届かず、門は「名簿が無い = 何も除いておらぬ」と
+#   全行を名指す側へ倒れる (安全側だが毎朝鳴る = 外される)。
+!config/cli_substitution_roster.yaml
 
 # Templates
 !templates/
@@ -257,6 +261,10 @@ scripts/seo_qc.sh
 # 判定で落とさず名指すだけの道具なので、配られなければ存在価値がない。
 # .gitignore:7 の * に黙って弾かれていた (git check-ignore で実測・17:38)。同型はこれで 12 度目。
 !scripts/customs_lint.py
+# cmd_1455 (2026-07-28): CLI 名の置換が触れる行のうち、名簿に無い物を毎朝 名指す門。
+# gate_nightly.sh が呼ぶ先ゆえ、配られなければ「道具が居らぬ」で毎朝 UNDETERMINED が出る。
+# .gitignore:7 の * に黙って弾かれる (git check-ignore --no-index で実測・06:5x)。同型はこれで 13 度目。
+!scripts/gate_cli_substitution_roster.py
 # cmd_1363 (2026-07-26): 「道具へ渡す前に shell が食う」関所 (PreToolUse hook)。
 # ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
 #   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。

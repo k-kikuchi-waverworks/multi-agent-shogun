@@ -1,0 +1,40 @@
+# 載せてよいのは呼称だけ。判ずるのは人である。
+#
+# この名簿は scripts/gate_cli_substitution_roster.py が読む。
+# scripts/build_instructions.sh は CLAUDE.md を正本として他 CLI 向けの文書を作る時、
+# 「Claude Code」を各 CLI 名へ置き換える。門は置換が触れる行を数え上げ、
+# ここに札の無い行を毎朝 名指す。
+#
+# ■ 札を足してよい行 / 足してはならぬ行
+#   足してよい  = CLI 名が「呼称」として出るだけの行 (製品名・見出し・並記)。
+#                 置き換わっても、誰も測っていない主張は生まれない。
+#   足してならぬ = CLI の働きを断ずる行。
+#                 例 =「Claude Code rejects Write/Edit on unread files.」
+#                 これは Claude Code で1つ測った事実だが、置換後は Codex / Copilot / Kimi
+#                 について「誰も測っていない3つの断定」になる (cmd_1455 で 2 行を直した)。
+#                 直し方は札を足すことではなく、正本から CLI 名を外し、
+#                 読み手が自分の CLI で確かめられる形へ書き替えることである。
+#
+# ■ 門が鳴る二つの理由
+#   (1) 名簿に無い行が在る  = 正本へ CLI 名が新しく書かれた。人が上の物差しで判ぜよ。
+#   (2) 死んだ札が在る      = 札の指す行が盤面に無い。行が直されたか消えた。札を消せ。
+#       (2) を鳴らすのは、名簿が古びたまま黙る形を避けるためである。
+#       cmd_1447 で六号が見つけた白名簿は、指す先を失っても何も鳴らず 26 日 気付かれなかった。
+#
+# ■ 照合は line_sha256 で行う。text: は人が読むための欄で、照合には使わない。
+#   行を 1 byte でも直せば札は当たらなくなる = 匿えるのは「今 そこに在る其の行」だけ。
+#   本文だけ直して hash を置き去りにすると、門がその食い違いを名乗る。
+#
+# 採取の刻 = 2026-07-28 06:5x (ashigaru1 / cmd_1455)。
+# 射程はその時の盤面 = CLAUDE.md 1 本・537 行・触れる行 1。
+# cmd_1451 の案B (instructions/*.md を唯一の正本とする) が着地すれば射程が動く。
+# 門は射程を build_instructions.sh から毎回 読み直すゆえ、置換が動けば自ら鳴る。
+
+entries:
+  - path: CLAUDE.md
+    line_sha256: f0ec6bf56053ac191c4ff651d724ffe901c707881c13bcbb12a02cbca73c7b91
+    text: 'description: "Claude Code + tmux multi-agent parallel dev platform with sengoku military hierarchy"'
+    note: |
+      frontmatter の description。製品名としての呼称ゆえ、置き換わっても
+      誰も測っておらぬ断定は生まれぬ (AGENTS.md では「Codex CLI + tmux ...」となる)。
+      判じた者 = ashigaru1 / 2026-07-28 06:5x / cmd_1455。

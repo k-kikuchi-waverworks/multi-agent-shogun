@@ -100,11 +100,21 @@ def known_books() -> tuple[list[Path], str | None]:
         pairs, err = C.read_gate_pairs(REPO_ROOT / "scripts" / "gate_nightly.sh")
         if err:
             return _fallback_books(), f"gate_nightly.sh を読めなんだ: {err}"
-        books = []
+        # ★同じ冊を二度 数えぬ★ (cmd_1409・2026-07-27 10:31 実測で見つけた)=
+        #   read_gate_pairs は gate_nightly.sh の ★註 (コメント) 行の --registry も拾う★ ゆえ、
+        #   同じ file が ★絶対 path と相対 path の二つの顔★ で返りうる。
+        #   ★綴りで数えれば 7 冊 265 件・実体で数えれば 6 冊 264 件★ =
+        #   ★★母数を刷る道具が母数を誤る = 本朝ずっと狩ってきた形の、己の中の顔★★
+        #   ⇒ ★実体 (resolve した path) で一意にする★。★読めぬ path は resolve せず綴りのまま残す★
+        #     (= 不在を黙って消さぬ = 「冊が無い」と名乗る口は下流に在る)。
+        books, seen = [], set()
         for reg, _root in pairs:
             p = Path(reg)
-            if p not in books:
-                books.append(p)
+            key = p.resolve() if p.exists() else (REPO_ROOT / p).resolve() if (REPO_ROOT / p).exists() else p
+            if key in seen:
+                continue
+            seen.add(key)
+            books.append(p)
         if not books:
             return _fallback_books(), "gate_nightly.sh から冊を 1 つも拾えなんだ"
         return books, None
@@ -324,17 +334,21 @@ def mode_staged(strict: bool) -> int:
         print("[gate-4] 台帳に触れておらぬ (検分する物が無い)")
         return 0
     worst, lines = 0, []
+    tally = Tally()
     for rel in staged:
         blob, e2 = _git(REPO_ROOT, "show", f":{rel}")   # ★index の中身 = 現に commit される物★
         if e2:
             lines.append(f"  ⚠ 測れなんだ: {rel} — {e2}")
+            tally.add(None)
             worst = max(worst, 2)
             continue
-        rc_a = report_scan(scan_book(blob, rel), lines, strict)
+        scan = scan_book(blob, rel)
+        tally.add(scan)
+        rc_a = report_scan(scan, lines, strict)
         rc_b = report_delta(delta_check(REPO_ROOT, rel, blob), rel, lines, strict)
         for rc in (rc_a, rc_b):
             worst = 1 if 1 in (worst, rc) else max(worst, rc)
-    _emit(worst, lines, "staged の台帳")
+    _emit(worst, lines, tally.render("staged の台帳"))
     return worst
 
 
@@ -343,17 +357,21 @@ def mode_all(strict: bool, books: list[Path] | None = None) -> int:
     if books is None:
         books, err = known_books()
     worst, lines = 0, []
+    tally = Tally()
     if err:
         lines.append(f"  ⚠ 冊の一覧を正本から取れなんだ (自 repo の 3 冊のみ見た): {err}")
         worst = 2
     for b in books:
         if not b.exists():
             lines.append(f"  ⚠ 冊が無い: {b} (撃とうとした事実は残す)")
+            tally.add(None)
             worst = max(worst, 2)
             continue
-        rc = report_scan(scan_book(b.read_text(encoding="utf-8"), str(b)), lines, strict)
+        scan = scan_book(b.read_text(encoding="utf-8"), str(b))
+        tally.add(scan)
+        rc = report_scan(scan, lines, strict)
         worst = 1 if 1 in (worst, rc) else max(worst, rc)
-    _emit(worst, lines, f"{len(books)} 冊")
+    _emit(worst, lines, tally.render("台帳"))
     return worst
 
 
@@ -392,14 +410,40 @@ def mode_count(paths: list[str]) -> int:
     return worst
 
 
+class Tally:
+    """★母数を先に出す為の勘定★ (家老 09:54 の命・五号 09:54 の実測より)。
+
+    ★「0 件 該当」より先に「N 件 走査」を出せ★= ★0/0 と 0/6 は別物である★。
+    ★読めなんだ冊は【走査した】に数えるが【読めた】には数えぬ★= 不在と無音を分ける。
+    """
+
+    def __init__(self) -> None:
+        self.scanned = self.readable = self.registered = self.swallowed = 0
+
+    def add(self, scan: dict | None) -> None:
+        self.scanned += 1
+        if not scan or not scan.get("ok"):
+            return
+        self.readable += 1
+        self.registered += len(scan["registered"])
+        self.swallowed += len(scan["swallowed"]) + len(scan["text_only"])
+
+    def render(self, what: str) -> str:
+        unread = self.scanned - self.readable
+        tail = f" / ★読めなんだ {unread} 冊★" if unread else ""
+        return (f"走査 {what} {self.scanned} 冊 (読めた {self.readable} 冊){tail}"
+                f" / 登録 {self.registered} 件 / 呑まれ {self.swallowed} 件")
+
+
 def _emit(worst: int, lines: list, what: str) -> None:
+    print(f"[gate-4] ★母数★ {what}")          # ★結果より先に母数を出す★ (0 件は分母と共にのみ意味を持つ)
     if worst == 0:
-        print(f"[gate-4] PASS: {what} — 登録されておる (呑まれ 0)")
+        print("[gate-4] PASS: 登録されておる (呑まれ 0)")
         for ln in lines:
             print(ln)
         return
     head = "★FAIL — 台帳へ書いたのに登録されておらぬ★" if worst == 1 else "⚠ UNDETERMINED — ★緑ではない★"
-    print(f"[gate-4] {head} ({what} / cmd_1409)")
+    print(f"[gate-4] {head} (cmd_1409)")
     for ln in lines:
         print(ln)
     print("  出所 = 五号 08:15 実測『台帳の末尾へ継ぐと mutations: に入らず別 key の値として黙って呑まれる』")

@@ -4258,6 +4258,63 @@ mutations:
     expect: nonzero
     red_needle: "not ok 1 T-SGS-103"  # 実測 2026-07-28 07:12:01 (四号): :162 の ① で落ちる
 
+  # ── 三号の cmd_1414 続き (commit 8740790・軍師一号の検分が指摘した穴を塞いだ分) ──
+  #  免除の判定は「定義済みの変数なら展開されても意図どおり」と見なすが、
+  #  その定義の探し方が広すぎた。実行されない場所に書かれた NAME= まで定義と読み、
+  #  免除だけが効いていた。三号が2箇所を塞ぎ、陰性側の試験 2 本を対で足した。
+  #  ★四号が自分で撃って確かめた (2026-07-28 08:09〜08:12)★ =
+  #    どちらも赤の理由は【挙動チェック】であり、変異が当たらなかったための赤ではない。
+  #    S4 → :217 の ①（原本が現に鳴ることの確認）で落ちる
+  #    S5 → :235 の ①（同上）で落ちる
+  #  ★2 本とも「当てれば赤くなる」を主張する物ゆえ、牙にできる★
+  #  (四号が cmd_1458 で示した「牙にできない物に牙の顔をさせない」の除外には当たらない)。
+  - id: MUT-1414-S4
+    origin: cmd_1414
+    suspected_by: ashigaru3
+    desc: |
+      免除の根拠を探す範囲を「その引数が始まる位置まで」から「行の終わりまで」へ
+      戻すと、T-SGS-104 が赤くなるべき。
+      shell は左から実行するので、引数より後ろに書かれた定義はその引数には効かない。
+      折っても緑なら、実行されない後置きの定義を根拠に免除する形へ黙って戻る。
+    paths: [scripts/shell_expansion_guard.py, tests/unit/test_shell_guard_scope.bats]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/shell_expansion_guard.py"
+      s = open(p, encoding="utf-8").read()
+      old = "scanned[:line_start] + line[:arg_at])"
+      assert s.count(old) == 1, "MUT-1414-S4: 錨が一意でない (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(old, "scanned[:line_start] + line)  # MUTREG-S4", 1))
+      PY
+    test: |
+      bats --filter '^T-SGS-104' tests/unit/test_shell_guard_scope.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SGS-104"  # 実測 2026-07-28 08:11 (四号): :217 の ① で落ちる
+
+  - id: MUT-1414-S5
+    origin: cmd_1414
+    suspected_by: ashigaru3
+    desc: |
+      定義を探す前に引用符の中と註を空白へ置き換える処理を外すと、
+      T-SGS-105 が赤くなるべき。文字列や註の中の NAME= は shell が定義として実行しない。
+      折っても緑なら、実行されない場所の定義を根拠に免除する形へ黙って戻る。
+      ★S4 とは覆う型が違う★ = 三号の実測では、引数より前の引用符/註の中の定義は
+      S5 の直しだけが効き、S4 の変異では鳴り続ける (二重に覆われてはいない)。
+    paths: [scripts/shell_expansion_guard.py, tests/unit/test_shell_guard_scope.bats]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/shell_expansion_guard.py"
+      s = open(p, encoding="utf-8").read()
+      old = "rx.finditer(_mask_quotes_and_comments(head)):"
+      assert s.count(old) == 1, "MUT-1414-S5: 錨が一意でない (実装が動いた = UNVERIFIABLE)"
+      open(p, "w", encoding="utf-8").write(
+          s.replace(old, "rx.finditer(head):  # MUTREG-S5", 1))
+      PY
+    test: |
+      bats --filter '^T-SGS-105' tests/unit/test_shell_guard_scope.bats
+    expect: nonzero
+    red_needle: "not ok 1 T-SGS-105"  # 実測 2026-07-28 08:12 (四号): :235 の ① で落ちる
+
   # ══════════════════════════════════════════════════════════════════════
   # cmd_1451 (2) — 段2 (負の主張の刃) が名指した未登録 1 件の始末 (2026-07-28)
   #  ★出所は人の疑いでなく門である★ = gate_mutation_replay.py 段2 が

@@ -3665,7 +3665,7 @@ mutations:
       import pathlib
       p = pathlib.Path("scripts/gate_mutation_replay.py")
       s = p.read_text(encoding="utf-8")
-      old = 'FIXTURE_ID_BAND_RE = re.compile(r"^MUT-9999-")'
+      old = 'FIXTURE_ID_BAND_RE = re.compile(r"^MUT-9999[A-Za-z]*-")'
       n = s.count(old)
       assert n == 1, f"anchor が一意でない (hit={n})"
       p.write_text(s.replace(old, 'FIXTURE_ID_BAND_RE = re.compile(r"^MUT-")', 1), encoding="utf-8")

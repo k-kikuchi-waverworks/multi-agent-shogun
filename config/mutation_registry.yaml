@@ -2692,6 +2692,202 @@ mutations:
     red_needle: "MUT-1381-201: ★baseline が既に赤"
     timeout: 600
 
+  # ─── ★ml の門の【免除】そのものへ立てた牙 8 本 (cmd_1408・六号)★ ────────────
+  #   ★免除は放っておけば広がる★= 「此の一つの理由の時だけ」と書いた線が、
+  #     明日 誰かの一行で「ml coverage は当分黙らせる」へ黙って育つ道が現に在る。
+  #   ⇒ ★免除の【射程】を機械に縛らせる★ = 別の理由・FAIL・期限切れでは効かぬ事を毎朝検める。
+  #   ★登録の前に 8 本とも己の手で撃った★ (2026-07-27 09:21:50〜09:22:01・全て赤 + 針の名指し)。
+  #   ★ML5 は門の三箇所を一度に倒す★ = 一箇所ずつでは半分だけ効く盤面になるゆえ
+  #     意図しての全置換であり、其れを anchor_sites: 3 として申告しておる (門が現に咎めた)。
+  - id: MUT-1408-ML1
+    desc: |
+      ★免除が【FAIL まで飲み込まぬ】こと★。条件から rc12 -eq 2 を外すと、ml の登録検知が
+      FAIL (rc=1 = 台帳に無い変異test 等) を返した朝まで門が黙る = ★免除が「当分黙らせる」へ育つ★。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = 'if [ "$rc12" -eq 2 ] && printf'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "if printf", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-003
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-003"
+    timeout: 600
+
+  - id: MUT-1408-ML2
+    desc: |
+      ★免除が【出所を検めずに効かぬ】こと★。signature の照合を消すと、ml 台帳が見えぬ朝
+      (path 違い / disk 未 mount) の UNDETERMINED まで免除され ★見ておらぬ朝が黙って通る★。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = 'grep -qF "$ML_COV_WAIVER_SIG"'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, 'grep -q ""', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-002
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-002"
+    timeout: 600
+
+  - id: MUT-1408-ML3
+    desc: |
+      ★免除が【黙って延びぬ】こと★。until の比較を外すと期限が意味を失い、
+      ★誰も消さぬ限り永久に効く免除★ になる (免除は放っておけば広がる)。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = '''if [[ "$(date '+%Y-%m-%d')" < "$ML_COV_WAIVER_UNTIL" ]]; then'''
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "if true; then", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-004
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-004"
+    timeout: 600
+
+  - id: MUT-1408-ML4
+    desc: |
+      ★免除した札が【緑に化けぬ】こと★。mlcov() を素の verdict へ倒すと、門を落とさぬ事が
+      そのまま PASS と刷られる = ★読む者は「ml は緑」と読む★ (本朝ずっと狩ってきた形)。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = '    if [ "$ml_cov_waived" = "1" ]; then'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "    if false; then", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-005
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-005"
+    timeout: 600
+
+  - id: MUT-1408-ML5
+    desc: |
+      ★門の判定が現に ml_cov_gate を見ておること★。三箇所を rc12 直読みへ巻き戻すと
+      免除が 1bit も効かず ★配線した其の日から毎朝 UNDETERMINED で鳴る★ (誰も消せぬ札)。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = '$ml_cov_gate"'
+      n = s.count(old)
+      assert n == 3, f"anchor の数が違う (hit={n}) = 門の箇所が変わった疑いゆえ止める"
+      p.write_text(s.replace(old, '$rc12"'), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-006
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-006"
+    # ★門の三箇所を一度に倒すのが【狙い】である★= 一箇所だけ戻しても他の二箇所が残れば
+    #   免除は半分しか効かず、盤面は「時に鳴り時に鳴らぬ」= 最も読みにくい形になる。
+    #   ⇒ 全置換が意図ゆえ、其れを黙らせず ★数として申告する★ (cmd_1382 の掟)。
+    anchor_sites: 3
+    timeout: 600
+
+  - id: MUT-1408-ML6
+    desc: |
+      ★撃った木を点呼へ記す一行が消えれば赤くなること★。watched を落とすと ml は現に
+      撃たれておるのに ★木の点呼から【見ておらぬ木】として消える★ (宣言でなく実績を記す形の要)。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = '    watched "$ML_ROOT"\n'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-008
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-008"
+    timeout: 600
+
+  - id: MUT-1408-ML7
+    desc: |
+      ★ml 台帳の paths から p5 が落ちれば赤くなること★。p7 は p5 を import するゆえ、
+      p5 を欠いた写しでは import で赤くなり ★変異ゆえの赤と見分けられぬ★
+      (= 本朝 未判定 10 件が嵌った当の穴を、台帳の側で縛る)。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("config/mutation_registry.ml.yaml")
+      s = p.read_text(encoding="utf-8")
+      old = "      - scripts/cmd1349_p5_body_stats.py\n"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-007
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-007"
+    timeout: 600
+
+  - id: MUT-1408-ML8
+    desc: |
+      ★canary が現に働くこと★= 抜き出しの綴りが変われば T-ML-000 が名指す。
+      之が無ければ ★0 行を eval して全部緑★ になる (本夜 05:2x に己で踏んだ族)。
+    origin: cmd_1408
+    suspected_by: ashigaru6
+    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = "ML_COV_WAIVER_SIG='"
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, "ML_COV_SIGNATURE_RENAMED='", 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-000
+    expect: nonzero
+    red_needle: "not ok 1 T-ML-000"
+    timeout: 600
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

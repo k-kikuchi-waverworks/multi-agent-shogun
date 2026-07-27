@@ -38,10 +38,60 @@ import sys
 import time
 
 # 本文位置 = その道具の「人が書いた散文」が乗る引数番号 (1-origin)
+# ★cmd_1414 で読み替えた★ = 本表は「見る道具の一覧」ではなく
+#   ★散文位置が【判っておる】道具の一覧★である。表に載らぬ道具も既定で見る (下の R5)。
 GUARDED_TOOLS: dict[str, set[int]] = {
     "inbox_write.sh": {2},        # <target> <content> <type> <from>
     "ntfy.sh": {1, 2},            # <title> <body>  (どちらも散文)
 }
+
+# ★R5 の対象から外す道具 (cmd_1414)★
+#   ★黙って外す道は作らぬ★ = 外すなら理由と【いつ返すか】を同じ行に書け。
+#   走査 (--selftest) が期限切れを名指す。
+#   書き方: "foo.sh": "理由 (until: YYYY-MM-DD)"
+UNGUARDED_TOOLS: dict[str, str] = {}
+
+# ★R5 = 表に載らぬ道具も既定で見る (cmd_1414)★
+#   ★何ゆえ要るか (実測)★ 直近3日の Bash 呼出 35,860 件を数えると、
+#   ★散文を argv で受け取った道具は 107 種★あり、★表に載るのは 2 種だけ★であった。
+#   = ★表に載らぬまま散文を受けておる道具が 105 種・延べ 324 回★。
+#   首位は cmd_id_alloc.sh (3 日 137 回) で、★将軍が現に踏まれた口★である
+#   (07-27 01:21:12 の --evidence "…$200 promotional credit…" ⇒ $2 が未定義ゆえ黙って空へ)。
+#   ★同じ本文を inbox_write.sh の本文位置へ入れれば関所は DENY を返す★ =
+#   ★判定の力は元より在り、当てる先が無かっただけである。★
+#
+#   ★甲 (表へ cmd_id_alloc.sh を 1 行 足す) を採らなんだ理由★
+#     本表は引数の【番号】で散文位置を持つ。inbox_write.sh は位置引数ゆえ {2} で足りる。
+#     ★cmd_id_alloc.sh は名前つきの旗で受け取る道具ゆえ、散文の値が何番目に来るかが
+#       旗の並び順で動く★ (実測 = --evidence の値が第10引数・--title の値が第2引数)。
+#     ⇒ 番号を並べれば並び順を変えられた時に黙って外れる。
+#     ★そして芯は「表に 1 件 足りぬ」ではなく【表を足す者が居らねば穴が開く】形である。★
+#       1 件 足せば今日の穴は塞がるが、残り 104 種は開いたままになる。
+#
+#   ★R4 の射程は据え置いた★ = 引用符なし heredoc は【表の 2 道具】が居る時だけ鳴らす。
+#     実測 = 表へ道具を足すと R4 が command 全体へ広がり、★関係の無い heredoc まで止まる★
+#     (07-26 20:56 の実例 = 書き手が $NEW を展開させるために わざと引用符を外した <<PY)。
+#
+#   ★R5 は【行で割ってから】見る★ = 既存の段 (R1/R2/R4) の判定は 1 つも変えぬため。
+#     tokenize() は改行を operator と見ておらぬ (`c.isspace()` の枝が先に当たる) ゆえ、
+#     素直に args を集めると ★後続行の引数まで同じ道具の引数として数える★。
+_TOOL_SUFFIX_RE = re.compile(r"\.(?:sh|py)$")
+
+# ★R2-a = 同じ command の中で・その引数より前で定義された変数は R2 を当てぬ (cmd_1414 段1)★
+#   ★何ゆえ要るか★ 家老の裁 (06:52) = 「誤検知の 1 形が固まっておるなら先に潰せ。
+#   潰れたら DENY で当てよ。潰れなんだら名乗りに留めよ」。
+#   実測した 1 形 = ★連番を題に埋める書き方★ (--title "並行試験 N32 #$i")。
+#   $i は for の制御変数ゆえ現に定義されており、R2 が案ずる「黙って空へ落ちる」に当たらぬ。
+#   ★位置引数 ($1〜$9 / $@ / $? 等) は免除せぬ★ = 定義を検出できぬゆえ。
+#   ⇒ ★将軍が踏まれた $200 (= $2) は今も DENY である★ (守りは落ちておらぬ・実測で確かめた)。
+_DEF_RES = (
+    re.compile(r"(?:^|[;&|(\s])([A-Za-z_][A-Za-z0-9_]*)="),        # NAME=... / 環境変数の前置
+    re.compile(r"\bfor\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\b"),         # for NAME in
+    re.compile(r"\bfor\s*\(\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*="),     # for ((NAME=
+    re.compile(r"\bread\s+(?:-\S+\s+)*([A-Za-z_][A-Za-z0-9_]*)"),   # read NAME
+    re.compile(r"\b(?:local|declare|typeset|export)\s+([A-Za-z_][A-Za-z0-9_]*)"),
+)
+_NAME_EXPANSION_RE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
 
 # 展開の span を取るための正規表現 (優先順に食わせる)
 _EXPANSION_RE = re.compile(
@@ -350,6 +400,98 @@ def inspect_argument(raw_unsafe: str, prose: bool = True) -> list[str]:
     return reasons
 
 
+def _defined_names(head: str) -> set[str]:
+    """head (= その引数より前の綴り) の中で定義された変数名。"""
+    names: set[str] = set()
+    for rx in _DEF_RES:
+        for m in rx.finditer(head):
+            names.add(m.group(1))
+    return names
+
+
+def r2a_exempt(raw_unsafe: str, defined: set[str]) -> bool:
+    """★この引数の展開が全て「定義済の名前つき変数」なら R2 を当てぬ (cmd_1414 段1)★
+
+    ★一つでも 位置引数 / $(...) / 未定義の名前 が混ざれば免除せぬ★ =
+    ★免除の範囲を、免除の理由より広く取らぬ★
+    (cmd_1398 で己が踏んだ形 = 「本文が shell を通らぬ」から「此の行は通らぬ」へ滑った
+     の裏返しである。同じ滑りを二度 踏まぬ)。
+    """
+    spans = _EXPANSION_RE.findall(raw_unsafe)
+    if not spans:
+        return False
+    for s in spans:
+        if s.startswith("$("):
+            return False                       # command 置換は免除せぬ
+        m = _NAME_EXPANSION_RE.fullmatch(s)
+        if not m:
+            return False                       # $1 $@ $? 等 = 位置引数/特殊 ⇒ 免除せぬ
+        if m.group(1) not in defined:
+            return False                       # 未定義 ⇒ 免除せぬ
+    return True
+
+
+def scan_unregistered(scanned: str) -> list[dict]:
+    """★R5 = 表に載らぬ .sh / .py の道具も既定で見る (cmd_1414)★
+
+    R1 (生 backtick) は全引数へ / R2 (散文 + 展開) は散文に見える引数へ。
+    ★R2-a の免除を効かせる★ (上の docstring を見よ)。
+    ★行で割ってから見る★ = 既存の段の判定を 1 つも変えぬため。
+    """
+    findings: list[dict] = []
+    offset = 0
+    for line in scanned.splitlines(keepends=True):
+        head_upto = offset + len(line)
+        offset = head_upto
+        if not line.strip():
+            continue
+        try:
+            tokens = tokenize(line)
+        except Exception:
+            continue                            # 解けぬ時は通す (fail-OPEN と揃える)
+
+        groups: list[list[Token]] = []
+        cur: list[Token] = []
+        for t in tokens:
+            if t.is_operator:
+                if cur:
+                    groups.append(cur)
+                cur = []
+            else:
+                cur.append(t)
+        if cur:
+            groups.append(cur)
+
+        defined: set[str] | None = None
+        for grp in groups:
+            for i, tok in enumerate(grp):
+                basename = tok.value.rsplit("/", 1)[-1]
+                if not _TOOL_SUFFIX_RE.search(basename):
+                    continue
+                if basename in GUARDED_TOOLS:
+                    continue                    # 既存の段が既に見ておる
+                if basename in UNGUARDED_TOOLS:
+                    continue                    # 理由と期限つきで外した
+                for pos, arg in enumerate(grp[i + 1:], start=1):
+                    unsafe = arg.unsafe_text
+                    prose = bool(_PROSE_RE.search(_strip_expansions(unsafe)))
+                    if prose:
+                        if defined is None:
+                            defined = _defined_names(scanned[:head_upto])
+                        if r2a_exempt(unsafe, defined):
+                            prose = False       # R2 は当てぬ。★R1 は下で当たる★
+                    for reason in inspect_argument(unsafe, prose=prose):
+                        findings.append(
+                            {
+                                "tool": basename,
+                                "arg_index": pos,
+                                "reason": reason,
+                                "excerpt": arg.value[:80],
+                            }
+                        )
+    return findings
+
+
 def analyze(command: str) -> dict:
     """command 文字列を検め、verdict と理由を返す。
 
@@ -432,6 +574,9 @@ def analyze(command: str) -> dict:
                         "excerpt": arg.value[:80],
                     }
                 )
+
+    # ★R5 (cmd_1414) = 表に載らぬ道具も既定で見る。既存の段の後に足す★
+    findings.extend(scan_unregistered(scanned))
 
     return {"verdict": "DENY" if findings else "ALLOW", "findings": findings}
 
@@ -631,6 +776,71 @@ _CASES: list[tuple[str, str, str]] = [
         "二本目は裸である\nB",
         "DENY",
         "★H5: 一本目が引用つきでも、二本目の裸の口を見失わぬ★",
+    ),
+    # ── ★cmd_1414: 表に載らぬ道具も既定で見る (R5) + 定義済変数の免除 (R2-a)★ ──────
+    #   ★家老の裁 (06:52) = 二段で当てよ。段1 で誤検知の 1 形を潰し、潰れたら DENY へ倒せ。★
+    #   段1 は潰れた (実測 = 誤検知 5 件が全て消え、将軍の件は残った) ゆえ DENY で当てておる。
+    (
+        'bash scripts/cmd_id_alloc.sh --title "戦力再配分" --origin shogun '
+        '--evidence "殿の定額枠が枯渇し $200 promotional credit 運用へ移行=有限の実弾"',
+        "DENY",
+        "★S-1: 将軍が 07-27 01:21:12 に現に踏まれた原文の型 — $2 が未定義ゆえ黙って空へ★",
+    ),
+    (
+        'bash scripts/cmd_id_alloc.sh --title "短名" --origin karo --evidence-file /tmp/e.txt',
+        "ALLOW",
+        "★S-2: 道具の側の逃げ道 (--evidence-file) は shell を通らぬゆえ通す★",
+    ),
+    (
+        'echo "採取の刻 = $(date \'+%F %T\')"',
+        "ALLOW",
+        "★S-3: 道具でない物を巻き込まぬ (R5 は .sh/.py だけを見る)★",
+    ),
+    (
+        'for i in $(seq 1 3); do bash scripts/cmd_id_alloc.sh --title "並行試験 N32 #$i" '
+        "--origin karo; done",
+        "ALLOW",
+        "★S-4 (段1 で潰した 1 形): for で定義された $i は R2 を当てぬ★",
+    ),
+    (
+        'bash scripts/cmd_id_alloc.sh --title "並行試験 N32 #$i" --origin karo',
+        "DENY",
+        "★S-5 (S-4 の負の対照): 同じ綴りでも定義が無ければ咎める = 免除が広すぎぬ証★",
+    ),
+    (
+        'for i in 1 2; do bash scripts/foo.sh "残 `wc -l < f` 行 #$i"; done',
+        "DENY",
+        "★S-6: R1 (生 backtick) は R2-a では免除されぬ★",
+    ),
+    (
+        'for i in 1 2; do bash scripts/foo.sh "件数 $(wc -l < f) 本 #$i"; done',
+        "DENY",
+        "★S-7: $(…) が混ざれば免除せぬ = 免除の範囲を理由より広く取らぬ★",
+    ),
+    (
+        'bash scripts/foo.sh "hash は $COMMIT_SHA じゃ"',
+        "DENY",
+        "★S-8: 未定義の名前つき変数は咎める (R5 が現に効いておる証)★",
+    ),
+    (
+        'SHA=$(git rev-parse HEAD); bash scripts/foo.sh "hash は $SHA じゃ"',
+        "ALLOW",
+        "★S-9: 同じ command の中で先に代入された変数は通す★",
+    ),
+    (
+        'bash scripts/foo.sh "$msg"',
+        "ALLOW",
+        "★S-10: 展開だけで散文でない引数は通す (R2 の元の趣旨どおり)★",
+    ),
+    (
+        "bash scripts/foo.sh '本文に `x` が在る'",
+        "ALLOW",
+        "★S-11: 単引用符の中は shell が触れぬゆえ通す★",
+    ),
+    (
+        'bash scripts/foo.sh "軍師の検分は PASS であった"',
+        "ALLOW",
+        "★S-12: 展開も backtick も無い普通の散文は通す (R5 が過剰に鳴らぬ証)★",
     ),
 ]
 

@@ -168,7 +168,11 @@ PY
 @test "T-SW-001: a switch that overlaps the process birth is named in BOTH the log line and the karo message" {
     _write_stuck_task ashigaru91
     _write_pane_states ashigaru91:idle
-    _write_switch_record ashigaru91 300
+    # ★実測の形へ寄せた (2026-07-27 17:0x・現に走る 8 体)★= ★誕生 − launch = +0.4〜1.3 秒★
+    #   ⇒ 見本も「切替の直後に生まれた process」= 齢 390 秒・切替 395 秒前 とする。
+    #   ★初版は切替 300 秒前 = 誕生の 90 秒 前であった★= ★猶予 120 秒に寄り掛かった見本★ =
+    #   ★実測に照らせば起こらぬ形を見本にしておった★ (家老 17:00 の第七条で撃ち直した)。
+    _write_switch_record ashigaru91 395
 
     FAKE_PROC_AGE=390 run _run_main_py
     [ "$status" -eq 0 ]
@@ -205,7 +209,7 @@ PY
 
     # state を捨て、同じ盤面を【記録あり】で撃ち直す
     rm -f "$Q/state/clear_log.yaml"
-    _write_switch_record ashigaru91 300
+    _write_switch_record ashigaru91 395
     FAKE_PROC_AGE=390 run _run_main_py
     [ "$status" -eq 0 ]
     local with
@@ -277,7 +281,7 @@ PY
     _write_pane_states ashigaru91:idle
     printf 'これは壊れた行\n' >> "$Q/state/switch_history.tsv"
     printf 'not_a_number\tiso\tashigaru91\tx\n' >> "$Q/state/switch_history.tsv"
-    _write_switch_record ashigaru91 300
+    _write_switch_record ashigaru91 395
 
     FAKE_PROC_AGE=390 run _run_main_py
     [ "$status" -eq 0 ]

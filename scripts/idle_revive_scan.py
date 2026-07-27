@@ -153,7 +153,16 @@ SWITCH_HISTORY_FILE = "switch_history.tsv"   # queue/state/ 配下・switch_cli.
 # ★猶予★= 記録は Enter 送出の直後に落ちるが、process の誕生は其の前後に僅かに散る
 #   (shell の起動・CLI の fork)。★猶予は【添える側】を広くする★ = 誤って添えても
 #   判定は動かず、読む者が pane を実査して否めるゆえ害が小さい。
-SWITCH_EXPLAINS_SLACK_SEC = 120
+# ★★初版は 120 秒であった = 見立てであり実測ではなかった★★ (家老 17:00 の第七条 =
+#   ★「言えぬ」と名乗る前に【安く言える道】が無いかを先に見よ★) ⇒ ★1 分で割れた★:
+#   ★2026-07-27 17:0x 実測★= 現に走る 8 体で ★誕生 − launch(log) = +0.4 〜 +1.3 秒★
+#     (ash1 0.9 / ash2 0.7 / ash3 0.8 / ash4 0.4 / ash5 1.0 / ash6 1.3 / gunshi1 0.5 / gunshi2 0.6)
+#   ⇒ ★誕生は必ず launch の【後】に来る★ ⇒ 猶予は原理上 0 でも成り立つ。
+#   ★而して 0 にはせぬ★= 記録の書込が誕生より僅かに後れる形 (writer が Enter の後に書く) と
+#   時計のずれに備える ⇒ ★実測の最大 1.3 秒に対し 23 倍の余裕で 30 秒★。
+#   ★之を広く取り過ぎた時に何が起きるか★= ★一斉切替の日に【古い process にも札が付く】★ =
+#   札が意味を失う (T-SW-004 が其の向きを縛る)。
+SWITCH_EXPLAINS_SLACK_SEC = 30
 # ★scan() の戻り値は 3 組から動かさぬ★ (他の牙が 3 組で受けておる = 最小 churn)。
 #   ⇒ 母数の型 (IMPOSSIBLE_JUDGE_STATS) に倣い、読んだ源を module へ置いて main が名乗る。
 SWITCH_READ_STATS = {"source": "unread", "records": 0, "bad_lines": 0}

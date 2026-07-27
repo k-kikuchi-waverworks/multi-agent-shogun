@@ -4011,6 +4011,96 @@ mutations:
     red_needle: not ok 1 T-GSW-012
     timeout: 300
 
+  # ── cmd_1399 続き (三号 f11af21・軍師一号が名指した3つの穴) ──────────────
+  #  ★E/F/G は G1〜G4 と違い「己では sed を撃たぬ素の試験」を宛てておる★ =
+  #  台帳が先に変異を当てても、当てる先が消えることはない。
+  #  六号が隔離木で 3 件とも実測した (2026-07-27 23:3x):
+  #    ①原本で当該試験が緑 ②変異を当てると赤 ③赤の理由は働きの側
+  #      (`[ "$status" -eq 2 ]' failed) であり MUTATION-DID-NOT-APPLY ではない
+  #  ⇒ 三号の見立ては実測と一致した (G1〜G4 で 1 件 直した罠は此の 3 件には無い)。
+  - id: MUT-1399-E
+    origin: cmd_1399
+    suspected_by: ashigaru3
+    desc: |
+      rg / ugrep の再帰判定へ `and not roots` を戻す変異。path を書いた途端に
+      「再帰でない」と読み、`rg PAT .` という最も普通に打たれる形が盲のまま黙る。
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    if not recursive and prog in ("rg", "ugrep"):'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(
+          old, '    if not recursive and prog in ("rg", "ugrep") and not roots:', 1),
+          encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-014"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-014
+    timeout: 300
+
+  - id: MUT-1399-F
+    origin: cmd_1399
+    suspected_by: ashigaru3
+    desc: |
+      git grep の読み取りを潰す変異。git grep は根に依らず追跡下しか見ぬ道具ゆえ
+      本門が名指すべき当の相手だが、綴りが "git" で始まるため検索器の一覧に当たらず
+      之まで黙っていた。潰せば元の沈黙へ戻る。
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    if tokens[0] == "git" and len(tokens) > 1 and tokens[1] == "grep":'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, '    if False:', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-017"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-017
+    timeout: 300
+
+  - id: MUT-1399-G
+    origin: cmd_1399
+    suspected_by: ashigaru3
+    desc: |
+      command の切り分けが lex に失敗した時、None でなく空 list を返す変異。
+      呼ぶ側の for が一度も回らず、一つも検めておらぬのに rc=0 になる。
+      「何も検めておらぬ」が「異常なし」の顔で返る形であり、本門が塞ごうとしている病そのもの。
+      ★id が MUT-1399-G1〜G4 の頭と重なるが、ID の抜き出しは最長一致 (REGISTRY_ID_RE) ゆえ
+      G1 の言及が G として拾われることはない (六号が regex を読んで確かめた)。
+      綴りを三号の bats 側の呼び名 (mutation E/F/G) へ揃える方を採った。★
+    paths:
+      - scripts/grep_scope_warn.py
+      - tests/unit/test_grep_scope_warn.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/grep_scope_warn.py")
+      s = p.read_text(encoding="utf-8")
+      old = '    except Exception:\n        return None'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n})"
+      p.write_text(s.replace(old, '    except Exception:\n        return []', 1),
+                   encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_grep_scope_warn.bats --filter "^T-GSW-019"
+    expect: nonzero
+    red_needle: not ok 1 T-GSW-019
+    timeout: 300
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

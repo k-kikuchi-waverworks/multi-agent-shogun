@@ -244,7 +244,7 @@ assert ids == ["pending-old", "processed-old"], ids
 PY
 }
 
-# cmd_1463 裁(1): 剪定の条件 = 正本 instructions/karo.md:1855
+# cmd_1463 裁(1): 剪定の条件 = 正本 instructions/karo.md の「剪定 gate」の項
 # 「終端 status かつ evidence 欄に close 根拠があること」を満たすエントリのみ剪定可。
 # これが無いと、家老が slim を撃った瞬間に evidence の空な45件 (2026-07-28 08:0x 実測) が
 # 黙って archive へ移る。

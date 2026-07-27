@@ -43,9 +43,15 @@ CANONICAL_REPORTS = ({f'ashigaru{i}_report' for i in range(1, 9)}
 IDLE_STUB = {'task': {'status': 'idle'}}
 TOP_LEVEL_IDLE_STUB = {'status': 'idle'}
 # ★status の語彙は【ファイル種別ごとに別】である (cmd_1463)★
-# 正本 = instructions/common/task_flow.md:9-20「Status is defined per YAML file type」。
-# 台帳の 8 値は instructions/karo.md:1803 (schema v2) と scripts/cmd_id_alloc.sh:238 が綴りまで同一。
-# 台帳の終端の別は instructions/common/task_flow.md:58-78 と instructions/karo.md:1853。
+# 正本 = instructions/common/task_flow.md の「Status is defined per YAML file type」の項。
+# 台帳の 8 値は instructions/karo.md の「slim entry schema v2」の項と、
+#   scripts/cmd_id_alloc.sh の --status を検める case 文が綴りまで同一。
+#   探し方 = grep -n "pending|in_progress|deferred|done|superseded|archived|dispatched|cancelled" scripts/cmd_id_alloc.sh
+# 台帳の終端の別は instructions/common/task_flow.md の「Archive Rule」の項と、
+#   instructions/karo.md の「剪定対象 = 終端 status」の行。
+# ★行番号で指さぬ★ = 正本が1行 動いた瞬間に別の行を指すゆえ (条F の末尾)。
+#   現に 2026-07-28 の時点で、此の註が書いておった cmd_id_alloc.sh:238 は
+#   8 値の行ではなく die の行を指しておった (軍師一号が検分で見つけた)。
 #
 # ★2026-07-28 まで、此の道具は【1 組の語彙を 3 種の file へ当てておった】★:
 #   旧 TERMINAL = {done, cancelled, paused} / 旧 ACTIVE = {pending, in_progress, blocked}
@@ -408,9 +414,11 @@ def slim_inbox(agent_id, dry_run=False):
 
 
 def has_close_evidence(cmd):
-    """剪定の条件 = 正本 instructions/karo.md:1855 (cmd_1463 で実装)。
+    """剪定の条件 = 正本 instructions/karo.md の「剪定 gate」の項 (cmd_1463 で実装)。
 
     正本の文 = 「終端 status かつ evidence 欄に close 根拠があること」を満たす entry のみ剪定可。
+    探し方 = grep -n "close 根拠" instructions/karo.md
+    (★行番号で指さぬ★ = 正本が1行 動いた瞬間に別の行を指すゆえ。条F の末尾)
 
     ★機械が見ておるのは【欄が空でないこと】だけである★ =
     書かれた文が本当に close の根拠になっておるかは、機械には判じられぬ。
@@ -466,7 +474,7 @@ def slim_shugun_to_karo(dry_run=False):
         ids = [str(cmd.get('id', '<missing-id>')) for cmd in held]
         print_inventory(
             f"terminal but evidence is empty: {len(held)} kept in the active file "
-            f"(karo.md:1855 の剪定条件を満たさぬ。家老が evidence を埋めるまで移さぬ) — "
+            f"(karo.md の「剪定 gate」の条件を満たさぬ。家老が evidence を埋めるまで移さぬ) — "
             + ", ".join(ids))
 
     # If nothing to archive, return success without writing

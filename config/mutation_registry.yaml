@@ -3002,10 +3002,13 @@ mutations:
       python3 - <<'PY'
       import pathlib
       p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      old = '|| [ "$append_gate" -eq 1 ]; then exit 1; fi'
+      # ★錨を【最小の一意な綴り】へ絞った (2026-07-27 12:56・六号)★=
+      #   ★旧錨は行末まで含んでおったゆえ、同じ行の後ろへ別の条件 (fab_gate) が足された
+      #   其の瞬間に hit=0 へ落ちた★ = ★己の牙を己の手で鈍らせた★ (gate-3 が即座に名指した)。
+      old = '[ "$append_gate" -eq 1 ]'
       n = s.count(old)
       assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '|| [ "$append_rc" -eq 1 ]; then exit 1; fi', 1), encoding="utf-8")
+      p.write_text(s.replace(old, '[ "$append_rc" -eq 1 ]', 1), encoding="utf-8")
       PY
     test: |
       bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-006
@@ -3024,10 +3027,12 @@ mutations:
       python3 - <<'PY'
       import pathlib
       p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      old = ' || [ "$append_rc" -eq 1 ] || [ "$append_gate" -ne 0 ]; then\n'
+      # ★錨を絞った (2026-07-27 12:56・六号)★= 旧錨は 'then\n' まで含んでおったゆえ
+      #   同行の後ろへ fab の条件が足された瞬間に hit=0 (gate-3 の名指しで気付いた)。
+      old = '[ "$append_rc" -eq 1 ] || [ "$append_gate" -ne 0 ]'
       n = s.count(old)
       assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, ' || [ "$append_gate" -ne 0 ]; then\n', 1), encoding="utf-8")
+      p.write_text(s.replace(old, '[ "$append_gate" -ne 0 ]', 1), encoding="utf-8")
       PY
     test: |
       bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-007
@@ -3341,6 +3346,56 @@ mutations:
       bats tests/unit/test_process_signal_guard_degraded.bats
     expect: nonzero
     red_needle: not ok 4 T-PSG-003
+    timeout: 300
+
+  # ── cmd_1413 (c)「捏造の門の配線」を守る牙 2 本 (MUT-1413-FB1/FB2) ───────────
+  # ★守る対象 = gate_nightly.sh の捏造の門 block (b23ec47)★。
+  # ★FB1 は gate-2 段2 の名指し (12:55) への返答★= T-FB-000 の負の主張 (if-then-return) の刃を台帳が証す。
+  # ★赤は二度 見た★= 手で当てた変異 2/2 (12:56) + runner の replay 2/2 PASS (12:56:44)。
+  - id: MUT-1413-FB1
+    desc: ★捏造の門の配線 block の頭 (FAB_STRICT=) を改名する変異★ = ★試験が現物から抜く其の口を塞ぐ★。之で T-FB-000 (canary) が赤くならねば、★抜き出しが空でも【全部緑】に見える★= cmd_1404『梯子を書き写しておった二本』と同族の穴。★T-FB-000 は負の主張 (if-then-return) を持つ試験ゆえ、其の刃を台帳が証す★ (gate-2 段2 の名指し 12:55 への返答)
+    origin: cmd_1413
+    suspected_by: ashigaru6
+    paths:
+    - scripts/gate_nightly.sh
+    - tests/unit/test_gate_fabrication_wiring.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = 'FAB_STRICT="${GATE_FAB_STRICT:-0}"'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, 'FAB_STRICT_RENAMED="${GATE_FAB_STRICT:-0}"', 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_fabrication_wiring.bats --filter T-FB-000
+    expect: nonzero
+    red_needle: not ok 1 T-FB-000
+    timeout: 300
+  - id: MUT-1413-FB2
+    desc: ★『既定は名乗るのみ』を破る変異 (fab_gate へ生の rc を入れる)★ = ★配線した其の日から門が落ちうる形★。★毎朝 N 件鳴る門は外される (cmd_1388 の族)★ゆえ、既定が報告のみである事を機械で縛る
+    origin: cmd_1413
+    suspected_by: karo
+    paths:
+    - scripts/gate_nightly.sh
+    - tests/unit/test_gate_fabrication_wiring.bats
+    mutate: |
+      python3 - <<'PY'
+      import pathlib
+      p = pathlib.Path("scripts/gate_nightly.sh")
+      s = p.read_text(encoding="utf-8")
+      old = '    fab_gate=0\n    [ "$fab_rc" -eq 1 ]'
+      new = '    fab_gate="$fab_rc"\n    [ "$fab_rc" -eq 1 ]'
+      n = s.count(old)
+      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
+      p.write_text(s.replace(old, new, 1), encoding="utf-8")
+      PY
+    test: |
+      bats tests/unit/test_gate_fabrication_wiring.bats --filter T-FB-003
+    expect: nonzero
+    red_needle: not ok 1 T-FB-003
     timeout: 300
 
 coverage_waivers: []

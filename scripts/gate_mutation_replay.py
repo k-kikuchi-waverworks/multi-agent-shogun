@@ -573,27 +573,31 @@ def ls_files(repo: Path):
 def registry_named_test_bodies(entries, repo: Path):
     """台帳が名指しする tracked file のうち【test 本体】を返す。
 
-    返り = ({relpath: {"ids": [entry id], "run": bool}}, error)
+    返り = ({走らせる物 relpath: [entry id]}, {同伴 relpath: [entry id]}, error)
 
     ★綴りを一切見ぬ★ = paths / test / mutate の中の path らしき文字列を拾い、
     追跡下・COVERAGE_EXTS・test 本体の印を持つものだけを残す。
 
-    ★★run = 【台帳が現に走らせる/壊す物】か★★ (cmd_1408・三号 2026-07-27)
-      ・True  = test / mutate に現れる = ★赤くなる側の本体★ (entry が之を走らせて赤を見る)
-      ・False = ★paths にしか現れぬ【同伴】★ = 本体が import する依存等、
+    ★★二つに分けて返す = 【走らせる物】と【同伴】★★ (cmd_1408・三号 2026-07-27)
+      ・走らせる物 = test / mutate に現れる = ★赤くなる側の本体★ (entry が之を走らせて赤を見る)
+      ・同伴       = ★paths にしか現れぬ物★ = 本体が import する依存等、
         ★replay が写す為だけに並んでおる物★ (ml の cmd1349_p5_body_stats.py が現物)。
     ★何ゆえ別けるか★= ★視野計の分母は「規則が見付ける【べき】変異試験」でなければならぬ★。
       同伴を分母へ入れると、★台帳が走らせてもおらぬ file を「規則の盲」として数える★ =
       ★★問いの違う二つの計器を同じ問いだと思う形★★ (家老 22:35 通達①)。
-      ★実測 (2026-07-27 09:32)★= 6 冊の盲 17 件は ★悉く run=True★ であり、
-      ★run=False は ml の 1 件のみ★ ⇒ ★分母を run へ絞っても盲は 1 件も失われぬ★
+      ★実測 (2026-07-27 09:32)★= 6 冊の盲 17 件は ★悉く【走らせる物】★であり、
+      ★同伴は ml の 1 件のみ★ ⇒ ★分母を絞っても盲は 1 件も失われぬ★
       (失うのは「台帳が走らせておらぬ同伴を盲と呼んでおった」誤りだけである)。
+    ★★同伴も返す (捨てぬ)★★= 呼び手が ★役を名乗らせた上で画面へ出す★ ゆえ =
+      ★黙って落とせば「見えておらぬ物が減った」と読まれる = 数を良くする動きになる★。
     """
     tracked, err = ls_files(repo)
     if err:
-        return None, err
+        return None, None, err
     tset = set(tracked)
-    out: dict[str, dict] = {}
+    out: dict[str, list[str]] = {}
+    comp: dict[str, list[str]] = {}
+    seen_run: set[str] = set()
     for e in entries:
         eid = str(e.get("id", "?"))
         run_blob = " ".join([str(e.get("test", "")), str(e.get("mutate", ""))])
@@ -610,13 +614,21 @@ def registry_named_test_bodies(entries, repo: Path):
                 if not _TEST_BODY_RE.search(p.read_text(encoding="utf-8", errors="replace")):
                     continue
             except OSError as ex:
-                return None, f"読めぬ追跡 file: {rel} ({ex}) — 黙って飛ばさぬ (沈黙禁)"
-            rec = out.setdefault(rel, {"ids": [], "run": False})
-            if eid not in rec["ids"]:
-                rec["ids"].append(eid)
+                return None, None, f"読めぬ追跡 file: {rel} ({ex}) — 黙って飛ばさぬ (沈黙禁)"
             if rel in run_rels:
-                rec["run"] = True
-    return out, None
+                seen_run.add(rel)
+            tgt = out if rel in seen_run else comp
+            tgt.setdefault(rel, [])
+            if eid not in tgt[rel]:
+                tgt[rel].append(eid)
+    # ★一つの木で【走らせる物】と【同伴】の両方に立つ file は、走らせる物を正とする★
+    #   (別の entry が現に走らせておるなら、其れは規則が見付ける【べき】物ゆえ)
+    for rel in list(comp):
+        if rel in out:
+            for eid in comp.pop(rel):
+                if eid not in out[rel]:
+                    out[rel].append(eid)
+    return out, comp, None
 
 
 def registry_shard_dir(path: Path) -> Path:
@@ -1342,30 +1354,31 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
                 "★物差しが巻き戻ったか★ — 見分けは selftest T71/T72 が持つ)")
 
     # ── ★視野計★ (付帯4・cmd_1370): 検知規則の recall を台帳で測り、盲を数字で言わせる ──
-    named, nerr = registry_named_test_bodies(entries, repo)
+    named, companions, nerr = registry_named_test_bodies(entries, repo)
     if nerr:
         print(f"[gate-2 coverage] UNDETERMINED: {nerr}")
         return 2
-    blind = {rel: rec["ids"] for rel, rec in named.items() if rel not in cands}
+    blind = {rel: ids for rel, ids in named.items() if rel not in cands}
     for rel in sorted(blind):
-        # ★同伴は【消さぬ】= 名を出したまま、役を名乗らせる★ (黙って分母から落とすと
-        #   「見えておらぬ物が減った」と読まれる = 数を良くする動きになる)
-        tail = ("" if named[rel]["run"] else
-                " ★但し之は【同伴】である★ = paths にしか現れず、台帳が走らせてはおらぬ"
-                " (本体が import する依存等) ゆえ ★視野の分母には入れぬ★")
         print(f"  注   [RULE-BLIND]    {rel}: 台帳 {'/'.join(blind[rel])} が名指す変異試験だが"
               " ★検知規則 D1/D2/D3 には見えておらぬ★ (台帳が在るゆえ守られてはおる。"
-              "同じ形の【未登録】は検知できぬ = 検知規則の視野の外)" + tail)
+              "同じ形の【未登録】は検知できぬ = 検知規則の視野の外)")
+    # ★★同伴は【消さぬ】= 名を出したまま、役を名乗らせる★★ (cmd_1408・三号)
+    #   ★黙って分母から落とせば「見えておらぬ物が減った」と読まれる = 数を良くする動きになる★。
+    for rel in sorted(c for c in companions if c not in cands):
+        print(f"  注   [RULE-BLIND/同伴] {rel}: 台帳 {'/'.join(companions[rel])} が"
+              " paths にのみ挙げる物 = ★台帳は之を走らせてはおらぬ★ (本体が import する依存等)"
+              " ⇒ ★規則に見えておらぬが【視野の分母には入れぬ】★"
+              " (走らせてもおらぬ物を『規則の盲』と数えれば、規則の死を誤って疑う)")
     n_named, n_seen = len(named), len(named) - len(blind)
     # ★物差しの長さを先に言う★: 対照は必ず当たる fixture ゆえ分母から除く。
     #   除いた残りが 0 件なら【recall を測れておらぬ】= 「全部見えておる」ではない
     #   (分母0と全員健全を区別する — cmd_1364 の流儀を検知器自身へ当てたもの)
-    # ★★併せて【同伴】も分母から除く (cmd_1408・三号)★★ =
+    # ★★併せて【同伴】は named に入っておらぬ (cmd_1408・三号)★★ =
     #   ★台帳が走らせておらぬ file を「規則が見落とした」と数えるのは筋が違う★。
     #   ★之を入れておった為、ml (非対照が同伴 1 件のみ) で
     #    「検出規則が死んでおる疑い」へ誤って escalate しておった★ = 規則は現に生きておる。
-    run_named = {rel for rel, rec in named.items() if rec["run"]}
-    non_ctl = sorted(run_named - {control})
+    non_ctl = sorted(set(named) - {control})
     seen_non_ctl = [rel for rel in non_ctl if rel in cands]
     if not non_ctl:
         vision = ("★視野は測れておらぬ★ = 台帳が名指す test 本体が対照のみ"
@@ -2286,7 +2299,8 @@ def selftest() -> int:
         rc, out = _invoke(["--coverage", "--registry", str(reg), "--repo-root", str(repo)])
         expect("T73 ★同伴のみ=規則の死を疑わぬ★ (誤 escalate せぬ)", 0, rc,
                "視野は測れておらぬ", out)
-        expect("T73b ★同伴は消さず役を名乗る★ (黙って分母から落とさぬ)", 0, rc, "★但し之は【同伴】である★", out)
+        expect("T73b ★同伴は消さず役を名乗る★ (黙って分母から落とさぬ)", 0, rc,
+               "[RULE-BLIND/同伴]", out)
 
         # T22: 実在 ID の言及は幽霊扱いせぬ (誤検知抑止の負例)
         repo = _mk_git_repo(T / "t22", {ctl: _COV_CONTROL_BODY,

@@ -33,8 +33,16 @@ out2="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --sanity 2>&1)"; r
 #   ★1 を返さぬ設計ゆえ commit を止めることは無い★ (UNDETERMINED=2 で警告するのみ)。
 #   ★所要 = 触った file を持つ牙のみ・物差しB のみゆえ 0.2s 級 (実測)★。
 out3="$(python3 "$SCRIPT_DIR/scripts/gate_anchor_touched.py" 2>&1)"; rc3=$?
+# gate-4 (cmd_1409): ★「登録した」と「登録されておる」を分ける★。
+#   ★五号 08:15 実測★= 台帳の末尾へ entry を継ぐと mutations: の下に入らず、最後の key の
+#   値として ★黙って呑まれる★ (parse は通り・道具も何も申さず・総数も動かぬ)。
+#   ⇒ ★呑まれは【翌朝の replay にも見えぬ】★= 台帳に載っておらぬ牙は撃たれもせぬゆえ、
+#     ★書いた其の瞬間 (commit) に名指す以外に捕える口が無い★ (gate-3 の時差論とは別の理由)。
+#   ★既定は 1 を返さぬ (UNDETERMINED=2 で警告するのみ)★ / REGISTRY_APPEND_STRICT=1 で commit を止める。
+#   ★所要 = 触った台帳のみ・実測 0.2 秒級 (6 冊 全数でも 0.20s)★。
+out4="$(python3 "$SCRIPT_DIR/scripts/gate_registry_append.py" 2>&1)"; rc4=$?
 
-for pair in "gate-1:$rc1" "gate-2:$rc2" "gate-3:$rc3"; do
+for pair in "gate-1:$rc1" "gate-2:$rc2" "gate-3:$rc3" "gate-4:$rc4"; do
     rc="${pair#*:}"
     if [ "$rc" -eq 1 ]; then worst=1
     elif [ "$rc" -eq 2 ] && [ "$worst" -ne 1 ]; then worst=2; fi
@@ -46,6 +54,7 @@ if [ "$worst" -eq 1 ]; then
     [ "$rc1" -ne 0 ] && printf '%s\n' "$out1"
     [ "$rc2" -ne 0 ] && printf '%s\n' "$out2"
     [ "$rc3" -ne 0 ] && printf '%s\n' "$out3"
+    [ "$rc4" -ne 0 ] && printf '%s\n' "$out4"
     echo "  詳細と処方: docs/content/ops/cmd_1352_silent_pitfall_gates.md"
     echo "  緊急回避 (理由必須): SHOGUN_GATE_SKIP=1 git commit ..."
     echo "════════════════════════════════════════════════════════════════"
@@ -57,9 +66,11 @@ if [ "$worst" -eq 2 ]; then
     [ "$rc1" -ne 0 ] && printf '%s\n' "$out1"
     [ "$rc2" -ne 0 ] && printf '%s\n' "$out2"
     [ "$rc3" -ne 0 ] && printf '%s\n' "$out3"
+    [ "$rc4" -ne 0 ] && printf '%s\n' "$out4"
     echo "  gate_nightly.sh (cron) が家老へ警告する。今直せるなら今直せ。"
+    echo "  ★但し gate-4 (台帳の呑まれ) だけは翌朝の門にも見えぬ★ = 此処で直さねば誰も気付かぬ。"
     echo "════════════════════════════════════════════════════════════════"
     exit 0
 fi
-echo "[gate] PASS: gate-1 (manifest捕捉) + gate-2 (台帳sanity) + gate-3 (牙の着弾) 緑"
+echo "[gate] PASS: gate-1 (manifest捕捉) + gate-2 (台帳sanity) + gate-3 (牙の着弾) + gate-4 (台帳の呑まれ) 緑"
 exit 0

@@ -303,10 +303,15 @@ def scan_qc_dispatch(inbox_dir: Path, threshold_min: int, now=None):
     ★規の出所は【節の名】で指す。行番号で指さぬ★ (家老 07:04・四号の見立て・cmd_1450 で直した)。
       instructions/karo.md の
       「#### 🚨 MANDATORY: Ash Report Receipt → Karo MUST Dispatch QC Task Explicitly」の節。
-    ★何ゆえ★= 元は "karo.md L1319" と書いておったが、案B の合流で当の規は :1376 へ動き、
+    ★何ゆえ★= 元は "karo.md L1319" と書いておったが、案B の合流で当の規は別の行へ動き、
       :1319 は今 全く別の節 (Gunshi Limitations) である。
       ★指し先は生きた顔をしたまま、指す先だけが別物に化けた★ = 本朝ずっと狩っておる族そのもの。
       節名なら行が動いても付いて回る (2026-07-28 実測 = 此の名は karo.md に 1 件のみ = 一意)。
+    ★併せて己の非 (cmd_1450 丙・07:2x)★= 此の註の初版は「当の規は :1376 へ動き」と
+      ★新しい行番号を書いておった★。而して 07:20 の実測では節の頭は :1394 (作業木)・
+      :1373 (HEAD) であり、★:1376 は書いた其の刻から既に違うておった★。
+      ⇒ ★行番号を捨てる直しの中で、己が新しい行番号を書いた★ = 同じ族を己で踏んだ。
+      ⇒ 之が「行番号を書かぬ」を ★註の中でも★ 守る理由である。
 
     見る物 = 軍師の inbox に居る【足軽の報告】で、未読のまま threshold_min を超えた物。
 
@@ -325,6 +330,13 @@ def scan_qc_dispatch(inbox_dir: Path, threshold_min: int, now=None):
         #   (gunshi.yaml を読み report_received だけを見る ⇒ 恒久に 0)。
         #   ★之を置かねば「見ておらぬ 0」と「無かった 0」が同じ顔で返る。★
         "report_family_all": 0,
+        # ★刻が未来の物★ (家老 07:21 の裁・三号 07:17 の実測)。
+        #   経過で切る検めは ★未来の刻を永久に拾わぬ★ (elapsed が負ゆえ閾値を超えぬ)。
+        #   実測 = ashigaru1_report.yaml の record が 07:45 (file の mtime は 07:08) ⇒ 経過 -28 分。
+        #   ★黙って skip すれば、其の報告は検めから消えたまま誰も気付かぬ。★
+        #   ⇒ hit にはせぬ (経過が閾値を超えておらぬのは事実) が、★必ず名乗らせる★。
+        #   之は条D-3 が【読む側】でなく【検めを盲にする側】の顔で出た物である。
+        "future": [],
         "unreadable_files": [], "undated": [],
     }
     for path in sorted(inbox_dir.glob(QC_INBOX_GLOB)):
@@ -368,6 +380,13 @@ def scan_qc_dispatch(inbox_dir: Path, threshold_min: int, now=None):
                 })
                 continue
             elapsed_min = int((now - dt).total_seconds() // 60)
+            if elapsed_min < 0:
+                # ★刻が未来 = 経過で切る検めから永久に落ちる★ ゆえ、落ちた事実を名乗る。
+                stats["future"].append({
+                    "inbox": path.name, "id": m.get("id"), "from": sender,
+                    "timestamp": str(m.get("timestamp")), "ahead_min": -elapsed_min,
+                })
+                continue
             if elapsed_min < threshold_min:
                 continue
             hits.append({
@@ -411,6 +430,13 @@ def print_qc_result(qc_hits, stats, threshold_min):
     for u in stats["undated"]:
         print(f"ACTION=gunshi_msg_undated INBOX={u['inbox']} MSG_ID={u['id']} "
               f"FROM={u['from']} ⇒ ★刻が読めぬゆえ経過を測れぬ (hits に載らぬ)★")
+    # ★刻が未来の便を黙って落とさぬ (家老 07:21 の裁・三号 07:17 の実測)★
+    for u in stats["future"]:
+        print(f"ACTION=gunshi_msg_future_dated INBOX={u['inbox']} MSG_ID={u['id']} "
+              f"FROM={u['from']} TIMESTAMP={u['timestamp']} AHEAD_MIN={u['ahead_min']} "
+              f"⇒ ★便の刻が未来である★ = 経過が負ゆえ "
+              f"★閾値を永久に超えず、本検めから黙って消える★。"
+              f"刻を直さぬ限り、此の報告の QC 漏れは検め得ぬ")
     for h in qc_hits:
         print(f"QC_DISPATCH_LATE INBOX={h['inbox']} MSG_ID={h['msg_id']} "
               f"FROM={h['from']} MSG_TYPE={h['msg_type']} "
@@ -429,7 +455,8 @@ def print_qc_result(qc_hits, stats, threshold_min):
               f"便={stats['messages']} 未読={stats['unread']} "
               f"未読の報告族={stats['report_family']} "
               f"読めぬinbox除外={len(stats['unreadable_files'])} "
-              f"刻の読めぬ便除外={len(stats['undated'])}" + canary)
+              f"刻の読めぬ便除外={len(stats['undated'])} "
+              f"刻が未来ゆえ除外={len(stats['future'])}" + canary)
 
 
 def format_alert_message(hit):

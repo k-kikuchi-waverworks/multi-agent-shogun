@@ -182,3 +182,45 @@ _inbox() { echo "messages:" > "$Q/inbox/$1.yaml"; }
     [[ "$output" == *"qc_dispatch_late"* ]]
     [[ "$output" == *"ashigaru5"* ]]
 }
+
+# ── 刻が未来の便 (cmd_1450 丙・家老 07:21 の裁・三号 07:17 の実測) ──────────
+# ★機序★= 経過で切る検めは、刻が未来の便を ★永久に拾わぬ★ (経過が負ゆえ閾値を超えぬ)。
+#   実測 = ashigaru1_report.yaml の record が 07:45 (file の mtime は 07:08) ⇒ 経過 -28 分。
+#   ★黙って skip すれば、其の報告は検めから消えたまま誰も気付かぬ。★
+#   ⇒ hit にはせぬ (経過が閾値を超えておらぬのは事実) が、★必ず名乗らせる★。
+
+@test "T-QC-015: 刻が未来の便は【黙って落とさず】名乗る (陽性)" {
+    _inbox gunshi1
+    # now より確実に先の刻を作る (試験の刻に依らぬよう相対で作る)
+    FUTURE="$(python3 -c 'import datetime;print((datetime.datetime.now()+datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S"))')"
+    _msg gunshi1 ashigaru5 report false "$FUTURE"
+    run python3 "$SCAN" --queue-root "$Q" --qc-threshold-min 10
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ACTION=gunshi_msg_future_dated"* ]]
+    [[ "$output" == *"AHEAD_MIN="* ]]
+    # ★hit には載せぬ★ = 経過が閾値を超えておらぬのは事実である
+    [[ "$output" != *"QC_DISPATCH_LATE"* ]]
+    # ★母数にも数が出る★ = 「見た上で落とした」が読める
+    [[ "$output" == *"刻が未来ゆえ除外=1"* ]]
+}
+
+@test "T-QC-016: 刻が過去の便では未来の名乗りは出ぬ (負の対照)" {
+    _inbox gunshi1
+    _msg gunshi1 ashigaru5 report false "$OLD"
+    run python3 "$SCAN" --queue-root "$Q" --qc-threshold-min 10
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"ACTION=gunshi_msg_future_dated"* ]]
+    [[ "$output" == *"QC_DISPATCH_LATE"* ]]
+}
+
+@test "T-QC-017: 未来の便が在っても、同居する古い便は現に鳴る (未来が他を隠さぬ)" {
+    _inbox gunshi1
+    FUTURE="$(python3 -c 'import datetime;print((datetime.datetime.now()+datetime.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S"))')"
+    _msg gunshi1 ashigaru5 report false "$FUTURE"
+    _msg gunshi1 ashigaru6 report false "$OLD"
+    run python3 "$SCAN" --queue-root "$Q" --qc-threshold-min 10
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ACTION=gunshi_msg_future_dated"* ]]
+    [[ "$output" == *"QC_DISPATCH_LATE"* ]]
+    [[ "$output" == *"ashigaru6"* ]]
+}

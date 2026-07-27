@@ -644,30 +644,46 @@ def _live_report_text(task_id: str, timestamp: str) -> str:
     return f"task_id: {task_id}\nstatus: done\ntimestamp: '{timestamp}'\n"
 
 
-def live_ledgers() -> tuple[list[tuple], int]:
+def is_self_ledger(target_path, self_path: pathlib.Path | None = None) -> bool:
+    """其の帳面は【此の file 自身】を指しておるか (条C = 己を母数から外す)。
+
+    ★何ゆえ独立の口にしたか (cmd_1450 丙)★=
+      除外が live_ledgers の中に埋まっておった間、★除外を外す変異は緑のまま生き残った★。
+      因は「今 此の file を指す帳面が現に無い」ゆえの偶然であって、守りが試験された
+      からではない。★口を分ければ、盤に何が在ろうと両方向で撃てる★。
+    """
+    if not (target_path and looks_like_path(target_path)):
+        return False
+    me = (self_path or pathlib.Path(__file__)).resolve()
+    try:
+        return (_SCRIPTS_DIR.parent / str(target_path).strip()).resolve() == me
+    except OSError:
+        return False
+
+
+def live_ledgers(tasks_dir=None, self_path: pathlib.Path | None = None) -> tuple[list[tuple], int]:
     """現物の queue/tasks/ から anchor に使える帳面を集める。(帳面 list, 現に在る yaml の数)。
 
     ★current_task を差し替えずに呼ぶ★= 之が撃ちたい当の配線である。
     ★己の帳面は外す (条C)★= target_path が ★此の file 自身★ を指す帳面は、
       今 此の門を書いておる者の物ゆえ、書いておる間に動く。anchor にせぬ。
+
+    tasks_dir / self_path は ★試験が除外そのものを撃つ★ ためだけの口である
+    (既定 = 現物)。之を渡す試験は差し替えの試験ゆえ、★差し替えなしの L0〜L4 と
+    併せて読め★ = 片方だけでは配線を証さぬ。
     """
-    base = _SCRIPTS_DIR.parent / "queue" / "tasks"
-    me = pathlib.Path(__file__).resolve()
+    base = pathlib.Path(tasks_dir) if tasks_dir else _SCRIPTS_DIR.parent / "queue" / "tasks"
     if not base.is_dir():
         return [], 0
     files = sorted(base.glob("*.yaml"))
     out = []
     for p in files:
         stem = f"{p.stem}_report"
-        tid, upd, prev, tgt = current_task(stem)
+        tid, upd, prev, tgt = current_task(stem, tasks_dir=tasks_dir)
         if not (tid and isinstance(upd, str) and reader_can_parse_time(upd)):
             continue
-        if tgt and looks_like_path(tgt):
-            try:
-                if (_SCRIPTS_DIR.parent / tgt).resolve() == me:
-                    continue  # ★己を母数から外す★
-            except OSError:
-                pass
+        if is_self_ledger(tgt, self_path):
+            continue  # ★己を母数から外す★
         out.append((stem, tid, upd, prev, tgt))
     return out, len(files)
 
@@ -677,6 +693,40 @@ def live_wiring() -> tuple[bool, list[str]]:
     lines: list[str] = []
     ok = True
     determined = 0
+
+    # ── L5 / L6 = ★己の除外 (条C) そのものを撃つ★ (cmd_1450 丙) ──
+    #   ★何ゆえ足したか★= 除外を外す変異は 07:0x 時点で ★緑のまま生き残った★。
+    #   因は「今 此の file を指す帳面が現に無い」= ★偶然 無害★であって、守りが
+    #   試験されておったからではない。⇒ 盤に依らず撃てる形へ改めた。
+    me_rel = "scripts/" + pathlib.Path(__file__).name
+    if is_self_ledger(me_rel) and not is_self_ledger("plans/cmd_9999_not_me.md"):
+        determined += 1
+        lines.append(f"  ok  L5 己の除外が両方向で効く ({me_rel} → 外す / 他人の路 → 外さぬ)")
+    else:
+        ok = False
+        lines.append(f"  NG  L5 ★己の除外が壊れておる★ 己={is_self_ledger(me_rel)} "
+                     f"(True の筈) / 他人={is_self_ledger('plans/cmd_9999_not_me.md')} (False の筈)")
+
+    #   L6 = ★除外が live_ledgers に現に配線されておるか★。
+    #   砂場の帳面で撃つ ⇒ ★現物の queue/tasks/ へ 0 byte★。
+    with tempfile.TemporaryDirectory() as _td6:
+        _d6 = pathlib.Path(_td6)
+        (_d6 / "zzself.yaml").write_text(
+            "task:\n  task_id: subtask_9460\n  updated_at: '2026-07-28T05:00:00'\n"
+            f"  target_path: '{me_rel}'\n", encoding="utf-8")
+        (_d6 / "zzother.yaml").write_text(
+            "task:\n  task_id: subtask_9461\n  updated_at: '2026-07-28T05:00:00'\n"
+            "  target_path: 'plans/cmd_9999_not_me.md'\n", encoding="utf-8")
+        got6, n6 = live_ledgers(tasks_dir=_d6)
+        stems6 = {s for s, *_ in got6}
+        if n6 == 2 and stems6 == {"zzother_report"}:
+            determined += 1
+            lines.append("  ok  L6 帳面 2 本のうち ★己を指す 1 本だけが母数から落ちた★ "
+                         "(除外が live_ledgers に現に配線されておる)")
+        else:
+            ok = False
+            lines.append(f"  NG  L6 ★除外が配線されておらぬ★ 帳面 {n6} 本 → 残った={sorted(stems6)} "
+                         "(期待 = {'zzother_report'} のみ)")
 
     ledgers, n_files = live_ledgers()
     lines.append(f"  ── L0 現物の帳面 {n_files} 本のうち anchor に使えるもの = {len(ledgers)} 本 "
@@ -815,16 +865,33 @@ def _cases() -> list[tuple[str, str, str | None, str | None]]:
     ]
 
 
+# ★B4 が要求する検めの族★ (cmd_1450 丙)
+#   ★何ゆえ要るか★= 07:0x 実測 = ★L 系の呼び出しを selftest から消す変異が、緑のまま
+#   生き残った★。門はいつでも外せ、外したことを誰も名指さなんだ。
+#   ⇒ 「族がここに在るべし」を ★data として宣言し、走った後に照合する★。
+#   ★之で消えるのは【黙って消える形】だけである★= 下の表から名を消せば依然として外せる。
+#   而して其の時は ★何を捨てたかを明示して消す★ことになる (条6 = 射程を名乗る)。
+REQUIRED_FAMILIES = ("B1", "B2", "B3", "B3n", "L0", "L5", "L6", "N3")
+
+
 def selftest() -> int:
     ok = True
-    print("=== report_validate --selftest (変異=赤 / 無改変=緑) ===")
+    emitted: list[str] = []
+
+    def say(*parts) -> None:
+        """印字しつつ ★何を撃ったかを控える★ (B4 が後で照合する)。"""
+        msg = " ".join(str(x) for x in parts)
+        emitted.append(msg)
+        print(msg)
+
+    say("=== report_validate --selftest (変異=赤 / 無改変=緑) ===")
     # ★門の不調を、門の側で捕える★= R2 は slim_yaml から借りた表に依る。借り損ねれば
     #   R2 は黙って消える (書き手には何も見えぬ) ゆえ、機械が此処で名指す。
     if CANONICAL_REPORTS is None:
         ok = False
-        print(f"  NG  B1 slim_yaml の除外表を借りられなんだ = ★R2 が黙って消えておる★: {BORROW_ERROR}")
+        say(f"  NG  B1 slim_yaml の除外表を借りられなんだ = ★R2 が黙って消えておる★: {BORROW_ERROR}")
     else:
-        print(f"  ok  B1 除外表を借りられた ({len(CANONICAL_REPORTS)} 件)")
+        say(f"  ok  B1 除外表を借りられた ({len(CANONICAL_REPORTS)} 件)")
 
     # ★B2 = 前提そのものを名乗る★ (cmd_1404)。M2/M2n は「表の外/中」を撃つ試験ゆえ、
     #   其の stem が現に外/中に在ることを ★先に言葉で出す★。焼き付けた綴りが黙って
@@ -839,16 +906,16 @@ def selftest() -> int:
     ):
         if stem is None:
             ok = False
-            print(f"  NG  B2 {label} の stem を立てられなんだ = ★M2/M2n の前提が崩れておる★: {why}")
+            say(f"  NG  B2 {label} の stem を立てられなんだ = ★M2/M2n の前提が崩れておる★: {why}")
             continue
         inside = CANONICAL_REPORTS is not None and stem in CANONICAL_REPORTS
         if inside != want_inside:
             ok = False
-            print(f"  NG  B2 {label} を撃つ筈の stem '{stem}' が ★実際には表の"
+            say(f"  NG  B2 {label} を撃つ筈の stem '{stem}' が ★実際には表の"
                   f"{'中' if inside else '外'}に在る★ = ★前提が反対側へ移っておる★"
                   f" (cmd_1397-B で現に起きた型・{why})")
         else:
-            print(f"  ok  B2 {label} の stem を表から立て、表へ当て直して確かめた: {why}")
+            say(f"  ok  B2 {label} の stem を表から立て、表へ当て直して確かめた: {why}")
 
     # ★B3 (cmd_1450) = 【帳面を読む口】そのものを撃つ★
     #   ★何ゆえ要るか★= W5 系は task_lookup を差し替えて撃つゆえ、★current_task が
@@ -868,16 +935,16 @@ def selftest() -> int:
         got = current_task("zz_probe_report", tasks_dir=_tdir)
         want = ("subtask_9450", "2026-07-28T05:00:00", {"subtask_9449"}, "plans/cmd_9450_draft.md")
         if got == want:
-            print("  ok  B3 帳面から (task_id/updated_at/前任/target_path) を現に読めた")
+            say("  ok  B3 帳面から (task_id/updated_at/前任/target_path) を現に読めた")
         else:
             ok = False
-            print(f"  NG  B3 ★帳面を読む口が壊れておる★ 期待={want} / 実際={got}")
+            say(f"  NG  B3 ★帳面を読む口が壊れておる★ 期待={want} / 実際={got}")
         got2 = current_task("zz_notarget_report", tasks_dir=_tdir)
         if got2[3] is None:
-            print("  ok  B3n target_path の無い帳面では None を返す = ★R5d は黙る★ (負の対照)")
+            say("  ok  B3n target_path の無い帳面では None を返す = ★R5d は黙る★ (負の対照)")
         else:
             ok = False
-            print(f"  NG  B3n target_path が無いのに {got2[3]!r} を返した")
+            say(f"  NG  B3n target_path が無いのに {got2[3]!r} を返した")
 
     # ★L 系 (cmd_1450 乙) = 差し替えを一切せぬ試験★
     #   B3 は current_task を直に撃ち、W5 系は task_lookup を差し替えて撃つ。
@@ -886,12 +953,12 @@ def selftest() -> int:
     live_ok, live_lines = live_wiring()
     ok = ok and live_ok
     for _line in live_lines:
-        print(_line)
+        say(_line)
 
     for name, text, stem, needle in _cases():
         if stem is None:
             ok = False
-            print(f"  NG  {name} / ★前提の stem を立てられず撃てなんだ★ (B2 を見よ)")
+            say(f"  NG  {name} / ★前提の stem を立てられず撃てなんだ★ (B2 を見よ)")
             continue
         problems = validate_text(text, stem)
         got_red = bool(problems)
@@ -905,7 +972,7 @@ def selftest() -> int:
                 if not passed else " / " + "; ".join(p.split("\n")[0] for p in problems)
             )
         ok = ok and passed
-        print(f"  {'ok ' if passed else 'NG '} {name}{detail}")
+        say(f"  {'ok ' if passed else 'NG '} {name}{detail}")
 
     # ── R5 (cmd_1407) = ★鍵を消せば赤・正しい物では静か★ を両方向で ──
     #   ★試験の前提を焼き付けぬ★= task YAML は差し替え可能な口 (task_lookup) から与える。
@@ -1040,7 +1107,7 @@ def selftest() -> int:
             detail = (" / " + "; ".join(g.split("\n")[0] for g in got)) if got else \
                      " / ★警告が1つも出ておらぬ★"
         ok = ok and passed
-        print(f"  {'ok ' if passed else 'NG '} {name}{detail}")
+        say(f"  {'ok ' if passed else 'NG '} {name}{detail}")
 
     # ★盤面の側の負例★= 現に在る report 9 本が緑であること (門が狼少年でない証)
     reports_dir = _SCRIPTS_DIR.parent / "queue" / "reports"
@@ -1055,17 +1122,57 @@ def selftest() -> int:
         w = warn_file(p)
         if w:
             r5_hit.append((p.name, [x.split("]")[0] + "]" for x in w]))
-        print(f"  {mark}N2 現物 {p.name} = 緑であるべき{detail}")
+        say(f"  {mark}N2 現物 {p.name} = 緑であるべき{detail}")
     if not live:
-        print("  -- N2 現物の report が見当たらぬ (skip)")
+        say("  -- N2 現物の report が見当たらぬ (skip)")
     # ★N3 = 母数の印字★ (judge には効かせぬ)。R5 は警告ゆえ現物が赤くとも FAIL にせぬが、
     #   ★数を黙らせぬ★= 「R1-R4 は全部 緑、なれど読み手には見えておらぬ」を一目で出す。
-    print(f"  ── N3 現物 {len(live)} 本のうち ★R5 が名指す物 = {len(r5_hit)} 本★ "
+    say(f"  ── N3 現物 {len(live)} 本のうち ★R5 が名指す物 = {len(r5_hit)} 本★ "
           f"(judge には効かせぬ = 警告ゆえ)")
     for nm, rules in r5_hit:
-        print(f"       {nm}: {'+'.join(sorted(set(rules)))}")
+        say(f"       {nm}: {'+'.join(sorted(set(rules)))}")
 
-    print("=== 総judge:", "PASS" if ok else "FAIL", "===")
+    # ── B4 (cmd_1450 丙) = ★宣言した族が現に走ったか★ ──
+    #   ★守る物★= 検めを selftest から【黙って外す】形。外せば族の名が出ぬゆえ此処が名指す。
+    #   ★守らぬ物 (条6 = 緑の射程)★=
+    #     ・REQUIRED_FAMILIES から名を消す形は止められぬ (明示の一行になるだけ)
+    #     ・B4 自身を消す形も止められぬ (★之が「一段 外側」の止め所である★)
+    #     ・族が【走った】ことしか見ぬ = 中身が正しいかは各族の判定に委ねる
+    seen_fams = set()
+    for _l in emitted:
+        _m = re.match(r"\s*(?:ok|NG|\?\?|--|──)\s+([A-Z][A-Za-z0-9]*)\b", _l)
+        if _m:
+            seen_fams.add(_m.group(1))
+    missing = [f for f in REQUIRED_FAMILIES if f not in seen_fams]
+    if missing:
+        ok = False
+        say(f"  NG  B4 ★宣言した検めが走っておらぬ★ 欠け = {missing} "
+            f"(REQUIRED_FAMILIES={list(REQUIRED_FAMILIES)} / 現に走った族={sorted(seen_fams)})")
+        say("      ★之は『検めを黙って外した』の顔である★ = 外すなら "
+            "REQUIRED_FAMILIES からも名を消し、何を捨てたかを書け")
+    else:
+        say(f"  ok  B4 宣言した {len(REQUIRED_FAMILIES)} 族が現に走った "
+            f"({'/'.join(REQUIRED_FAMILIES)})")
+
+    # ── B5 (cmd_1450 丙) = ★赤い行を刷りながら総judge が PASS になる形を禁ずる★ ──
+    #   ★何ゆえ要るか★= B4 は「族が走ったか」しか見ぬ。ゆえに
+    #   ★検めは走らせるが、其の赤を ok へ混ぜ忘れる (или 握り潰す) 変異★ が擦り抜けた
+    #   (2026-07-28 変異F2 で実測)。之は「見たのに数えぬ」形である。
+    #   ⇒ ★印字と判定の食い違い★を、判定の最後に照合する。
+    red_lines = [l for l in emitted if re.match(r"\s*NG\b", l.strip()[:3]) or l.lstrip().startswith("NG ")]
+    if red_lines and ok:
+        ok = False
+        say(f"  NG  B5 ★赤を {len(red_lines)} 行 刷りながら総judge が PASS になっておった★ "
+            "= 検めは走ったが其の赤が judge へ混ざっておらぬ")
+        for _r in red_lines[:5]:
+            say(f"      刷った赤: {_r.strip()[:110]}")
+    elif red_lines:
+        say(f"  ── B5 赤 {len(red_lines)} 行 / 総judge={'PASS' if ok else 'FAIL'} "
+            f"({'★食い違っておる★' if ok else '食い違っておらぬ'})")
+    else:
+        say("  ok  B5 赤い行は 1 つも刷られておらぬ (印字と判定が食い違っておらぬ)")
+
+    say("=== 総judge:", "PASS" if ok else "FAIL", "===")
     return 0 if ok else 1
 
 

@@ -321,6 +321,16 @@ scripts/seo_qc.sh
 # 見えないと 2 つ起きる: clone へ配られない / git clean -xd で消える。
 # どちらの場合も「控えが古い」を誰も知らせなくなり、しかも黙って そうなる。
 !scripts/backup_freshness_check.sh
+# cmd_1465 (2026-07-28): 定時実行 7 本の「終わった証」を検める側 (stall_watchdog_scan.py が呼ぶ先)。
+# 一号が 44fa684 で名指した穴と同じ物を、その 40 分後に五号が己の script で踏んでいた。
+# 気づけたのは git status が緑だったためではなく、git status がこの file を見ていなかったため。
+#   ⇒ 追跡外かどうかを git status で確かめるな。git check-ignore で確かめること。
+# 見張りを据える側の script ほど、消えても誰も気づかない (見張りが黙るだけなので)。
+!scripts/scheduled_liveness_check.py
+# cmd_1465 (2026-07-28): 毎朝 06:55 の cron が現に呼んでいる先。五号が census で見つけた。
+#   cron の 5 本のうち、呼ぶ先が git から見えないのはこの 1 本だけ。
+#   中身の commit は持ち主 (cmd_1393) の手番ゆえ、ここでは「見える」ようにするまで。
+!scripts/engine_devserver_morning_check.sh
 # cmd_1381 段3 (2026-07-26): ★殿への通知路の生死★を毎朝読む番人 (gate_nightly が呼ぶ先)。
 # ★之を whitelist へ書き忘れれば、通知路の番人自身が clone へ配られず、
 #  fresh clone の毎朝は「通知路=見ておらぬ」に静かに戻る★ = cmd_1367 が名指した当の族ゆえ明示で通す。

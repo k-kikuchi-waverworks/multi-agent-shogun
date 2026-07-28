@@ -23,6 +23,11 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# ── 定時実行の見張り (cmd_1465・足軽五号) ──────────────────────────────
+# 新しい cron は作らず、既に家老へ知らせる口を持つこの監視スクリプトへ相乗りさせる。
+#   (新しい cron を足しても、今度はその cron が黙って死ぬ物になるだけのため)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scheduled_liveness_check as liveness  # noqa: E402
 DEFAULT_TASKS_DIR = REPO_ROOT / "queue" / "tasks"
 DEFAULT_REPORTS_DIR = REPO_ROOT / "queue" / "reports"
 DEFAULT_INBOX_DIR = REPO_ROOT / "queue" / "inbox"
@@ -813,6 +818,59 @@ def notify_karo(hit):
     return proc
 
 
+def print_liveness_result(findings):
+    """定時実行の見張りの所見を刷る。OK も含めて全数出す (母数を隠さないため)。"""
+    for f in findings:
+        print(f"SL_JOB={f['name']} SL_VERDICT={f['verdict']} SL_DETAIL={f['detail']}")
+    c = {v: sum(1 for f in findings if f["verdict"] == v)
+         for v in ("OK", "STALE", "MISSING", "SKIPPED")}
+    print(f"[stall_watchdog] 定時実行の見張り (cmd_1465) 母数={len(findings)}本 "
+          f"OK={c['OK']} STALE={c['STALE']} MISSING={c['MISSING']} SKIPPED={c['SKIPPED']} "
+          f"この見張りはこの監視スクリプトに相乗りしており、"
+          f"こちらが死ねば一緒に黙る (そこは塞げていない)")
+
+
+def notify_liveness(findings, state, cooldown_min, now, exit_code):
+    """STALE / MISSING を家老へ知らせる。鳴らさなかった時は、その事を log へ出す。"""
+    stale = [f for f in findings if f["verdict"] == "STALE"]
+    missing = [f for f in findings if f["verdict"] == "MISSING"]
+    if not stale and not missing:
+        return exit_code
+
+    to_send = []
+    for f in stale:
+        key = f"liveness|stale|{f['name']}"
+        last = parse_iso_to_naive_local(state.get(key, {}).get("last_alert"))
+        if last is not None and (now - last).total_seconds() < cooldown_min * 60:
+            print(f"[stall_watchdog] cooldown 中ゆえ再警報せず: {key} "
+                  f"(cooldown={cooldown_min}分)")
+            continue
+        to_send.append((key, f))
+    if missing:
+        # 顔ぶれそのものを鍵にする = 同じ顔ぶれの間は一度だけ、変われば また鳴る。
+        sig = ",".join(sorted(f["name"] for f in missing))
+        key = f"liveness|missing|{sig}"
+        if key in state:
+            print(f"[stall_watchdog] 既に知らせ済みなので再警報しない: {key} "
+                  f"(顔ぶれが変われば また鳴る。log には毎回 出している)")
+        else:
+            to_send.append((key, {"name": f"証を持たない {len(missing)} 本"}))
+    if not to_send:
+        return exit_code
+
+    proc = subprocess.run(
+        ["bash", str(INBOX_WRITE_SH), "karo", liveness.format_alert(findings),
+         "stall_watchdog_scheduled_liveness_alert", "stall_watchdog"],
+        capture_output=True, text=True)
+    if proc.returncode != 0:
+        print(f"[stall_watchdog] ERROR: inbox_write failed for liveness: "
+              f"{proc.stderr.strip()}", file=sys.stderr)
+        return 1
+    for key, _f in to_send:
+        state[key] = {"last_alert": now.isoformat(timespec="seconds")}
+    return exit_code
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true",
@@ -838,6 +896,10 @@ def main(argv=None):
                     help="起票漏れの突合 (cmd_1459) を走らせぬ。")
     ap.add_argument("--ledger", type=Path, default=None,
                     help="台帳 (shogun_to_karo.yaml) の path を差し替える (試験用)。")
+    ap.add_argument("--no-liveness-scan", action="store_true",
+                    help="定時実行 7 本の『終わった証』の検め (cmd_1465) を走らせぬ。")
+    ap.add_argument("--liveness-logs-dir", type=Path, default=None,
+                    help="定時実行の見張りが読む logs/ を差し替える (試験用)。")
     ap.add_argument("--cooldown-min", type=int, default=DEFAULT_COOLDOWN_MIN,
                     help=f"同一 (agent, task_id) の再警報を抑える分数 "
                          f"(default {DEFAULT_COOLDOWN_MIN})。★常に赤い検知は無視されて死ぬ★")
@@ -868,6 +930,10 @@ def main(argv=None):
         ml_hits, ml_quiet, ml_stats = scan_qc_ledger_miss(
             reports_dir, tasks_dir, ledger_path, args.qc_ledger_threshold_min)
 
+    lv_findings = []
+    if not args.no_liveness_scan:
+        lv_findings, _lv_total = liveness.scan(args.liveness_logs_dir)
+
     if args.json:
         print(json.dumps(hits, ensure_ascii=False))
         # ★json の口でも黙らぬ★= hits だけを吐けば、読めなんだ agent は
@@ -890,6 +956,10 @@ def main(argv=None):
                               "qc_ledger_miss_quiet": ml_quiet,
                               "qc_ledger_miss_stats": ml_stats},
                              ensure_ascii=False))
+        # json の口でも定時実行の見張りを落とさない (cmd_1465)。
+        #   口ごとに見る範囲が違うと「json に出ない = 無い」と読まれるため。
+        if lv_findings:
+            print(json.dumps({"scheduled_liveness": lv_findings}, ensure_ascii=False))
     else:
         # ★黙った件は黙って黙らぬ★ = 再dispatchと見て鳴らさなかった分を必ず印字する。
         # これが見えねば「再dispatch判定が効きすぎて全部握り潰す」状態と
@@ -929,6 +999,12 @@ def main(argv=None):
         if ml_stats is not None:
             print_ledger_miss_result(ml_hits, ml_quiet, ml_stats,
                                      args.qc_ledger_threshold_min)
+        # 定時実行の見張り (cmd_1465)。母数を必ず載せ、OK の分も名前を出す
+        #   (「異常なし」と「そもそも見ていない」を log の上で分けるため)。
+        #   欄の名に SL_ を付けるのは、他のチェックの陰性対照を巻き込まないため
+        #   (2026-07-28 に LM_ で同じ失敗が現に起きている)。
+        if lv_findings:
+            print_liveness_result(lv_findings)
 
     if args.dry_run or args.queue_root is not None:
         return 0
@@ -984,6 +1060,12 @@ def main(argv=None):
             continue
         state[key] = {"last_alert": now.isoformat(timespec="seconds"),
                       "cmd": h["cmd"]}
+    # ── 定時実行の見張りの警報 (cmd_1465) ────────────────────────────
+    #   STALE は時間で抑える (直れば止まり、直らなければ また鳴る)。
+    #   MISSING は顔ぶれが変わるまで一度だけ鳴らす。
+    #     MISSING は人が直すまで消えない状態なので、毎回 鳴らせば常に赤い検知になり、
+    #     読む者はやがて無視する = 検知そのものが死ぬ。顔ぶれが変われば新しい知らせなので鳴る。
+    exit_code = notify_liveness(lv_findings, state, args.cooldown_min, now, exit_code)
     _save_alert_state(state)
     return exit_code
 

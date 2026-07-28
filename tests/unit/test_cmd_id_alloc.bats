@@ -5,10 +5,10 @@
 #   (B-N2) rollback 前の quarantine = gate非経由の並行追記を復元不能に消さない
 #   (B-N3) 耐久mirror = journal が失われても番号を再払い出ししない
 #   正常系回帰 = reserve/claim が従来どおり成立し validate PASS
-#   (cmd_1466) 木の外の高水位 = 台帳ごと巻き戻された時に番号の二度払い出しを止める
+#   (cmd_1466) repo の外に置く高水位 = 台帳ごと巻き戻された時に番号の二度払い出しを止める
 #
-# ★全て tmp fixture harness = 実台帳/実journal/実archive/実高水位には一切触れない★
-# 高水位も ALLOC_HIGHWATER で tmp へ差し替える (既定は $HOME/.local/share/... = 木の外)。
+# 全部 tmp の使い捨て fixture で走る = 本物の台帳/journal/archive/高水位には一切触れない
+# 高水位も ALLOC_HIGHWATER で tmp へ差し替える (既定は $HOME/.local/share/... = repo の外)。
 
 load "../test_helper/bats-support/load"
 load "../test_helper/bats-assert/load"
@@ -28,8 +28,8 @@ setup() {
     export LEDGER_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
     [ -x "$LEDGER_PYTHON" ] || export LEDGER_PYTHON="python3"
 
-    # cmd_1466: 高水位も砂場へ。本物 ($HOME/.local/share/multi-agent-shogun/) には触れない。
-    # 「木の外」を模すため repo の外 (BATS_TMPDIR 配下) へ置く。
+    # cmd_1466: 高水位も使い捨ての場所へ。本物 ($HOME/.local/share/multi-agent-shogun/) には触れない。
+    # 「repo の外」という条件を模すため BATS_TMPDIR 配下へ置く。
     export ALLOC_HIGHWATER="$TEST_TMPDIR/outside/cmd_id_highwater"
     mkdir -p "$TEST_TMPDIR/outside"
 
@@ -121,25 +121,25 @@ EOF
 
     # 台帳は snapshot へ復元されている (rollback 自体は従来どおり)
     assert_equal "$(cat "$LEDGER_FILE")" "$before"
-    # ★quarantine に消えたはずの並行追記 (cmd_7777) が保全されている★
+    # 消えたはずの並行追記 (cmd_7777) が quarantine に残っている
     run bash -c "grep -lE '^- id: cmd_7777' '$ARCHIVE_DIR'/corrupt_shogun_to_karo_*.yaml"
     assert_success
 }
 
 # ───────────────────────────────────────────────────────────
-# (cmd_1466) 木の外の高水位 — 台帳ごと巻き戻された時に止める
+# (cmd_1466) repo の外の高水位 — 台帳ごと巻き戻された時に止める
 #
 # 陽性/陰性を対で撃つ (CLAUDE.md「数の検め方」条4)。
 #   陰性側 = 正常な盤面では止まらないこと
 #   陽性側 = 古い控えから戻した盤面で現に止まること
 # ───────────────────────────────────────────────────────────
 
-# 木の内の4点 (台帳・archive・journal・mirror) を git clean -xd 後の姿にし、
-# 台帳だけを古い控えから戻す = cmd_1466 で実測した「危い形」の再現。
+# repo の中の4点 (台帳・archive・journal・mirror) を git clean -xd 後の状態にし、
+# 台帳だけを古い控えから戻す = cmd_1466 で実測した危ない形の再現。
 rewind_tree() {
     rm -f "$ALLOC_JOURNAL"
     rm -rf "$ARCHIVE_DIR"
-    mkdir -p "$ARCHIVE_DIR"   # ★人が ERROR を見て mkdir -p を撃つ手を含めて再現する★
+    mkdir -p "$ARCHIVE_DIR"   # 人が ERROR を見て mkdir -p を実行する手順まで含めて再現する
     printf 'commands:\n- id: cmd_100\n  status: done\n  evidence: |\n    古い控え\n' > "$LEDGER_FILE"
 }
 
@@ -168,7 +168,7 @@ rewind_tree() {
 
     rewind_tree
 
-    # ★ここが本題★ 高水位が無ければ cmd_101 を平然と再払い出しする盤面である
+    # ここが本題。高水位が無ければ cmd_101 を平然ともう一度 払い出す状態である
     run alloc --claim --origin karo
     assert_failure
     assert_output --partial "巻き戻"
@@ -188,7 +188,7 @@ rewind_tree() {
         "ALLOC_HIGHWATER='$TEST_TMPDIR/outside/bootstrap' bash '$PROJECT_ROOT/scripts/cmd_id_alloc.sh' --init-highwater 1 >/dev/null 2>&1
          ALLOC_HIGHWATER='$TEST_TMPDIR/outside/bootstrap' bash '$PROJECT_ROOT/scripts/cmd_id_alloc.sh' --claim --origin karo"
     assert_success
-    assert_output --partial "cmd_101"   # ★二度目の cmd_101 = 守りが無い時の姿★
+    assert_output --partial "cmd_101"   # 二度目の cmd_101 = 検査が無い時に起きること
 }
 
 @test "(cmd_1466) peek も巻き戻った盤面で「次の空き番号」を答えない" {
@@ -246,7 +246,7 @@ rewind_tree() {
     run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
     assert_output "600"
 
-    # ★下げるのは通らない★
+    # 下げる方向は通らない
     run alloc --init-highwater 400
     assert_failure
     assert_output --partial "下げ"
@@ -264,19 +264,19 @@ rewind_tree() {
     assert_output "1467"
 }
 
-@test "(cmd_1466) 既定の置き場は repo の木の外に解決される" {
-    # ★上の試験は全て ALLOC_HIGHWATER を砂場へ差し替えている = 既定の path を一度も通らない★
+@test "(cmd_1466) 既定の置き場は repo の外に解決される" {
+    # 上の試験は全て ALLOC_HIGHWATER を使い捨ての場所へ差し替えている = 既定の path を一度も通らない
     # (足軽六号が cmd_1450 で踏んだ形 = 入力を差し替える試験は、入力を読む口を試験しない)。
-    # 既定が木の内へ解決されれば守りは丸ごと無意味になるので、既定の解決だけを別に撃つ。
+    # 既定が repo の中へ解決されると検査が丸ごと無意味になるので、既定の解決だけを別に確かめる。
     local fake_home="$TEST_TMPDIR/home"
     mkdir -p "$fake_home"
     run env -u ALLOC_HIGHWATER -u XDG_DATA_HOME HOME="$fake_home" \
         bash "$PROJECT_ROOT/scripts/cmd_id_alloc.sh" --init-highwater 1
     assert_success
     [ -f "$fake_home/.local/share/multi-agent-shogun/cmd_id_highwater" ]
-    # 本物の $HOME も repo の木の下ではないこと (既定が木の内なら git clean -xd で消える)
+    # 本物の $HOME も repo の下ではないこと (既定が repo の中なら git clean -xd で消える)
     case "$HOME/" in
-        "$PROJECT_ROOT"/*) fail "\$HOME が repo の木の下に在る = 既定の置き場が射程の内になる" ;;
+        "$PROJECT_ROOT"/*) fail "\$HOME が repo の下にある = 既定の置き場が git clean -xd で消える範囲に入る" ;;
     esac
 }
 

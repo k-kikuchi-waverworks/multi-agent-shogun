@@ -5,8 +5,10 @@
 #   (B-N2) rollback 前の quarantine = gate非経由の並行追記を復元不能に消さない
 #   (B-N3) 耐久mirror = journal が失われても番号を再払い出ししない
 #   正常系回帰 = reserve/claim が従来どおり成立し validate PASS
+#   (cmd_1466) 木の外の高水位 = 台帳ごと巻き戻された時に番号の二度払い出しを止める
 #
-# ★全て tmp fixture harness = 実台帳/実journal/実archiveには一切触れない★
+# ★全て tmp fixture harness = 実台帳/実journal/実archive/実高水位には一切触れない★
+# 高水位も ALLOC_HIGHWATER で tmp へ差し替える (既定は $HOME/.local/share/... = 木の外)。
 
 load "../test_helper/bats-support/load"
 load "../test_helper/bats-assert/load"
@@ -26,7 +28,14 @@ setup() {
     export LEDGER_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
     [ -x "$LEDGER_PYTHON" ] || export LEDGER_PYTHON="python3"
 
+    # cmd_1466: 高水位も砂場へ。本物 ($HOME/.local/share/multi-agent-shogun/) には触れない。
+    # 「木の外」を模すため repo の外 (BATS_TMPDIR 配下) へ置く。
+    export ALLOC_HIGHWATER="$TEST_TMPDIR/outside/cmd_id_highwater"
+    mkdir -p "$TEST_TMPDIR/outside"
+
     printf 'commands:\n- id: cmd_100\n  status: done\n  evidence: |\n    fixture\n' > "$LEDGER_FILE"
+    # fixture の最大は cmd_100 ゆえ、高水位も 100 から始める (正常な盤面)
+    bash "$PROJECT_ROOT/scripts/cmd_id_alloc.sh" --init-highwater 100 >/dev/null 2>&1
 }
 
 teardown() {
@@ -115,4 +124,166 @@ EOF
     # ★quarantine に消えたはずの並行追記 (cmd_7777) が保全されている★
     run bash -c "grep -lE '^- id: cmd_7777' '$ARCHIVE_DIR'/corrupt_shogun_to_karo_*.yaml"
     assert_success
+}
+
+# ───────────────────────────────────────────────────────────
+# (cmd_1466) 木の外の高水位 — 台帳ごと巻き戻された時に止める
+#
+# 陽性/陰性を対で撃つ (CLAUDE.md「数の検め方」条4)。
+#   陰性側 = 正常な盤面では止まらないこと
+#   陽性側 = 古い控えから戻した盤面で現に止まること
+# ───────────────────────────────────────────────────────────
+
+# 木の内の4点 (台帳・archive・journal・mirror) を git clean -xd 後の姿にし、
+# 台帳だけを古い控えから戻す = cmd_1466 で実測した「危い形」の再現。
+rewind_tree() {
+    rm -f "$ALLOC_JOURNAL"
+    rm -rf "$ARCHIVE_DIR"
+    mkdir -p "$ARCHIVE_DIR"   # ★人が ERROR を見て mkdir -p を撃つ手を含めて再現する★
+    printf 'commands:\n- id: cmd_100\n  status: done\n  evidence: |\n    古い控え\n' > "$LEDGER_FILE"
+}
+
+@test "(cmd_1466 陰性側) 正常な盤面では止まらず、高水位が払い出しに追随する" {
+    run alloc --claim --origin karo
+    assert_success
+    assert_output --partial "cmd_101"
+    # 高水位が 100 → 101 へ上がっている
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "101"
+
+    run alloc --claim --origin karo
+    assert_success
+    assert_output --partial "cmd_102"
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "102"
+}
+
+@test "(cmd_1466 陽性側) 台帳を古い控えから戻すと巻き戻りを検知して止まる" {
+    # まず正常に払い出して高水位を進める (cmd_101〜103 が焼却される)
+    alloc --claim --origin karo >/dev/null
+    alloc --claim --origin karo >/dev/null
+    run alloc --claim --origin karo
+    assert_success
+    assert_output --partial "cmd_103"
+
+    rewind_tree
+
+    # ★ここが本題★ 高水位が無ければ cmd_101 を平然と再払い出しする盤面である
+    run alloc --claim --origin karo
+    assert_failure
+    assert_output --partial "巻き戻"
+    assert_output --partial "cmd_101"
+    # 焼却済みの番号は出ていない
+    refute_output --partial "claimed:"
+    # 高水位は下がっていない
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "103"
+}
+
+@test "(cmd_1466 陽性側) 高水位が無ければ再払い出しは現に起きる (この試験が守っている物の実証)" {
+    alloc --claim --origin karo >/dev/null   # cmd_101
+    rewind_tree
+    # 高水位を外した時だけ、同じ番号がもう一度 出ることを示す
+    ALLOC_HIGHWATER="$TEST_TMPDIR/outside/none" run bash -c \
+        "ALLOC_HIGHWATER='$TEST_TMPDIR/outside/bootstrap' bash '$PROJECT_ROOT/scripts/cmd_id_alloc.sh' --init-highwater 1 >/dev/null 2>&1
+         ALLOC_HIGHWATER='$TEST_TMPDIR/outside/bootstrap' bash '$PROJECT_ROOT/scripts/cmd_id_alloc.sh' --claim --origin karo"
+    assert_success
+    assert_output --partial "cmd_101"   # ★二度目の cmd_101 = 守りが無い時の姿★
+}
+
+@test "(cmd_1466) peek も巻き戻った盤面で「次の空き番号」を答えない" {
+    alloc --claim --origin karo >/dev/null   # cmd_101
+    rewind_tree
+    run alloc --peek
+    assert_failure
+    assert_output --partial "巻き戻"
+}
+
+@test "(cmd_1466) 高水位 file が無ければ止まる (fail-closed)" {
+    rm -f "$ALLOC_HIGHWATER"
+    run alloc --claim --origin karo
+    assert_failure
+    assert_output --partial "高水位 file が無い"
+    assert_output --partial "--init-highwater"
+    # 番号は出ていない
+    refute_output --partial "claimed:"
+}
+
+@test "(cmd_1466) 空 file / 数でない中身を0扱いしない (archive dir と同じ穴を作らない)" {
+    : > "$ALLOC_HIGHWATER"
+    run alloc --claim --origin karo
+    assert_failure
+    assert_output --partial "読めぬ"
+
+    printf 'not_a_number\n' > "$ALLOC_HIGHWATER"
+    run alloc --claim --origin karo
+    assert_failure
+    assert_output --partial "読めぬ"
+}
+
+@test "(cmd_1466) 高水位を書けねば番号を払い出さない (fail-closed)" {
+    chmod 500 "$TEST_TMPDIR/outside"
+    run alloc --claim --origin karo
+    chmod 700 "$TEST_TMPDIR/outside"
+    assert_failure
+    assert_output --partial "高水位を書けぬ"
+}
+
+@test "(cmd_1466) --init-highwater は値を明示させ、下げる方向へは動かない" {
+    # 値の明示が要る (導出しない)
+    run alloc --init-highwater
+    assert_failure
+    assert_output --partial "整数で明示"
+
+    run alloc --init-highwater 500
+    assert_success
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "500"
+
+    # 上げるのは通る
+    run alloc --init-highwater 600
+    assert_success
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "600"
+
+    # ★下げるのは通らない★
+    run alloc --init-highwater 400
+    assert_failure
+    assert_output --partial "下げ"
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "600"
+}
+
+@test "(cmd_1466) --init-highwater は台帳/archive が消えていても撃てる" {
+    # 据え直しが要るのは、まさに台帳も archive も消えた後だからである
+    rm -f "$LEDGER_FILE" "$ALLOC_HIGHWATER"
+    rm -rf "$ARCHIVE_DIR"
+    run alloc --init-highwater 1467
+    assert_success
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "1467"
+}
+
+@test "(cmd_1466) 既定の置き場は repo の木の外に解決される" {
+    # ★上の試験は全て ALLOC_HIGHWATER を砂場へ差し替えている = 既定の path を一度も通らない★
+    # (足軽六号が cmd_1450 で踏んだ形 = 入力を差し替える試験は、入力を読む口を試験しない)。
+    # 既定が木の内へ解決されれば守りは丸ごと無意味になるので、既定の解決だけを別に撃つ。
+    local fake_home="$TEST_TMPDIR/home"
+    mkdir -p "$fake_home"
+    run env -u ALLOC_HIGHWATER -u XDG_DATA_HOME HOME="$fake_home" \
+        bash "$PROJECT_ROOT/scripts/cmd_id_alloc.sh" --init-highwater 1
+    assert_success
+    [ -f "$fake_home/.local/share/multi-agent-shogun/cmd_id_highwater" ]
+    # 本物の $HOME も repo の木の下ではないこと (既定が木の内なら git clean -xd で消える)
+    case "$HOME/" in
+        "$PROJECT_ROOT"/*) fail "\$HOME が repo の木の下に在る = 既定の置き場が射程の内になる" ;;
+    esac
+}
+
+@test "(cmd_1466) reserve も高水位を上げる (claim だけの守りにしない)" {
+    run alloc --title "高水位試験" --origin karo --project test --priority low --evidence "cmd_1466"
+    assert_success
+    assert_output --partial "cmd_101"
+    run bash -c "cut -f1 '$ALLOC_HIGHWATER'"
+    assert_output "101"
 }

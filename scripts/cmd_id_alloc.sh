@@ -21,6 +21,8 @@
 #       (番号が gate を通っておれば ledger_guard の手動起票検知は鳴らない)。
 #   参照 (予約なし。窓は開いたままゆえ正式採番には使うな):
 #     bash scripts/cmd_id_alloc.sh --peek
+#   高水位の初期化 (cmd_1466。値は人が明示する。導出はしない — 下の「なぜ導出しないか」):
+#     bash scripts/cmd_id_alloc.sh --init-highwater <N>
 #
 # 払い出し記録 = journal + archive mirror (cmd_1336 / cmd_1341):
 #   - reserve / claim の払い出しは queue/.cmd_id_alloc.journal へ1行追記される
@@ -36,6 +38,35 @@
 #     ★journal が失われても mirror が番号の再払い出しを防ぐ★ (journal 削除→同番号
 #     再払い出しの実証済み穴の封鎖)。journal は「速度 + 検知層突合の cache」であり
 #     耐久の正本は mirror (archive = 剪定規律により削除されない領域)。
+#
+# 高水位 = 木の外に置く1行 (cmd_1466):
+#   ★上の4点 (台帳・archive・journal・mirror) は【全部 repo の木の内】に在る★。
+#   `git clean -xd` は queue/ を丸ごと持って行くので、4点が同時に消える。その後に
+#   古い控えから台帳だけ戻すと、払い出しは【止まらない】。rc=0 で整った entry が並び、
+#   ★既に焼却された番号を警告なしに再び払い出す★ (cmd_1466 で実測 = 台帳を cmd_1099 の
+#   控えへ戻したら cmd_1100 を返した。実機なら cmd_1107 以降 約360番が二度 払い出される)。
+#   害の向きがデータの喪失と違う = ★データは file が無いので気付けるが、番号の再利用は
+#   気付けない★。
+#
+#   ゆえに「これまでに払い出した最大の番号」だけを、repo の木の外の1行の file に持つ:
+#     ${XDG_DATA_HOME:-$HOME/.local/share}/multi-agent-shogun/cmd_id_highwater
+#   置き場を此処にした理由 = ★queue/inbox が既に同じ場所へ symlink で逃がしてあり、
+#   git clean -xd を現に生き延びる (cmd_1466 で砂場に本物を撃って実測)★。同じ流儀に揃えた。
+#
+#   払い出しの直前に「これから出す番号 > 高水位」を検める。満たさねば止める
+#   = 台帳が巻き戻った証。払い出しが済んだら高水位を其の番号へ上げる (fail-closed:
+#   高水位を上げられねば番号を出さない)。
+#
+#   ★file が無い時は止める★ (通さない)。理由 = 「無ければ通す」は今の穴を其のまま残す
+#   (git clean は高水位ごと消しはせぬが、環境が変われば file は無くなりうる。無い時に
+#   通す作りだと、いちばん危うい局面で黙って素通りする)。初回の1度だけ
+#   `--init-highwater <N>` を人が撃つ費えと引き換えに、巻き戻りを常に捕える。
+#
+#   ★なぜ --init-highwater は値を導出しないか (cmd_1466 の item 3)★:
+#   既存の `[ -d "$ARCHIVE_DIR" ]` の穴と同じ形を作らないため。あの検査は dir の存在だけを
+#   見るので、`mkdir -p` を撃たれると通ってしまう。同じく、高水位を木の内から自動で導出すると
+#   ★巻き戻った木から巻き戻った値を作り、検知が己で己を無効化する★。
+#   ゆえに N は人が明示する。既存の値を下げる方向へは動かさない。
 #
 # 採番規則:
 #   - 正本 = queue/shogun_to_karo.yaml + queue/archive/ 配下 *.yaml (再帰走査)。
@@ -56,6 +87,7 @@
 #
 # env override (test harness が scratchpad 複製を注入する — ledger_guard.sh と同流儀):
 #   LEDGER_FILE / ARCHIVE_DIR / LEDGER_VALIDATOR / LEDGER_PYTHON
+#   ALLOC_JOURNAL / ALLOC_JOURNAL_MIRROR / ALLOC_HIGHWATER
 #   CMD_ID_ALLOC_RACE_DELAY: read→append の窓を人工的に広げる秒数 (試験専用。本番0)
 # ═══════════════════════════════════════════════════════════════
 
@@ -73,6 +105,8 @@ PYTHON="${LEDGER_PYTHON:-$SCRIPT_DIR/.venv/bin/python3}"
 ALLOC_JOURNAL="${ALLOC_JOURNAL:-$SCRIPT_DIR/queue/.cmd_id_alloc.journal}"
 # cmd_1341 (B-N3): 耐久mirror。archive 配下 = union走査対象ゆえ journal 喪失でも番号不再利用
 ALLOC_MIRROR="${ALLOC_JOURNAL_MIRROR:-$ARCHIVE_DIR/alloc_journal_mirror.yaml}"
+# cmd_1466: 高水位 = 木の外の1行。★ここだけが git clean -xd の射程の外に在る★
+ALLOC_HIGHWATER="${ALLOC_HIGHWATER:-${XDG_DATA_HOME:-$HOME/.local/share}/multi-agent-shogun/cmd_id_highwater}"
 
 LOCKFILE="${LEDGER_FILE}.lock"
 LOCK_DIR="${LOCKFILE}.d"
@@ -180,13 +214,82 @@ journal_record() {
         || die "alloc mirror 追記失敗 ($ALLOC_MIRROR)。記録できぬ番号は払い出さない (fail-closed)"
 }
 
+# ─── cmd_1466: 高水位の読み書き (木の外の1行) ───
+# 返り値で三態を分ける。★「無い」と「読めぬ」を同じ顔にしない★ (どちらも0扱いにすると
+# 空 file を置くだけで検知を外せる = archive dir の穴と同じ形になる)。
+#   rc=0 → stdout に整数 / rc=1 → file が無い / rc=2 → 在るが整数を読み取れぬ
+read_highwater() {
+    [ -f "$ALLOC_HIGHWATER" ] || return 1
+    local first val
+    first="$(head -1 "$ALLOC_HIGHWATER" 2>/dev/null || true)"
+    val="${first%%[$' \t']*}"
+    case "$val" in
+        ''|*[!0-9]*) return 2 ;;
+    esac
+    # 先頭0を落とす (008 → 8)。空にはしない
+    val="$(printf '%s' "$val" | sed -e 's/^0*\([0-9]\)/\1/')"
+    printf '%s' "$val"
+    return 0
+}
+
+# 高水位を書く (atomic: tmp へ書いて mv)。★1行のみ★。file 自身に「下げるな」を書き添える
+# = 中身を開いた者が、値だけを見て手で書き替えるのを思い止まる手掛かりになる。
+write_highwater() {
+    local num="$1" note="$2" dir tmp
+    dir="$(dirname "$ALLOC_HIGHWATER")"
+    mkdir -p "$dir" 2>/dev/null || return 1
+    tmp="$(mktemp "${dir}/.cmd_id_highwater.XXXXXX" 2>/dev/null)" || return 1
+    printf '%s\t%s\torigin=%s\t%s\t# cmd番号の高水位 (cmd_1466)。★手で下げるな — 下げると番号の二度払い出しが黙って通る★\n' \
+        "$num" "$TIMESTAMP" "${ORIGIN:-unknown}" "$note" > "$tmp" 2>/dev/null || {
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    }
+    mv -f "$tmp" "$ALLOC_HIGHWATER" 2>/dev/null || {
+        rm -f "$tmp" 2>/dev/null || true
+        return 1
+    }
+    return 0
+}
+
+# 巻き戻り検知。★払い出しの直前に撃つ★
+assert_not_rewound() {
+    local candidate="$1" hw rc
+    hw="$(read_highwater)" && rc=0 || rc=$?
+    case "$rc" in
+        1)
+            die "高水位 file が無い ($ALLOC_HIGHWATER)。fail-closed で採番しない。
+  これは「初回」か「木の外の控えごと失った」かのどちらかである。★通さぬのは後者を捕えるため★。
+  据える手 = bash scripts/cmd_id_alloc.sh --init-highwater <これまでに払い出した最大の番号>
+  ★N は台帳/archive/journal から自動で導出しない★ (巻き戻った木から巻き戻った値が出るため)。
+  N は台帳・archive・journal・mirror の他に、queue/inbox・plans/・dashboard・git log など
+  ★木の外や履歴に残る証も併せて当たり、いちばん大きい番号を人が判じて渡せ★。"
+            ;;
+        2)
+            die "高水位 file を読めぬ ($ALLOC_HIGHWATER)。先頭行の第1欄が整数でない。
+  ★空 file や壊れた中身を0として扱わない★ (0扱いにすれば空 file を置くだけで検知を外せる)。
+  中身を検め、正しい値で --init-highwater を撃ち直せ。"
+            ;;
+    esac
+    if [ "$candidate" -le "$hw" ]; then
+        die "★台帳が巻き戻っている疑い★ — 払い出そうとした番号 cmd_${candidate} が高水位 cmd_${hw} 以下である。
+  木の内 (台帳・archive・journal・mirror) は全て queue/ の下に在り、git clean -xd 一手で同時に消える。
+  古い控えから戻すと、払い出しは止まらず ★焼却済みの番号を黙って再び払い出す★ (cmd_1466 実測)。
+  高水位 = $ALLOC_HIGHWATER (木の外ゆえ其の一手では消えぬ)。
+  やること = ①台帳/archive/journal/mirror が巻き戻っていないかを先に検めよ
+            ②本当に復旧が正しく、高水位の方が古いと判じたなら --init-highwater で上げよ
+  ★高水位を下げて通すな。番号が二度 払い出される。★"
+    fi
+    HIGHWATER_NOW="$hw"
+}
+
 # ─── block scalar 整形: 全行に4space indent (空行は素通し) ───
 indent4() {
     awk '{ if ($0 == "") print ""; else print "    " $0 }'
 }
 
 usage() {
-    sed -n '3,20p' "${BASH_SOURCE[0]}" >&2
+    # 綴りで指す (行番号で焼かない — 次に誰かが註を足した瞬間に別の行を指すため)
+    awk '/^# Usage:/{f=1} f && /^# 払い出し記録/{exit} f{print}' "${BASH_SOURCE[0]}" >&2
     exit 2
 }
 
@@ -200,11 +303,19 @@ STATUS="pending"
 EVIDENCE=""
 EVIDENCE_FILE=""
 TIMESTAMP=""
+INIT_HIGHWATER=""
+HIGHWATER_NOW=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --peek) MODE="peek"; shift ;;
         --claim) MODE="claim"; shift ;;
+        # 値が無い時に `shift 2` を撃つと set -e で【何も刷らずに】落ちる (既存の旗と同じ形)。
+        # 此の旗は人が手で撃つ復旧の口ゆえ、必ず理由を刷ってから止まるようにする。
+        --init-highwater)
+            MODE="init_highwater"; INIT_HIGHWATER="${2:-}"; shift
+            [ $# -gt 0 ] && shift || true
+            ;;
         --title) TITLE="${2:-}"; shift 2 ;;
         --origin) ORIGIN="${2:-}"; shift 2 ;;
         --project) PROJECT="${2:-}"; shift 2 ;;
@@ -217,6 +328,41 @@ while [ $# -gt 0 ]; do
         *) die "unknown argument: $1 (--help for usage)" ;;
     esac
 done
+
+# ─── cmd_1466: 高水位の初期化。★台帳/archive の検査より前に置く★ ───
+# 理由 = 据え直しが要るのは、まさに台帳も archive も消えた後だからである。
+# 木の内の状態に依存させると、いちばん必要な局面で撃てない道具になる。
+if [ "$MODE" = "init_highwater" ]; then
+    case "$INIT_HIGHWATER" in
+        ''|*[!0-9]*) die "--init-highwater <N> の N は整数で明示せよ (got: '${INIT_HIGHWATER}')。
+  ★台帳や journal から自動で導出はしない★ = 巻き戻った木から巻き戻った値を作らぬため。" ;;
+    esac
+    INIT_HIGHWATER="$(printf '%s' "$INIT_HIGHWATER" | sed -e 's/^0*\([0-9]\)/\1/')"
+    [ "$INIT_HIGHWATER" -gt 0 ] || die "--init-highwater の N は1以上であること (got: $INIT_HIGHWATER)"
+    TIMESTAMP="${TIMESTAMP:-$(date '+%Y-%m-%dT%H:%M:%S')}"
+    ORIGIN="${ORIGIN:-manual}"
+
+    cur="$(read_highwater)" && cur_rc=0 || cur_rc=$?
+    if [ "$cur_rc" = "0" ]; then
+        if [ "$INIT_HIGHWATER" -lt "$cur" ]; then
+            die "高水位を下げようとしている (今 $cur → 指した値 $INIT_HIGHWATER)。★下げない★。
+  下げれば cmd_$((INIT_HIGHWATER + 1)) から cmd_${cur} までが二度 払い出される。
+  本当に下げるべきと判じたなら、其の理由を書き残した上で $ALLOC_HIGHWATER を手で書き替えよ
+  (道具は下げる口を持たない = 事故で下がらぬため)。"
+        fi
+        log "高水位を上げる: $cur → $INIT_HIGHWATER"
+    elif [ "$cur_rc" = "1" ]; then
+        log "高水位 file が無いので新しく据える: $INIT_HIGHWATER ($ALLOC_HIGHWATER)"
+    else
+        log "WARN: 今の高水位 file を読めぬ (第1欄が整数でない)。指した値で上書きする: $INIT_HIGHWATER"
+    fi
+
+    write_highwater "$INIT_HIGHWATER" "mode=init" \
+        || die "高水位を書けぬ ($ALLOC_HIGHWATER)。置き場の権限と親 dir を検めよ"
+    log "高水位を据えた: cmd_${INIT_HIGHWATER} → $ALLOC_HIGHWATER"
+    echo "$INIT_HIGHWATER"
+    exit 0
+fi
 
 [ -f "$LEDGER_FILE" ] || die "ledger not found: $LEDGER_FILE"
 [ -d "$ARCHIVE_DIR" ] || die "archive dir not found: $ARCHIVE_DIR (union(active+archives)=全史 invariant を守れないため fail-closed)"
@@ -291,6 +437,10 @@ NEXT_NUM="$(compute_next_id)" || {
     die "id scan returned empty — ledger path 誤り疑い ($LEDGER_FILE)。fail-closed で採番しない"
 }
 assert_id_unused "$NEXT_NUM" || die "invariant breach: cmd_${NEXT_NUM} は既に台帳/archiveに存在する (scan bug 疑い。採番中止)"
+# cmd_1466: 木の外の高水位と突き合わせる。★上の2つは全て木の内を見ており、木ごと巻き戻れば
+# 揃って黙る★。此の1本だけが木の外を見る。peek も通す = 巻き戻った盤面で「次の空き番号」を
+# 平然と答えさせないため。
+assert_not_rewound "$NEXT_NUM"
 
 # 試験専用: read→append の窓を人工的に広げる (lock が本当に閉じているかの実証用)
 if [ "$RACE_DELAY" != "0" ]; then
@@ -308,6 +458,12 @@ fi
 # cmd_1336: 払い出しは journal 記録が先 (台帳に現れる id は必ず journal 済の順序保証。
 # peek は上で exit 済 = 記録しない)
 journal_record "$NEW_ID" "$MODE"
+
+# cmd_1466: 木の外の高水位を上げる。★上げられねば番号を出さない (fail-closed)★
+# = journal/mirror と同じ流儀。番号は焼却済みとして残るので、安全側に倒れる。
+write_highwater "$NEXT_NUM" "mode=$MODE" \
+    || die "高水位を書けぬ ($ALLOC_HIGHWATER)。記録できぬ番号は払い出さない (fail-closed)。
+  ★木の外の置き場が消えている/書けぬ状態である。此処が死ぬと巻き戻り検知が止まる★"
 
 if [ "$MODE" = "claim" ]; then
     _release_lock

@@ -1331,7 +1331,9 @@ def selftest() -> int:
         ok = ok and passed
         say(f"  {'ok ' if passed else 'NG '} {name}{detail}")
 
-    # ★盤面の側の負例★= 現に在る report 9 本が緑であること (門が狼少年でない証)
+    # ★盤面の側の負例★= 現に在る report が悉く緑であること (門が狼少年でない証)。
+    #   ★本数を焼かぬ★ = agent が増減すれば動く数ゆえ (CLAUDE.md 条F の族)。
+    #   走らせれば下の N3 の行が、其の刻に何本 見たかを己で刷る。
     reports_dir = _SCRIPTS_DIR.parent / "queue" / "reports"
     live = sorted(reports_dir.glob("*.yaml")) if reports_dir.is_dir() else []
     r5_hit = []

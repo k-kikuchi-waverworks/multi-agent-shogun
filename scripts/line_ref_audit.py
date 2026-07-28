@@ -266,33 +266,44 @@ def canary(include_self: bool) -> int:
     print(f"[canary] 走査した file = {len(files)} 本 (採取 {stamp()})")
     print(f"[canary] 拾った指し先 = {len(refs)} 件")
 
-    # ★母数の中身を1行でも読めたかを数える★ (家老 12:22 の流し・軍師一号と軍師二号の実測)
-    #   「0件」は「該当なし」と「そもそも見ていない」の二義を持つ。
-    #   grep を避けても同じ 0 が返る道が在った = 制御文字で binary 扱いされる形と、
-    #   file 全体が UTF-16 で書かれており utf-8 として読むと中身が当たらぬ形。
-    #   ゆえに「読めたか」を、判定と同じ読み方で数える。
-    unread = []
-    garbled = []
+    # ★並べ方 (encoding) を先に判じ、内訳そのものを刷る★
+    #   出所 = 家老 12:31 の流し (最終形)。軍師一号と軍師二号の実測。
+    #   ★行数は捕えない★ = UTF-16 でも改行の \n の 1 バイトは残るので splitlines() は
+    #   行を刻み、「読めた」の顔で返る (軍師二号の実測 = 162 行 読めて中身は 0 件)。
+    #   ゆえに見るのは「行が読めたか」ではなく「並べ方を現に見たか」である。
+    #
+    #   ★内訳を必ず刷る理由★= 判じる口が死ぬと、名指す物が無くなって黙って緑になる。
+    #   内訳が出ていれば「utf-8 以外が 0 本」を人が見て気づける (条G = 覆えぬ所を名乗る)。
+    kinds: dict[str, int] = {}
+    odd = []
     for p in files:
         raw = p.read_bytes()
-        text = raw.decode("utf-8", errors="replace")
-        if len(text.splitlines()) == 0:
-            unread.append(p)
-        # UTF-16 の徴 = BOM か、ヌルバイトが多い
-        if raw[:2] in (b"\xff\xfe", b"\xfe\xff") or raw.count(b"\x00") > len(raw) // 4:
-            garbled.append(p)
-    if unread:
-        print(f"[canary] ★1行も読めなかった file = {len(unread)} 本★ = 此れらは「該当なし」ではない")
-        for p in unread:
-            print(f"           {p.relative_to(REPO)}")
+        if raw[:3] == b"\xef\xbb\xbf":
+            enc = "utf-8-sig"
+        elif raw[:4] in (b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff"):
+            enc = "utf-32"
+        elif raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            enc = "utf-16"
+        elif raw.count(b"\x00") > len(raw) // 10:
+            enc = "utf-16?(BOM 無し・NUL 多)"
+        else:
+            enc = "utf-8"
+        kinds[enc] = kinds.get(enc, 0) + 1
+        if enc != "utf-8":
+            odd.append((p, enc))
+    print(f"[canary] 並べ方の内訳 = {kinds}")
+    if odd:
+        print(f"[canary] ★utf-8 でない file = {len(odd)} 本★ = utf-8 で読むと中身が当たらぬ")
+        for p, e in odd:
+            print(f"           {p.relative_to(REPO)}  ({e})")
         rc = 1
-    else:
-        print(f"[canary] 母数 {len(files)} 本 とも 1 行以上 読めた (「見ていない」側ではない)")
-    if garbled:
-        print(f"[canary] ★UTF-16 と見える file = {len(garbled)} 本★ = utf-8 で読むと中身が当たらぬ")
-        for p in garbled:
-            print(f"           {p.relative_to(REPO)}")
+    if kinds.get("utf-8", 0) == 0:
+        print("[canary] ★utf-8 が 0 本★ = 並べ方を判じる口が死んでおる公算")
         rc = 1
+    # ★此の canary が覆っておらぬ所 (条G)★:
+    #   BOM が無く、且つ中身が日本語ばかりの UTF-16 は NUL が少ないゆえ見落としうる。
+    #   母数が ASCII 主体の .py/.sh ゆえ今は効くが、他所へ持ち出す時は此処を測り直せ。
+    print("[canary] ★覆えぬ所★= BOM が無く中身が日本語ばかりの UTF-16 は NUL が少なく見落としうる")
 
     # 陽性: 正規表現が現に「名前:数字」を掴むか
     probe = "# 見よ scripts/foo_bar.py:123 のところ"

@@ -261,9 +261,38 @@ def canary(include_self: bool) -> int:
     陰性 = 在りもせぬ綴りを同じ道で数えて、現に 0 であること。
     """
     rc = 0
+    files = scan_files(include_self)
     refs = collect_refs(include_self)
-    print(f"[canary] 走査した file = {len(scan_files(include_self))} 本 (採取 {stamp()})")
+    print(f"[canary] 走査した file = {len(files)} 本 (採取 {stamp()})")
     print(f"[canary] 拾った指し先 = {len(refs)} 件")
+
+    # ★母数の中身を1行でも読めたかを数える★ (家老 12:22 の流し・軍師一号と軍師二号の実測)
+    #   「0件」は「該当なし」と「そもそも見ていない」の二義を持つ。
+    #   grep を避けても同じ 0 が返る道が在った = 制御文字で binary 扱いされる形と、
+    #   file 全体が UTF-16 で書かれており utf-8 として読むと中身が当たらぬ形。
+    #   ゆえに「読めたか」を、判定と同じ読み方で数える。
+    unread = []
+    garbled = []
+    for p in files:
+        raw = p.read_bytes()
+        text = raw.decode("utf-8", errors="replace")
+        if len(text.splitlines()) == 0:
+            unread.append(p)
+        # UTF-16 の徴 = BOM か、ヌルバイトが多い
+        if raw[:2] in (b"\xff\xfe", b"\xfe\xff") or raw.count(b"\x00") > len(raw) // 4:
+            garbled.append(p)
+    if unread:
+        print(f"[canary] ★1行も読めなかった file = {len(unread)} 本★ = 此れらは「該当なし」ではない")
+        for p in unread:
+            print(f"           {p.relative_to(REPO)}")
+        rc = 1
+    else:
+        print(f"[canary] 母数 {len(files)} 本 とも 1 行以上 読めた (「見ていない」側ではない)")
+    if garbled:
+        print(f"[canary] ★UTF-16 と見える file = {len(garbled)} 本★ = utf-8 で読むと中身が当たらぬ")
+        for p in garbled:
+            print(f"           {p.relative_to(REPO)}")
+        rc = 1
 
     # 陽性: 正規表現が現に「名前:数字」を掴むか
     probe = "# 見よ scripts/foo_bar.py:123 のところ"

@@ -8,9 +8,10 @@ Removes completed/archived items from YAML queue files to maintain performance.
 """
 
 import os
+import re
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import yaml
@@ -101,6 +102,31 @@ INVENTORY_AGE_SECONDS = 30 * 86400
 #   今の大きさを知りたければ `ls -l queue/tasks/*.yaml` を撃て。
 # 2時間は、今朝の2件 (24.5分・39.5分) を覆えて、かつ見送りが多くなりすぎない線である。
 TASK_SLIM_COOLDOWN_SECONDS = 2 * 3600
+
+# ここから下 = 報告 (queue/reports/*.yaml) の古い節を移す仕組み (cmd_1467)。
+#
+# なぜ要るか。CANONICAL_REPORTS に名が載っている報告は、上の除外表で掃除が
+# 打ち切られる。表そのものは正しく、外すと「終端で file ごと消えて次の /clear 復帰で
+# 読む物が無い」という既知の事故を作り直す。
+# しかし外れた結果、育っている9本が9本とも一度も畳まれず、読む口の上限
+# (25,000 token) を越えた。越えると、開いた者は全文を読めない。
+#
+# そこで「file を攫うか」ではなく「節を攫うか」へ替える。file は残し、中の古い節だけを
+# queue/archive/reports/ へ移す。file が消えないので上の事故は起きない。
+#
+# ★本文を字のまま切り出す。yaml で読み書きし直さない★
+# 読み書きし直すと註と block scalar が書き換わる。実測 (2026-07-28 17:2x) =
+# ashigaru3_report.yaml で註 38 行が消え、block scalar 226 箇所が別の綴りになった。
+# 「古い節だけ移す」はずが、残す側の中身まで変わる。ゆえに行を切る形にし、
+# 切った後に「残った中身が元と同じか」を機械で検めてから書く。
+#
+# ★迷ったら移さない★ = 刻が読めない節・今 動いている cmd を名指す節・
+# 検めが合わない file は、そのまま残す。
+REPORT_SECTION_KEEP_DAYS = 1
+# 節の名や中身に焼かれた刻。20260728_0729 / 20260728 / 2026-07-28 の3綴りを見る。
+SECTION_DATE_RE = re.compile(r'(20\d{2})[-_]?(\d{2})[-_]?(\d{2})')
+# 節の中から刻を探す時に見る欄。1段だけ潜る。
+SECTION_DATE_KEYS = ('timestamp', 'updated_at', 'time', 'date', 'ts')
 
 
 def load_yaml(filepath):
@@ -482,6 +508,432 @@ def slim_tasks(dry_run=False):
     return True
 
 
+def get_report_section_keep_days():
+    """節を手元に残す日数を返す。試験と運用で差し替えられるよう環境変数も見る。"""
+    raw = os.environ.get('SHOGUN_REPORT_SECTION_KEEP_DAYS')
+    if raw is None or raw == '':
+        return REPORT_SECTION_KEEP_DAYS
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        print_inventory(
+            f"SHOGUN_REPORT_SECTION_KEEP_DAYS が数として読めない ('{raw}')。"
+            f"既定の {REPORT_SECTION_KEEP_DAYS} 日を使う"
+        )
+        return REPORT_SECTION_KEEP_DAYS
+
+
+def section_date_from_text(value):
+    """字の中から日付を1つ拾う。読めなければ None。"""
+    match = SECTION_DATE_RE.search(str(value))
+    if not match:
+        return None
+    try:
+        return date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def section_date(name, value):
+    """節の刻を返す。読めなければ None。
+
+    刻は2通りで引く。①節の名に焼かれた刻 ②節の中の timestamp 欄 (1段だけ潜る)。
+    どちらも読めなければ None を返し、呼ぶ側は ★移さない側へ倒す★。
+    """
+    found = section_date_from_text(name)
+    if found is not None:
+        return found
+    if isinstance(value, dict):
+        for key in SECTION_DATE_KEYS:
+            raw = value.get(key)
+            if isinstance(raw, datetime):
+                return raw.date()
+            if isinstance(raw, date):
+                return raw
+            if raw is not None:
+                found = section_date_from_text(raw)
+                if found is not None:
+                    return found
+    return None
+
+
+def _is_doc_separator(line):
+    # ★行末の CR まで落とす★ = この repo には CRLF の file が現に混じっており、
+    # '\n' だけを落とすと '---\r' が残って document の境目を見落とす。
+    # 見落とすと節の割り方が読み取りと合わなくなり、file ごと見送りになる
+    # (黙って切る形にはならないが、掃除が永久に当たらなくなる)。
+    stripped = line.rstrip('\r\n')
+    return stripped == '---' or stripped.startswith('--- ')
+
+
+def _split_documents(lines):
+    """行の列を document ごとに割る。返す物 = [(開始行, 終了行)]。終了行は含まない。
+
+    中身が註と空行しかない塊は落とす。yaml もそこを document と数えないため。
+    """
+    bounds = []
+    prev = 0
+    for i, line in enumerate(lines):
+        if _is_doc_separator(line):
+            bounds.append((prev, i))
+            prev = i + 1
+    bounds.append((prev, len(lines)))
+    return [(a, b) for (a, b) in bounds
+            if any(l.strip() and not l.lstrip().startswith('#') for l in lines[a:b])]
+
+
+def _section_ranges(lines, start, end, indent):
+    """[start, end) の中で、指定の字下げに並ぶ節の行範囲を返す。
+
+    返す物 = [(節の名, 開始行, 終了行)]。終了行は含まない。
+    節の直前に続く註の行は、その節に含める (節だけ移して註を置き去りにしないため)。
+    ただし ★最初の節には含めない★ = そこに在るのは file 全体の見出しであるため。
+
+    ここで拾った名は、呼ぶ側が yaml の読み取りと突き合わせる。合わなければ file ごと
+    見送る。ゆえにこの綴りの取りこぼしは、黙って中身を切る形にはならない。
+    """
+    heads = []
+    for i in range(start, end):
+        line = lines[i]
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        if len(line) - len(line.lstrip(' ')) != indent:
+            continue
+        match = re.match(r"([^:#]+):(\s|$)", line[indent:])
+        if not match:
+            continue
+        heads.append((i, match.group(1).strip().strip('\'"')))
+
+    ranges = []
+    for order, (line_no, name) in enumerate(heads):
+        begin = line_no
+        if order > 0:
+            while begin > start and lines[begin - 1].lstrip().startswith('#'):
+                begin -= 1
+        ranges.append([name, begin, end])
+    for order in range(len(ranges) - 1):
+        ranges[order][2] = ranges[order + 1][1]
+    return [tuple(r) for r in ranges]
+
+
+def _container_block(lines, start, end, key):
+    """字下げ 0 に並ぶ `key:` の塊が、何行目から何行目までかを返す。無ければ None。
+
+    これが要るのは、同じ document に入れ物が2つ並ぶ形が現に在るためである。
+    実例 = queue/reports/ashigaru5_report.yaml の doc0 は `report:` と
+    `previous_report:` を持つ。document 全体から字下げ 2 の行を拾うと、
+    両方の節が1つの入れ物の物として混ざる。
+    """
+    head = None
+    for i in range(start, end):
+        line = lines[i]
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        if line.startswith(' '):
+            continue
+        match = re.match(r"([^:#]+):(\s|$)", line)
+        if not match:
+            continue
+        if head is None:
+            if match.group(1).strip().strip('\'"') == key:
+                head = i
+        else:
+            return head + 1, i
+    return None if head is None else (head + 1, end)
+
+
+def _report_container(doc):
+    """document の中で、節が並んでいる所を返す。
+
+    返す物 = (節の入れ物, 字下げ)。読み取り道具 plans/cmd_1467_report_shape_scan.py と
+    同じ見分け方をそろえてある。片方だけ直すと数が合わなくなるため。
+    """
+    if not isinstance(doc, dict):
+        return None, 0
+    inner = doc.get('report')
+    if isinstance(inner, dict) and len(inner) > 3:
+        return inner, 2
+    return doc, 0
+
+
+def _container_of(doc, indent):
+    """字下げが分かっている時に入れ物を取り出す。
+
+    ★節を抜いた後の document へ _report_container を当ててはいけない★ =
+    あちらは「report: の下が3個より多いか」で見分けるので、節を抜いて数が減ると
+    見分けが裏返り、入れ物ごと別の物を指す。元の file で決めた字下げを持ち回す。
+    """
+    if not isinstance(doc, dict):
+        return None
+    return doc.get('report') if indent else doc
+
+
+def _archive_sections(docs):
+    """控えに入っている節を集める。
+
+    控えはこの道具が書いた物なので形が分かっている。字下げ 2 で書いた塊は
+    `report:` 1つだけを持つ document になる。それ以外は節がそのまま並ぶ。
+    """
+    found = {}
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        inner = doc.get('report')
+        if list(doc.keys()) == ['report'] and isinstance(inner, dict):
+            found.update(inner)
+        else:
+            found.update(doc)
+    return found
+
+
+def slim_report_sections(filepath, archive_dir, timestamp, active_cmd_ids, dry_run=False):
+    """報告 file は残したまま、中の古い節だけを控えへ移す。移した節の数を返す。
+
+    ★本文を字のまま切り出す★ = yaml で読み書きし直すと註と block scalar が
+    書き換わり、残す側の中身まで変わるため (この関数の上の註に実測が在る)。
+
+    ★切った後に検めてから書く★ = 残った中身が元と1つも違わないこと、控えへ移した
+    中身が元と同じことを、書く前に yaml で読み直して確かめる。合わなければ1行も書かない。
+    scripts/inbox_write.sh の overflow が「捨てる前に読み戻して数を数える」形と同じ。
+
+    ★移さないのは★ 刻が読めない節 / 今 動いている cmd を名指す節 / 器の最後の1節。
+    """
+    try:
+        # ★newline='' で読む★ = 既定の読み方は CRLF を黙って LF へ直す。直したまま
+        # 書き戻すと、古い節を移すだけのはずが file 全体の行末が入れ替わる。
+        # この repo には CRLF の file が現に混じっており、実測で 7 行すべてが
+        # LF へ化けた (2026-07-28 17:4x)。
+        with open(filepath, encoding='utf-8', newline='') as handle:
+            text = handle.read()
+        stat = filepath.stat()
+    except OSError as exc:
+        print_hold(f"{filepath.name} を見送る: 読めない ({exc.__class__.__name__})")
+        return 0
+    if not text.strip():
+        return 0
+
+    try:
+        docs = list(yaml.safe_load_all(text))
+    except yaml.YAMLError as exc:
+        print_hold(f"{filepath.name} を見送る: yaml として読めない ({exc.__class__.__name__})")
+        return 0
+
+    lines = text.splitlines(keepends=True)
+    bounds = _split_documents(lines)
+    if len(bounds) != len(docs):
+        print_hold(f"{filepath.name} を見送る: document の数が読み取りと合わない "
+                   f"(行から {len(bounds)} / yaml から {len(docs)})")
+        return 0
+
+    cutoff = date.today() - timedelta(days=max(0, get_report_section_keep_days() - 1))
+    plan = []          # (doc の番号, 節の名, 開始行, 終了行, 字下げ)
+    containers = []    # (doc の番号, 入れ物, 字下げ, その doc の節の列)
+    held_no_date = 0   # 刻が読めなくて見送った節
+    held_active = 0    # 今 動いている cmd を名指していて見送った節
+
+    for index, ((begin, end), doc) in enumerate(zip(bounds, docs)):
+        target, indent = _report_container(doc)
+        if not isinstance(target, dict) or not target:
+            continue
+        if indent:
+            block = _container_block(lines, begin, end, 'report')
+            if block is None:
+                print_hold(f"{filepath.name} を見送る: report: の行が見つからない (doc {index})")
+                return 0
+            scan_begin, scan_end = block
+        else:
+            scan_begin, scan_end = begin, end
+        ranges = _section_ranges(lines, scan_begin, scan_end, indent)
+        found = [name for name, _s, _e in ranges]
+        if len(found) != len(set(found)):
+            dup = sorted({n for n in found if found.count(n) > 1})
+            print_hold(f"{filepath.name} を見送る: 同じ節名が二度 在る {dup} (doc {index})。"
+                       f"後勝ちで先の記録が黙って消える形ゆえ、触らない")
+            return 0
+        if found != [str(k) for k in target.keys()]:
+            print_hold(f"{filepath.name} を見送る: 節の割り方が読み取りと合わない "
+                       f"(doc {index}: 行から {len(found)} / yaml から {len(target)})")
+            return 0
+        containers.append((index, target, indent, ranges))
+
+        movable = []
+        for name, sec_begin, sec_end in ranges:
+            when = section_date(name, target.get(name))
+            if when is None:
+                held_no_date += 1
+                continue
+            if when >= cutoff:
+                continue
+            body = ''.join(lines[sec_begin:sec_end])
+            hit = next((cmd for cmd in active_cmd_ids if cmd and cmd in body), None)
+            if hit:
+                held_active += 1
+                continue
+            movable.append((name, sec_begin, sec_end))
+        # 器を空にしない。空にすると節の入れ物そのものが消え、形が変わる。
+        if movable and len(movable) == len(ranges):
+            stayed = movable.pop()
+            print_hold(f"{filepath.name} の {stayed[0]} を残す: 器を空にしないため")
+        for name, sec_begin, sec_end in movable:
+            plan.append((index, name, sec_begin, sec_end, indent))
+
+    # 見送った物を名乗る。黙って見送ると「移す物が無かった」と「見たが移さなかった」が
+    # 同じ顔になる (cmd_1467 で帳面の側に入れたのと同じ理由)。
+    if held_no_date or held_active:
+        print_hold(f"{filepath.name} の {held_no_date + held_active} 節 を見送った "
+                   f"(刻が読めない {held_no_date} / 今 動いている cmd を名指す {held_active})")
+
+    if not plan:
+        return 0
+
+    moved_names = {}
+    for index, name, _b, _e, _i in plan:
+        moved_names.setdefault(index, set()).add(name)
+
+    drop = set()
+    for _index, _name, sec_begin, sec_end, _indent in plan:
+        drop.update(range(sec_begin, sec_end))
+    new_text = ''.join(l for i, l in enumerate(lines) if i not in drop)
+
+    archive_parts = []
+    for index, target, indent, _ranges in containers:
+        rows = [row for row in plan if row[0] == index]
+        if not rows:
+            continue
+        chunk = []
+        if indent:
+            chunk.append('report:\n')
+        for _i, _name, sec_begin, sec_end, _ind in rows:
+            chunk.append(''.join(lines[sec_begin:sec_end]))
+        archive_parts.append((index, ''.join(chunk)))
+
+    # 控えに足す行の行末は、元の file にそろえる (混ぜない)。
+    newline = '\r\n' if '\r\n' in text else '\n'
+    archived_at = timestamp_to_iso(timestamp) or timestamp
+    header = [
+        f"# {filepath.name} から古い節を移した控え (cmd_1467)",
+        f"# 元 = {filepath.name} / 移した刻 = {archived_at} / 節 {len(plan)} 個",
+        "# 元の file は残っている。ここに在るのは、そこから出した古い節だけである。",
+        "# ★ここは queue/ の下ゆえ git 管理外である。git clean -xd で親ごと消える。★",
+        "#   移す前も後も消える。この仕組みは「読めるようにする」ためで、",
+        "#   「失わないようにする」ためではない。",
+    ]
+    body = []
+    for order, (index, chunk) in enumerate(archive_parts):
+        if order:
+            body.append('---' + newline)
+        body.append(f"# 元の document {index}" + newline)
+        body.append(chunk)
+    archive_text = newline.join(header) + newline + ''.join(body)
+
+    if not _report_cut_is_faithful(filepath, new_text, archive_text, docs,
+                                   containers, moved_names):
+        return 0
+
+    archive_path = archive_dir / f'{filepath.stem}_{timestamp}{filepath.suffix}'
+    serial = 1
+    while archive_path.exists():
+        archive_path = archive_dir / f'{filepath.stem}_{timestamp}_{serial}{filepath.suffix}'
+        serial += 1
+
+    moved_bytes = len(''.join(''.join(lines[b:e]) for _i, _n, b, e, _d in plan).encode('utf-8'))
+    if dry_run:
+        print(f"[DRY-RUN] would move {len(plan)} sections ({moved_bytes:,} byte) "
+              f"from {filepath.name} to {archive_path.name}")
+        return len(plan)
+
+    ensure_parent_dir(archive_path)
+    try:
+        with open(archive_path, 'w', encoding='utf-8', newline='') as handle:
+            handle.write(archive_text)
+        # 書けたつもりを許さない。控えを読み戻して節の数を数え、合わなければ捨てる。
+        with open(archive_path, encoding='utf-8', newline='') as handle:
+            back = list(yaml.safe_load_all(handle.read()))
+        saved = len(_archive_sections(back))
+        if saved != len(plan):
+            raise RuntimeError(f"控えを読み戻したら節の数が合わない "
+                               f"(控え {saved} / 移すはず {len(plan)})")
+    except Exception as exc:
+        print_hold(f"{filepath.name} を見送る: 控えが書けない ({exc})")
+        try:
+            if archive_path.exists():
+                archive_path.unlink()
+        except OSError:
+            pass
+        return 0
+
+    try:
+        with open(filepath, 'w', encoding='utf-8', newline='') as handle:
+            handle.write(new_text)
+    except OSError as exc:
+        print(f"Error writing {filepath}: {exc}", file=sys.stderr)
+        return 0
+
+    # 最終書込の刻を元に戻す。掃除は「その agent が働いた刻」ではないため。
+    # 戻さないと、番人 (scripts/idle_revive_scan.py) が報告の刻を見て
+    # 「今さっき働いた」と読む。止まっている者を止まっていないと読む向きで、
+    # これは安全側ではない (cmd_1467・軍師一号の指摘)。
+    try:
+        os.utime(filepath, (stat.st_atime, stat.st_mtime))
+    except OSError as exc:
+        print_inventory(f"{filepath.name} の最終書込の刻を戻せなかった ({exc.__class__.__name__})")
+
+    print(f"[SLIM] {filepath.name}: 古い節 {len(plan)} 個 ({moved_bytes:,} byte) を "
+          f"{archive_path.name} へ移した", file=sys.stderr)
+    return len(plan)
+
+
+def _report_cut_is_faithful(filepath, new_text, archive_text, docs, containers, moved_names):
+    """切った後の本文と控えが、元と食い違っていないかを検める。
+
+    見るのは3つ。①残った本文が yaml として読め、document の数が変わっていないか
+    ②残った節の名と中身が元と1つも違わないか ③控えへ移した節の中身が元と同じか。
+    1つでも合わなければ False を返し、呼ぶ側は1行も書かない。
+    """
+    try:
+        after = list(yaml.safe_load_all(new_text))
+    except yaml.YAMLError as exc:
+        print_hold(f"{filepath.name} を見送る: 切った後が yaml として読めない "
+                   f"({exc.__class__.__name__})")
+        return False
+    if len(after) != len(docs):
+        print_hold(f"{filepath.name} を見送る: 切ると document の数が変わる "
+                   f"({len(docs)} → {len(after)})")
+        return False
+
+    try:
+        archived = list(yaml.safe_load_all(archive_text))
+    except yaml.YAMLError as exc:
+        print_hold(f"{filepath.name} を見送る: 控えが yaml として読めない "
+                   f"({exc.__class__.__name__})")
+        return False
+    archived_sections = _archive_sections(archived)
+
+    for index, target, indent, _ranges in containers:
+        moved = moved_names.get(index, set())
+        after_container = _container_of(after[index], indent)
+        if not isinstance(after_container, dict):
+            print_hold(f"{filepath.name} を見送る: 切ると節の入れ物が消える (doc {index})")
+            return False
+        expected = [str(k) for k in target.keys() if str(k) not in moved]
+        if [str(k) for k in after_container.keys()] != expected:
+            print_hold(f"{filepath.name} を見送る: 残る節の顔ぶれが変わる (doc {index})")
+            return False
+        for key in after_container:
+            if after_container[key] != target.get(key):
+                print_hold(f"{filepath.name} を見送る: 残した節 '{key}' の中身が変わる "
+                           f"(doc {index})")
+                return False
+        for name in moved:
+            if name not in archived_sections:
+                print_hold(f"{filepath.name} を見送る: 移した節 '{name}' が控えに無い")
+                return False
+            if archived_sections[name] != target.get(name):
+                print_hold(f"{filepath.name} を見送る: 移した節 '{name}' の中身が変わる")
+                return False
+    return True
+
+
 def slim_reports(dry_run=False):
     queue_dir = get_queue_dir()
     reports_dir = queue_dir / 'reports'
@@ -495,6 +947,10 @@ def slim_reports(dry_run=False):
 
     for filepath in sorted(reports_dir.glob('*.yaml')):
         if filepath.stem in CANONICAL_REPORTS:
+            # 除外表に載っている報告は file ごと攫わない (攫うと次の /clear 復帰で
+            # 読む物が無くなる)。代わりに file は残し、中の古い節だけを控えへ移す。
+            slim_report_sections(filepath, archive_dir, timestamp,
+                                 active_cmd_ids, dry_run=dry_run)
             continue
 
         data = load_yaml(filepath)

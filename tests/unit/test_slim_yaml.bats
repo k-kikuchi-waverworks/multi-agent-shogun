@@ -508,3 +508,258 @@ PY
     # 黙って既定へ倒すのではなく、読めなかったことを名乗ること
     assert_output --partial "数として読めない"
 }
+
+# ── cmd_1467: 報告 file を残したまま古い節だけを控えへ移す ───────────────────
+# 除外表に載っている報告は file ごと攫われない (攫うと次の /clear 復帰で読む物が
+# 無くなる)。その代わり中の古い節だけを移す。下は陽性と陰性を対で撃つ。
+
+report_fixture() {
+    local today="$(date +%Y%m%d)"
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<EOF
+task_id: subtask_test
+agent: ashigaru1
+# この註は残る節に付いている
+keep_${today}_1200: |
+  今日の分
+  2行目
+old_20260101_0900: |
+  古い分の1行目
+  古い分の2行目
+EOF
+}
+
+@test "cmd_1467/報告: 古い節は控えへ移り、file と今日の節は残る" {
+    report_fixture
+    run run_slim karo
+    assert_success
+    assert_output --partial "古い節 1 個"
+    [ -f "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" ]
+    run cat "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_output --partial "今日の分"
+    refute_output --partial "古い分の1行目"
+    run cat "$SHOGUN_QUEUE_DIR"/archive/reports/ashigaru1_report_*.yaml
+    assert_output --partial "古い分の1行目"
+    assert_output --partial "古い分の2行目"
+}
+
+@test "cmd_1467/報告: 残した所は字が1バイトも変わらない (註と block scalar が残る)" {
+    report_fixture
+    local today="$(date +%Y%m%d)"
+    run run_slim karo
+    assert_success
+    # 期待する残りを字で書き、現物と突き合わせる。yaml で読み書きし直すと
+    # 註が消えて block scalar が別の綴りになるので、それを捕える試験である。
+    cat > "$TEST_TMPDIR/expected.yaml" <<EOF
+task_id: subtask_test
+agent: ashigaru1
+# この註は残る節に付いている
+keep_${today}_1200: |
+  今日の分
+  2行目
+EOF
+    run diff "$TEST_TMPDIR/expected.yaml" "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_success
+}
+
+@test "cmd_1467/報告: 今日の節しか無ければ何も移さず控えも作らない (陰性)" {
+    local today="$(date +%Y%m%d)"
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<EOF
+task_id: subtask_test
+agent: ashigaru1
+keep_${today}_1200: |
+  今日の分
+EOF
+    cp "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" "$TEST_TMPDIR/before.yaml"
+    run run_slim karo
+    assert_success
+    refute_output --partial "古い節"
+    run diff "$TEST_TMPDIR/before.yaml" "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_success
+    run bash -c "ls '$SHOGUN_QUEUE_DIR'/archive/reports/ashigaru1_report_*.yaml 2>/dev/null | wc -l"
+    assert_output "0"
+}
+
+@test "cmd_1467/報告: 刻が読めない節は移さず、見送ったことを名乗る" {
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<'EOF'
+task_id: subtask_test
+agent: ashigaru1
+no_date_section: |
+  刻の書いていない節
+old_20260101_0900: |
+  古い分
+EOF
+    run run_slim karo
+    assert_success
+    assert_output --partial "刻が読めない"
+    run cat "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_output --partial "刻の書いていない節"
+}
+
+@test "cmd_1467/報告: 今 動いている cmd を名指す古い節は移さない" {
+    cat > "$SHOGUN_QUEUE_DIR/shogun_to_karo.yaml" <<'EOF'
+commands:
+- id: cmd_9999
+  status: in_progress
+EOF
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<'EOF'
+task_id: subtask_test
+agent: ashigaru1
+old_20260101_0900: |
+  この節は cmd_9999 を名指している
+old_20260102_0900: |
+  こちらはどの cmd も名指していない
+EOF
+    run run_slim karo
+    assert_success
+    assert_output --partial "今 動いている cmd を名指す 1"
+    run cat "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_output --partial "cmd_9999 を名指している"
+    refute_output --partial "どの cmd も名指していない"
+}
+
+@test "cmd_1467/報告: 器を空にしない (全部 古くても最後の1節は残す)" {
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<'EOF'
+report:
+  old_a_20260101_0900: |
+    あ
+  old_b_20260102_0900: |
+    い
+  old_c_20260103_0900: |
+    う
+  old_d_20260104_0900: |
+    え
+EOF
+    run run_slim karo
+    assert_success
+    assert_output --partial "器を空にしないため"
+    run cat "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_output --partial "old_d_20260104_0900"
+    refute_output --partial "old_a_20260101_0900"
+}
+
+@test "cmd_1467/報告: 同じ節名が二度 在る file は触らない" {
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<'EOF'
+task_id: subtask_test
+old_20260101_0900: |
+  さきの記録
+old_20260101_0900: |
+  あとの記録
+EOF
+    cp "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" "$TEST_TMPDIR/before.yaml"
+    run run_slim karo
+    assert_success
+    assert_output --partial "同じ節名が二度 在る"
+    run diff "$TEST_TMPDIR/before.yaml" "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_success
+}
+
+@test "cmd_1467/報告: 入れ物が2つ並ぶ形では report: の側だけを見る" {
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<'EOF'
+report:
+  task_id: subtask_now
+  agent: ashigaru1
+  status: done
+  old_20260101_0900: |
+    今の報告の古い節
+previous_report:
+  task_id: subtask_prev
+  old_20260102_0900: |
+    前の報告の節
+EOF
+    run run_slim karo
+    assert_success
+    assert_output --partial "古い節 1 個"
+    run cat "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    refute_output --partial "今の報告の古い節"
+    assert_output --partial "前の報告の節"
+}
+
+@test "cmd_1467/報告: document が2つの形でも、CRLF の行末で境目を見落とさない" {
+    printf 'task_id: subtask_a\r\nold_20260101_0900: |\r\n  ひとつめ\r\n---\r\ntask_id: subtask_b\r\nold_20260102_0900: |\r\n  ふたつめ\r\n' \
+        > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    run run_slim karo
+    assert_success
+    # 境目を見落とすと節の割り方が読み取りと合わず、file ごと見送りになる。
+    refute_output --partial "合わない"
+    assert_output --partial "古い節 2 個"
+}
+
+@test "cmd_1467/報告: 最終書込の刻を掃除で動かさない (番人が働いたと誤読しないため)" {
+    report_fixture
+    touch -d '2020-01-02 03:04:05' "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    run run_slim karo
+    assert_success
+    assert_output --partial "古い節 1 個"
+    run stat -c '%y' "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_output --partial "2020-01-02 03:04:05"
+}
+
+@test "cmd_1467/報告: 控えは yaml として読め、移した節がそのまま入っている" {
+    report_fixture
+    run run_slim karo
+    assert_success
+    run bash -c "'$TEST_PYTHON' -c \"
+import glob, sys, yaml
+p = glob.glob('$SHOGUN_QUEUE_DIR/archive/reports/ashigaru1_report_*.yaml')[0]
+docs = list(yaml.safe_load_all(open(p, encoding='utf-8')))
+keys = [k for d in docs if isinstance(d, dict) for k in d]
+print('KEYS', keys)
+print('BODY', docs[0]['old_20260101_0900'].strip().splitlines()[0])
+\""
+    assert_success
+    assert_output --partial "KEYS ['old_20260101_0900']"
+    assert_output --partial "BODY 古い分の1行目"
+}
+
+@test "cmd_1467/報告: 除外表に無い報告は今までどおり file ごと攫われる" {
+    # 節の攫いを足したことで、こちらの道が塞がっていないかを見る。
+    cat > "$SHOGUN_QUEUE_DIR/reports/stray_report.yaml" <<'EOF'
+parent_cmd: cmd_0001
+old_20260101_0900: |
+  古い分
+EOF
+    touch -d '2020-01-02 03:04:05' "$SHOGUN_QUEUE_DIR/reports/stray_report.yaml"
+    run run_slim karo
+    assert_success
+    [ ! -f "$SHOGUN_QUEUE_DIR/reports/stray_report.yaml" ]
+    [ -f "$SHOGUN_QUEUE_DIR/archive/reports/stray_report.yaml" ]
+}
+
+@test "cmd_1467/報告: 切った後が読めなくなる形では1バイトも書かない (検めの配線)" {
+    # 移す節に錨 (anchor) が在り、残る節がそれを指している形。節を抜くと指し先が
+    # 消えて yaml として読めなくなる。切った後を検める口が現に通っているかを見る。
+    local today="$(date +%Y%m%d)"
+    cat > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" <<EOF
+task_id: subtask_test
+old_20260101_0900: &shared
+  x: 1
+keep_${today}_1200:
+  ref: *shared
+EOF
+    cp "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml" "$TEST_TMPDIR/before.yaml"
+    run run_slim karo
+    assert_success
+    assert_output --partial "切った後が yaml として読めない"
+    run diff "$TEST_TMPDIR/before.yaml" "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    assert_success
+    run bash -c "ls '$SHOGUN_QUEUE_DIR'/archive/reports/ashigaru1_report_*.yaml 2>/dev/null | wc -l"
+    assert_output "0"
+}
+
+@test "cmd_1467/報告: CRLF の報告を掃除しても行末が LF へ化けない" {
+    # 既定の読み書きは CRLF を黙って LF へ直す。直すと、古い節を移すだけのはずが
+    # file 全体の行末が入れ替わる。「字のまま切り出す」が崩れる形である。
+    printf 'task_id: subtask_a\r\nold_20260101_0900: |\r\n  ふるい\r\nkeep_note: |\r\n  のこす\r\n' \
+        > "$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    run run_slim karo
+    assert_success
+    assert_output --partial "古い節 1 個"
+    local f="$SHOGUN_QUEUE_DIR/reports/ashigaru1_report.yaml"
+    local total="$(wc -l < "$f")"
+    local crlf="$(grep -c $'\r$' "$f" || true)"
+    [ "$total" -gt 0 ]
+    [ "$total" -eq "$crlf" ]
+    # 控えの側も同じ行末でそろえる (混ぜない)
+    local arc="$(ls "$SHOGUN_QUEUE_DIR"/archive/reports/ashigaru1_report_*.yaml | head -1)"
+    [ "$(wc -l < "$arc")" -eq "$(grep -c $'\r$' "$arc" || true)" ]
+}

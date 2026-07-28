@@ -59,6 +59,15 @@ for m in (d.get("messages") or []):
 
 count_in() { ids_in "$1" | grep -c . || true; }
 
+# 残す既読の通数を、検める当の script から引く (cmd_1467)。
+# ★数を試験へ焼かない★ = 焼くと、現物を替えた時に試験だけが古い数を守る。
+# 名は「現物と同値」と名乗るのに、現物を1バイトも読んでいない形になる
+# (同じ形を cmd_1288 で名指された)。ここは現に踏んだ = 30 から 15 へ下げた時、
+# この試験だけが 30 のまま赤くなった。
+keep_read_of() {
+    sed -n 's/^[[:space:]]*KEEP_READ = \([0-9][0-9]*\).*/\1/p' "$1" | head -1
+}
+
 @test "溢れた時、捨てた既読が退避 file に残る" {
     seed_inbox 60
     run bash "$SUT" karo "新しい便" notice ashigaru1
@@ -69,13 +78,15 @@ count_in() { ids_in "$1" | grep -c . || true; }
     local arcs=("$ARCHIVE_DIR"/inbox_karo_*_overflow*.yaml)
     [ "${#arcs[@]}" -eq 1 ]
 
-    # 残った 31通（未読1 + 既読30）／退避 30通
-    [ "$(count_in "$INBOX")" -eq 31 ]
-    [ "$(count_in "${arcs[0]}")" -eq 30 ]
+    # 残るのは 未読1 + 既読 KEEP_READ 通。退避はその残り。
+    local keep="$(keep_read_of "$SUT")"
+    [ -n "$keep" ]
+    [ "$(count_in "$INBOX")" -eq $((keep + 1)) ]
+    [ "$(count_in "${arcs[0]}")" -eq $((60 - keep)) ]
 
-    # 退避されたのは古い方 30通である
+    # 退避されたのは古い方である
     [ "$(ids_in "${arcs[0]}" | head -1)" = "seed_000" ]
-    [ "$(ids_in "${arcs[0]}" | tail -1)" = "seed_029" ]
+    [ "$(ids_in "${arcs[0]}" | tail -1)" = "$(printf 'seed_%03d' $((60 - keep - 1)))" ]
 }
 
 @test "1通も消えない（inbox + 退避 = 元の全部 + 新しい1通）" {
@@ -195,4 +206,15 @@ sys.exit(0 if any(m.get("content") == "新しい便" for m in (d.get("messages")
 
     # 中途半端な退避 file を残さぬ（ARCHIVE_DIR は file のままである）
     [ ! -d "$ARCHIVE_DIR" ]
+}
+
+@test "残す既読の通数が、読める上限の見積りを越えていない (cmd_1467)" {
+    # 2026-07-28 15:11:58 の実測 = 便 9本を測ると、上限 25,000 token に収まるのは
+    # 14〜19通であった。★byte からの換算で、token そのものは測っていない★ ゆえ、
+    # 上限側の 19 を越えていないことだけを見る。
+    # この試験が守るのは「15 が正しい」ではなく「測った幅より多く残していない」である。
+    # 走査器 = plans/cmd_1467_inbox_trigger_scan.py (同じ数を撃ち直せる)。
+    local keep="$(keep_read_of "$SUT")"
+    [ -n "$keep" ]
+    [ "$keep" -le 19 ]
 }

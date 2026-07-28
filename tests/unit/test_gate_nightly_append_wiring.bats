@@ -28,6 +28,9 @@
 #   T-NA-005: ★道具の側へ STRICT が現に届く★= 届かねば呑まれが rc=2 に化け、警報から落ちる
 #   T-NA-006: ★門の判定が append_gate を見ておる★= 生の rc を見れば報告のみが門を落とす
 #   T-NA-007: ★警報の条件は生の rc=1 を見ておる★= gate だけ見れば呑まれの朝が黙って沈む
+#             (cmd_1468 で ★綴りを数える形★ から ★条件を現に走らせる形★ へ改めた。理由は
+#              extract_alert_cond の註に在る。★覆えぬ範囲★= 鳴った後に本文が家老へ現に届くか
+#              は此処では撃っておらぬ = 条件の成立までである)
 #   T-NA-008: ★実物の道具で母数が現に出る★ (stub でなく本物・本 repo の 6 冊)
 
 setup_file() {
@@ -40,6 +43,33 @@ setup_file() {
 extract_reporter() { sed -n '/^run_reporter() {/,/^}$/p' "$GATE"; }
 extract_block()    { sed -n '/^APPEND_STRICT=/,/^fi$/p' "$GATE"; }
 extract_exits()    { sed -n '/^if \[ "$rc1" -eq 1 \]/,/^exit 0$/p' "$GATE"; }
+
+# ★警報の条件そのものを現物から抜く★ (cmd_1468)
+#   ★何ゆえ「if 行の綴り」で当てぬか★:
+#   初版は `^if [ "$rc1" -ne 0 ]` を錨にしており、★条件の先頭に別の札が1つ足された朝に黙って外れた★
+#   (11:31 の 44fa684 が freshness_rc を先頭へ足した。本体は正しく、外れたのは此の試験の錨だけ)。
+#   ⇒ ★札の並びに依らせぬ★= 警報の本文を組み立てる `appendnote=""` の直前に在る if 行を取る。
+extract_alert_cond() {
+    awk '/^if \[.*; then$/ { last = $0 } /^ *appendnote=""$/ { print last; exit }' "$GATE"
+}
+
+# ★抜いた条件を現に走らせる★ — 数えるのでなく撃つ (T-NA-006 と同じ作法)。
+#   条件が名指す札を悉く 0 (=鳴らぬ) に据え、引数で渡した札だけを立てる。
+#   ゆえに鳴れば ★渡した札だけが鳴らした★ ことになる。出力 = FIRE (鳴る) / SILENT (鳴らぬ)
+run_alert() {
+    local dir="$BATS_TEST_TMPDIR/alert_$$_${BATS_TEST_NUMBER:-0}_$RANDOM"
+    mkdir -p "$dir"
+    local cond; cond="$(extract_alert_cond)"
+    [ -n "$cond" ] || return 1
+    {
+        printf '%s\n' "$cond" | grep -o '\$[a-z_][a-z0-9_]*' | sort -u | sed 's/^\$/export /; s/$/=0/'
+        for kv in "$@"; do echo "export $kv"; done
+        printf '%s\n' "$cond"
+        echo '  echo FIRE; exit 0; fi'
+        echo 'echo SILENT'
+    } > "$dir/harness.sh"
+    bash "$dir/harness.sh"
+}
 
 # 呑まれ検知の道具を stub へ差し替えて配線だけを撃つ。$1 = stub が返す rc
 run_block() {
@@ -151,8 +181,23 @@ run_exits() {
 }
 
 @test "T-NA-007: 警報の条件は生の rc=1 を見ておる (gate だけ見れば呑まれの朝が沈む)" {
-    run bash -c "sed -n '/^if \\[ \"\$rc1\" -ne 0 \\]/p' '$GATE' | grep -c 'append_rc\" -eq 1'"
-    [ "$output" = "1" ]
+    # ★canary★= 警報の条件が現物から抜けておる (抜けねば以下の FIRE/SILENT は無意味)
+    run extract_alert_cond
+    [ -n "$output" ]
+    printf '%s' "$output" | grep -qE '^if \[.*; then$'
+
+    # ★陰性側 (先に置く)★= 何も立っておらぬ朝は鳴らぬ。鳴くなら条件でなく道具が壊れておる
+    run run_alert
+    [ "$output" = "SILENT" ]
+
+    # ★本命★= 呑まれ (append_rc=1) が在れば、門へ入れておらぬ (append_gate=0) 朝でも鳴る
+    run run_alert append_rc=1
+    [ "$output" = "FIRE" ]
+
+    # ★測れなんだ (rc=2) では鳴らぬ★= 環境の揺れで毎朝鳴る札を作らぬ (T-NA-003 の警報側の顔)
+    run run_alert append_rc=2
+    [ "$output" = "SILENT" ]
+
     # ★警報本文へ【何が呑まれたか】が載る★= rc だけでは名指しにならぬ
     grep -qF 'appendnote=' "$GATE"
     grep -qF '${appendnote}' "$GATE"

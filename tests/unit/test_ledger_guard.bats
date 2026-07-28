@@ -295,6 +295,21 @@ write_valid_ledger() {
     local good
     good="$(cat "$LAST_GOOD_FILE")"
 
+    # ★cmd_1468: last_good の出現を「見張りが立った」の代わりに使わぬ★
+    #   main_loop は startup_check (= last_good を作る) の【後】に inotifywait を起動する。
+    #   ゆえに last_good だけを待って台帳を壊すと、まだ見張りが立っておらぬ窓へ落ちる。
+    #   落ちた事故は 30秒の安全網 (inotifywait -t 30) まで拾われず、此の試験は15秒しか待たぬので
+    #   ★守りは正しいのに赤くなる★ (2026-07-28 18:25 実測: 窓は約 0.14 秒。全数走行の負荷で広がる)。
+    #   ⇒ ★見張りの process が現に立つまで待つ★。親 pid と process 名で当てるので
+    #      此の待ち手が己を拾うことはない (条C)。
+    for i in $(seq 1 40); do
+        pgrep -P "$guard_pid" -x inotifywait >/dev/null 2>&1 && break
+        sleep 0.25
+    done
+    pgrep -P "$guard_pid" -x inotifywait >/dev/null 2>&1
+    # process が立ってから inotify_add_watch が済むまでの僅かな隙を埋める
+    sleep 0.5
+
     # ★半角コロン混入 (atomic rename で書込=Editのidiomに近い)★
     printf 'commands:\n- id: cmd_x\n  evidence: foo: bar baz\n  status: pending\n' > "$LEDGER_FILE.tmp"
     mv "$LEDGER_FILE.tmp" "$LEDGER_FILE"

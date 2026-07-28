@@ -80,6 +80,22 @@ TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'blocked', 'in_progress',
 # ntfy_inbox (task_flow.md:18)。
 NTFY_TERMINAL_STATUSES = {'processed'}
 INVENTORY_AGE_SECONDS = 30 * 86400
+# 掃除を見送る冷却期間 (cmd_1467)。
+# 2026-07-28 08:09:28 に掃除を撃った時、その瞬間 status: done だった足軽2名の帳面が
+# 中身2行まで削られた。done は「もう要らない」ではなく「次の指示を待っている」状態で、
+# 掃除はその区別を持っていなかった。控え94本を測ると、6回に1回 (17.0%) は
+# 足軽が5分以内に書いた帳面を消していた。
+#
+# そこで「最後に書かれてから一定の時間が経っていない帳面は見送る」を入れる。
+# 刻が読めない時も見送る = 消してよいと言い切れない物を消さない。
+#
+# ★2時間より長くしてはいけない★
+# 見送りは「後で掃除する」ではない。閾値を越える頃には次の指示で上書きされて
+# もう終端ではなくなるので、長くすると掃除が二度と当たらなくなる。
+# 現に gunshi1 / gunshi2 / karo は一度も掃除が当たっておらず、gunshi2 は13本のうち
+# 最大の 123,085 byte まで育ち、session の開始で読み切れなかった実例が在る。
+# 2時間は、今朝の2件 (24.5分・39.5分) を覆えて、かつ見送りが多くなりすぎない線である。
+TASK_SLIM_COOLDOWN_SECONDS = 2 * 3600
 
 
 def load_yaml(filepath):
@@ -133,12 +149,93 @@ def uses_legacy_task_status(data):
     return isinstance(data, dict) and isinstance(data.get('task'), dict) and 'status' in data['task'] and 'status' not in data
 
 
-def idle_stub_for(stem, data):
+def get_item_field(item, key):
+    """タスク YAML から項目を1つ読む。2つの書式の両方に対応する。
+
+    書式は2つある。現行はキーがトップレベルに並ぶ形、旧い方は task: の下に
+    入れ子になる形。get_item_status と同じ読み方をそろえてある。status だけ
+    両対応で他の項目は片方しか読まない、という食い違いを防ぐため。
+    """
+    if not isinstance(item, dict):
+        return None
+    if item.get(key) is not None:
+        return item.get(key)
+    task = item.get('task')
+    if isinstance(task, dict):
+        return task.get(key)
+    return None
+
+
+def timestamp_to_iso(stamp):
+    """アーカイブのファイル名に使う14桁を、人が読める日時へ直す。
+
+    ファイル名に使うのと同じ文字列から作る。別々に now() を呼ぶと、
+    ファイル名の日時と中に書く日時が1秒ずれる日が来る。
+    """
+    try:
+        return datetime.strptime(str(stamp), '%Y%m%d%H%M%S').isoformat(timespec='seconds')
+    except ValueError:
+        return None
+
+
+def idle_stub_for(stem, data, archive_name=None, archived_at=None):
+    """終わったタスク YAML を、待機状態を示す短いファイルに置き換える。
+
+    この短いファイルを空にしない (cmd_1467)。
+
+    2026-07-28 08:09:28 に家老がこのスクリプトを実行した時、ちょうど status: done
+    だった足軽2名 (一号・六号) のタスク YAML が、中身2行だけのファイルになった。
+    スクリプトは仕様どおりに動いており、誤ったのは作業中に実行した側である。
+
+    問題の中心は「仕事を終えた直後の人ほど記録が消える」ことである。done は
+    「もう要らない」ではなく「次の指示を待っている」状態なのに、この片付け処理は
+    その区別を持っていない。
+
+    そこで待機ファイルに4つ残す。status を idle にすること自体は変えない
+    (タスクは実際に終わっており、次を待つ状態は idle が正しい)。残すのは
+    「誰が」「何を終えて」「全文はどこにあり」「いつ時点の写しか」である。
+
+      last_task_id     直前に終えたタスクの ID
+      last_parent_cmd  その親の cmd 番号
+      archived_from    全文を保存したアーカイブのファイル名
+      archived_at      そのアーカイブを取った日時
+
+    archived_from と archived_at は、足軽六号が指摘した点への答えである。
+    指摘は「復元する時は、いつ時点のアーカイブから復元したかを1行書くこと。
+    消えたタスク YAML から復元すると、消えた後にやった仕事が見えない」。
+    アーカイブの日時が待機ファイルに書いてあれば、その日時より後の report や
+    commit を調べるだけで「写しに入っていない仕事」が機械的に分かる。六号は
+    git log を見て偶然気づいたが、気づかなければ同じ作業を二度やっていた。
+
+    アーカイブ側には書き足さない。アーカイブは rename で元のファイルがそのまま
+    入るので、コメントも原文のまま残る。これは記録そのものなので、後から書き
+    足して変えない。参照先は今も使われている側のファイルに書く。読む人が最初に
+    開くのはそちらだからである。
+
+    元から task_id を持たないタスク YAML では、その項目を足さない。無い項目を
+    空文字で埋めると、「項目はあるが空」と「元から無い」が見分けられなくなる。
+    """
+    carried = {}
+    last_task_id = get_item_field(data, 'task_id')
+    last_parent_cmd = get_item_field(data, 'parent_cmd')
+    if last_task_id is not None:
+        carried['last_task_id'] = last_task_id
+    if last_parent_cmd is not None:
+        carried['last_parent_cmd'] = last_parent_cmd
+    if archive_name:
+        carried['archived_from'] = archive_name
+    if archived_at:
+        carried['archived_at'] = archived_at
+
     if uses_legacy_task_status(data):
-        return IDLE_STUB
+        inner = dict(IDLE_STUB['task'])
+        inner.update(carried)
+        return {'task': inner}
+
     stub = dict(TOP_LEVEL_IDLE_STUB)
     if stem in CANONICAL_TASKS:
         stub['worker_id'] = stem
+    stub.update(carried)
     return stub
 
 
@@ -158,6 +255,52 @@ def is_old_timestamp(value, now=None, age_seconds=INVENTORY_AGE_SECONDS):
 
 def print_inventory(message):
     print(f"[INVENTORY] {message}", file=sys.stderr)
+
+
+def print_hold(message):
+    """掃除を見送った物を名乗る。
+
+    黙って見送ると「消えなかった」と「そもそも見ていない」が同じ顔になる。
+    2026-07-28 の事故に気づけたのは、家老が別件で python を落としたからで偶然であった。
+    """
+    print(f"[HOLD] {message}")
+
+
+def get_task_slim_cooldown_seconds():
+    """冷却期間 (秒) を返す。試験と運用で差し替えられるよう環境変数も見る。"""
+    raw = os.environ.get('SHOGUN_TASK_SLIM_COOLDOWN_SECONDS')
+    if raw is None or raw == '':
+        return TASK_SLIM_COOLDOWN_SECONDS
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        print_inventory(
+            f"SHOGUN_TASK_SLIM_COOLDOWN_SECONDS が数として読めない ('{raw}')。"
+            f"既定の {TASK_SLIM_COOLDOWN_SECONDS} 秒を使う"
+        )
+        return TASK_SLIM_COOLDOWN_SECONDS
+
+
+def task_slim_hold_reason(filepath, cooldown_seconds, now=None):
+    """掃除を見送るなら理由の文、掃除してよいなら None を返す。
+
+    判定はファイルの最終書込で行う。タスク YAML は updated_at をほとんど持たず
+    (控え94本のうち読めたのは2本だけ)、全部に在る刻がこれしかないためである。
+
+    ★刻が読めない時は見送る側へ倒す。★
+    """
+    if cooldown_seconds <= 0:
+        return None
+    try:
+        mtime = filepath.stat().st_mtime
+    except OSError as exc:
+        return f"最終書込の刻が読めない ({exc.__class__.__name__}) ため見送る"
+    current = datetime.now().timestamp() if now is None else now
+    age = current - mtime
+    if age < cooldown_seconds:
+        return (f"最後に書かれてから {age / 60:.1f} 分 しか経っていない "
+                f"(冷却 {cooldown_seconds / 60:.0f} 分)")
+    return None
 
 
 def get_active_cmd_ids():
@@ -264,6 +407,8 @@ def slim_tasks(dry_run=False):
         return True
 
     timestamp = get_timestamp()
+    cooldown = get_task_slim_cooldown_seconds()
+    held = 0
     for filepath in sorted(tasks_dir.glob('*.yaml')):
         data = load_yaml(filepath)
         if not isinstance(data, dict):
@@ -280,21 +425,39 @@ def slim_tasks(dry_run=False):
                     print_inventory(f"canonical task {filepath.name} has non-canonical status '{status}'")
                 continue
 
+            hold = task_slim_hold_reason(filepath, cooldown)
+            if hold:
+                print_hold(f"{filepath.name} を見送る: {hold}")
+                held += 1
+                continue
+
             archive_path = archive_dir / f'{stem}_{timestamp}.yaml'
             if not archive_taskspec(filepath, archive_path, data, dry_run=dry_run):
                 return False
 
+            # 待機ファイルにアーカイブの参照先を書く。ファイル名と日時は
+            # 同じ timestamp から作る (cmd_1467)。
+            stub = idle_stub_for(stem, data,
+                                 archive_name=archive_path.name,
+                                 archived_at=timestamp_to_iso(timestamp))
+
             if dry_run:
-                print(f"[DRY-RUN] would overwrite: {filepath} with {idle_stub_for(stem, data)}")
+                print(f"[DRY-RUN] would overwrite: {filepath} with {stub}")
                 continue
 
-            if not save_yaml(filepath, idle_stub_for(stem, data)):
+            if not save_yaml(filepath, stub):
                 return False
             continue
 
         if status not in TASK_TERMINAL_STATUSES:
             if status not in TASK_ACTIVE_STATUSES:
                 print_inventory(f"task file {filepath.name} has non-canonical status '{status}'")
+            continue
+
+        hold = task_slim_hold_reason(filepath, cooldown)
+        if hold:
+            print_hold(f"{filepath.name} を見送る: {hold}")
+            held += 1
             continue
 
         archive_path = archive_dir / filepath.name
@@ -309,6 +472,8 @@ def slim_tasks(dry_run=False):
         ensure_parent_dir(archive_path)
         filepath.rename(archive_path)
 
+    if held:
+        print_hold(f"合わせて {held} 本 見送った (冷却 {cooldown / 60:.0f} 分)")
     return True
 
 

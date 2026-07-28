@@ -753,6 +753,245 @@ def print_ledger_miss_result(hits, quiet, stats, threshold_min):
               f"刻が未来={len(stats['future_dated'])}" + canary)
 
 
+# ── 読んだか読まぬかを見ない突合 (cmd_1459・足軽五号) ──────────────────────
+# 問い = 「報告の便が届いてから N 分、その cmd に応答が無い」。
+#
+# なぜ既にある 2 つでは足りないか:
+#   1. cmd_1454 の検め (scan_qc_dispatch) は「軍師の inbox に未読のまま N 分」を見る。
+#      ところが作法は「読んだら即 read: true」を命じている。
+#      つまり作法どおりに振る舞う軍師は、その手で検めの目を閉じる。
+#      実測 (2026-07-28 18:0x) = 軍師の inbox の報告族 5 通は全部 既読で、
+#      未読の報告族は 0 通。この検めは構造として 0 件しか返せない状態だった。
+#   2. cmd_1459 前段の突合 (scan_qc_ledger_miss) は read を見ないので上の穴は無い。
+#      ただし入口が足軽の report YAML で、この file は上書きされる (追記ではない)。
+#      実測 = 三号が 13:14 に軍師へ出した cmd_1349 の報告は、14:36 の cmd_1467 の
+#      報告に上書きされ、report YAML 側からは既に消えている。inbox 側には残っている。
+#      ⇒ 上書きが閾値の内に起きれば、その報告は前段の目に一度も入らない。
+#
+# 本検めは、その 2 つが見ていない所を埋める:
+#   入口 = 軍師の inbox (追記式ゆえ消えない) / 判定 = read を一切見ない。
+#
+# 既存の 2 つは置き換えない。置き換えれば「軍師が便を読んでいない」という
+# 別の異常を捕まえる目が消える = 守りを弱める向きになる。
+#
+# 覆っていない範囲 (条G。緑と同じ大きさで書く):
+#   ① ashigaru4 と ashigaru6 は report_to: karo で、軍師の inbox に一通も居ない
+#      (2026-07-28 実測 = 差出人は ashigaru1/2/3/5 のみ)。この 2 体は本検めに映らない。
+#      前段の突合 (report YAML 入口) が見ているので、2 つ揃って初めて 6 体を覆う。
+#   ② 応答の判定は「軍師の帳面の構造の欄が その cmd を指すか」だけを見る。
+#      帳面も上書きされるので、「まだ配られていない」と「配られて既に次へ替わった」を
+#      区別できない。家老はこれを付け忘れとして扱っている (台帳 cmd_1465/1349 の註)。
+#   ③ cmd は便の本文から綴りで拾う。本文が cmd 番号を書かなければ拾えない (拾えぬ旨は必ず刷る)。
+#   ④ 検分が済んだかは見ない。任が起きたかだけを見る。
+#   ⑤ inbox は「消えない入口」ではない。inbox_write.sh は 50 通を超えると既読を
+#      末尾 15 通まで切り詰め、残りを queue/archive/ へ移す (2026-07-28 に 30→15 へ下がった)。
+#      本検めは上限の窓の内にある archive も読むので、切り詰めの直後でも見える。
+#      ただし ★上限より古い archive は読まない★ = 窓の外の便は、この検めから消える。
+#      切り詰めの速さは我らの外 (便の流量と KEEP_READ の値) で決まるので、
+#      流量が上がって窓の内に二度 切り詰めが起きる形は、機械では守れない。
+#   ⑥ 上限 (既定 2 時間) を超えた便は鳴らさない。ただし毎回 log に名を刷る。
+#      理由 = 上限が無いと、追記式の inbox に古い便が積む分だけ警告が増え続け、
+#      常に赤い検知になって外される (条C)。上限は「黙る」ではなく「鳴らさず名乗る」である。
+QC_INBOX_DEFAULT_THRESHOLD_MIN = 10   # 何分 応答が無ければ鳴らすか (karo.md の 10 分規律に合わせる)
+QC_INBOX_DEFAULT_CEILING_MIN = 120    # 何分より古い便は鳴らさず名乗るだけにするか
+
+
+def scan_qc_inbox_response(inbox_dir: Path, tasks_dir: Path, ledger_path: Path,
+                           threshold_min: int, ceiling_min: int,
+                           already_alerted_cmds=None, now=None):
+    """軍師の inbox の報告族 ↔ 軍師の帳面 の突合。戻り値 (hits, quiet, stats)。
+
+    read の値は一度も見ない。これが本検めの芯である。
+    """
+    if now is None:
+        now = datetime.datetime.now()
+    already = set(already_alerted_cmds or ())
+    ptr, ptr_files, ptr_unreadable = gunshi_ledger_pointers(tasks_dir)
+    ledger = load_cmd_ledger_status(ledger_path)
+    stats = {
+        "files": 0, "messages": 0,
+        # canary = 「見た上での 0」と「そもそも見ていない 0」を分ける。
+        # read を問わず数える報告族の総数。0 なら探し方 (file 名か型) が
+        # 当たっていない疑いであり、この 0 を「応答漏れ無し」と読んではいけない。
+        # この数は下の分類と同じ loop・同じ判定式を通る。canary だけが別の道を
+        # 通っていると、壊れている道を一度も通らないまま緑になる (cmd_1466 の実例)。
+        "report_family": 0, "responded": 0, "archive_files": 0,
+        "pointer_cmds": len(ptr), "pointer_files": ptr_files,
+        "pointer_unreadable": ptr_unreadable,
+        "ledger_readable": ledger is not None,
+        "unreadable_files": [], "undated": [], "future": [], "cmd_undetermined": [],
+    }
+    hits, quiet = [], []
+    # 入口の file を集める。
+    #   inbox は追記式ではない。inbox_write.sh は 50 通を超えると
+    #   「未読の全部 + 既読の末尾 KEEP_READ 通」だけを残し、残りを queue/archive/ へ
+    #   移す (実測 2026-07-28 = gunshi1 は同じ日に 12:56 と 14:15 の二度 切り詰められた)。
+    #   slim_yaml.py の整理はもっと強く、既読を全部 archive へ移す。
+    #   ⇒ 移った先も見なければ、この検めは時間差で同じ穴に落ちる。
+    #   ただし上限の窓より古い archive は、中の便も必ず上限の外なので読まない
+    #   (読んでも「鳴らさず名乗る」だけが増え、log が古い便で埋まる)。
+    paths = list(inbox_dir.glob(QC_INBOX_GLOB))
+    archive_dir = inbox_dir.parent / "archive"
+    cutoff = now - datetime.timedelta(minutes=ceiling_min)
+    if archive_dir.is_dir():
+        for p in archive_dir.glob("inbox_gunshi*.yaml"):
+            try:
+                if datetime.datetime.fromtimestamp(p.stat().st_mtime) >= cutoff:
+                    paths.append(p)
+                    stats["archive_files"] += 1
+            except OSError:
+                stats["unreadable_files"].append(p.name)
+    for path in sorted(paths):
+        stats["files"] += 1
+        try:
+            with path.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+        except (OSError, yaml.YAMLError) as e:
+            print(f"[stall_watchdog] WARN: gunshi inbox parse failed: {path}: {e}",
+                  file=sys.stderr)
+            stats["unreadable_files"].append(path.name)
+            continue
+        messages = (data or {}).get("messages") or []
+        if not isinstance(messages, list):
+            stats["unreadable_files"].append(path.name)
+            continue
+        stats["messages"] += len(messages)
+        for m in messages:
+            if not isinstance(m, dict):
+                continue
+            sender = str(m.get("from") or "")
+            if not (any(sender.startswith(p) for p in QC_SENDER_PREFIXES)
+                    and m.get("type") in QC_REPORT_TYPES):
+                continue
+            stats["report_family"] += 1
+            cmds = sorted(set(_CMD_RE.findall(str(m.get("content") or ""))))
+            if not cmds:
+                stats["cmd_undetermined"].append({
+                    "inbox": path.name, "id": m.get("id"), "from": sender})
+                continue
+            dt = parse_iso_to_naive_local(m.get("timestamp"))
+            if dt is None:
+                stats["undated"].append({
+                    "inbox": path.name, "id": m.get("id"), "from": sender})
+                continue
+            elapsed_min = int((now - dt).total_seconds() // 60)
+            if elapsed_min < 0:
+                # 刻が未来だと経過が負になり、閾値を永久に超えない。
+                # 黙って落とすと、その便は検めから消えたまま誰も気づかない。
+                stats["future"].append({
+                    "inbox": path.name, "id": m.get("id"), "from": sender,
+                    "timestamp": str(m.get("timestamp")), "ahead_min": -elapsed_min})
+                continue
+            for cmd in cmds:
+                if cmd in ptr:
+                    stats["responded"] += 1
+                    continue
+                if elapsed_min < threshold_min:
+                    continue
+                led_status = None if ledger is None else ledger.get(cmd)
+                rec = {"inbox": path.name, "msg_id": m.get("id"), "from": sender,
+                       "cmd": cmd, "elapsed_min": elapsed_min, "read": bool(m.get("read")),
+                       "ledger_status": led_status,
+                       "timestamp": dt.isoformat(sep=" ")}
+                if elapsed_min > ceiling_min:
+                    rec["quiet_reason"] = f"上限{ceiling_min}分より古い"
+                    quiet.append(rec)
+                elif cmd in already:
+                    # 前段の突合が同じ走行で既に鳴らしている。二重に鳴らさない。
+                    rec["quiet_reason"] = "前段の突合が同じ走行で既に鳴らした"
+                    quiet.append(rec)
+                elif led_status in LEDGER_QUIET_STATUSES:
+                    rec["quiet_reason"] = f"台帳が{led_status}"
+                    quiet.append(rec)
+                else:
+                    hits.append(rec)
+    return hits, quiet, stats
+
+
+def format_inbox_response_alert(hit, threshold_min):
+    return (f"🚨 応答なき報告: {hit['inbox']} に居る {hit['from']} の便 "
+            f"({hit['msg_id']} / {hit['cmd']}) が着いて {hit['elapsed_min']} 分、"
+            f"軍師の帳面 (queue/tasks/gunshi*.yaml) の構造の欄が {hit['cmd']} を指しておらぬ "
+            f"(台帳 status={hit['ledger_status'] or '不明'}・便の read={hit['read']})。"
+            f"karo.md の 10 分規律 (閾値 {threshold_min} 分) を超えておる。"
+            f"  ※本検めは read を見ておらぬ = 軍師が読んだ後も目が開いたままである。"
+            f"見ておるのは「帳面が指すか」だけで、検分が済んだかは見ておらぬ。"
+            f"承知で退けるなら台帳の status を deferred にすれば鳴らぬ。")
+
+
+def inbox_response_alert_key(hit):
+    return f"qcinbox|{hit['inbox']}|{hit['msg_id']}|{hit['cmd']}"
+
+
+def notify_karo_inbox_response(hit, threshold_min):
+    return subprocess.run(
+        ["bash", str(INBOX_WRITE_SH), "karo",
+         format_inbox_response_alert(hit, threshold_min),
+         "stall_watchdog_qc_inbox_response_alert", "stall_watchdog"],
+        capture_output=True, text=True,
+    )
+
+
+def print_inbox_response_result(hits, quiet, stats, threshold_min, ceiling_min):
+    """母数は hit の有無に依らず刷る。鳴らさなかった分も必ず名乗る。
+
+    欄の名に IR_ を冠している。これは飾りではない。
+    この script は 4 つの検めが同じ stdout へ刷る。既存の検めの陰性対照は
+    「この走行に AGENT= / ELAPSED_MIN= / QC_DISPATCH_LATE が一つも無い」の形で
+    書かれており、素の欄名を刷ると他人の試験が赤くなる (2026-07-28 に三号が現に
+    5 本 落とした)。部分一致で当たる点に注意 = LM_AGENT= は AGENT= を含む。
+    """
+    for u in stats["unreadable_files"]:
+        print(f"ACTION=inbox_response_unreadable IR_INBOX={u} "
+              f"⇒ 読めなかったので応答の有無を判定できない = 健全と読むな")
+    for u in stats["cmd_undetermined"]:
+        print(f"ACTION=inbox_response_cmd_undetermined IR_INBOX={u['inbox']} "
+              f"IR_MSG_ID={u['id']} IR_ASHI={u['from']} "
+              f"⇒ 便の本文に cmd 番号が無く、突合から落ちた")
+    for u in stats["undated"]:
+        print(f"ACTION=inbox_response_undated IR_INBOX={u['inbox']} "
+              f"IR_MSG_ID={u['id']} IR_ASHI={u['from']} "
+              f"⇒ 刻が読めないので経過を測れない (hits に載らない)")
+    for u in stats["future"]:
+        print(f"ACTION=inbox_response_future_dated IR_INBOX={u['inbox']} "
+              f"IR_MSG_ID={u['id']} IR_ASHI={u['from']} IR_TIMESTAMP={u['timestamp']} "
+              f"IR_AHEAD_MIN={u['ahead_min']} ⇒ 便の刻が未来である = 経過が負ゆえ "
+              f"閾値を永久に超えず、経過で切る検めから消える")
+    for q in quiet:
+        print(f"QC_INBOX_NO_RESPONSE_QUIET IR_INBOX={q['inbox']} IR_ASHI={q['from']} "
+              f"IR_CMD={q['cmd']} IR_LATE_MIN={q['elapsed_min']} "
+              f"IR_LEDGER_STATUS={q['ledger_status']} IR_READ={q['read']} "
+              f"⇒ 鳴らさない ({q['quiet_reason']})。ただし数には入れる")
+    for h in hits:
+        print(f"QC_INBOX_NO_RESPONSE IR_INBOX={h['inbox']} IR_ASHI={h['from']} "
+              f"IR_CMD={h['cmd']} IR_MSG_ID={h['msg_id']} "
+              f"IR_LATE_MIN={h['elapsed_min']} IR_LEDGER_STATUS={h['ledger_status']} "
+              f"IR_READ={h['read']}")
+    if stats["report_family"] == 0:
+        canary = (" ★canary 赤 = 軍師の inbox に報告族が 1 通も無い ⇒ "
+                  "探し方 (file 名か型) が当たっていない疑い。"
+                  "この 0 を『応答漏れ無し』と読むな★")
+    elif stats["pointer_cmds"] == 0:
+        canary = (" ★canary 赤 = 軍師の帳面が指す cmd が 1 件も無い ⇒ "
+                  "探し方 (file 名か欄の名) が当たっていない疑い★")
+    elif not stats["ledger_readable"]:
+        canary = " ★台帳が読めなかった ⇒ 承知の遅れを分けられない★"
+    else:
+        canary = (f" (canary 緑 = read を問わぬ報告族 {stats['report_family']} 通・"
+                  f"帳面 {stats['pointer_cmds']} 件を現に見ている)")
+    head = ("応答なき報告 hit なし。" if not hits
+            else f"応答なき報告 hit={len(hits)} 件。")
+    print(f"[stall_watchdog] {head}閾値={threshold_min}分 上限={ceiling_min}分 "
+          f"走査file={stats['files']}(うち控え={stats['archive_files']}) "
+          f"便={stats['messages']} "
+          f"報告族={stats['report_family']} 応答済={stats['responded']} "
+          f"鳴らさず名乗った分={len(quiet)} "
+          f"読めぬinbox除外={len(stats['unreadable_files'])} "
+          f"cmd不明除外={len(stats['cmd_undetermined'])} "
+          f"刻の読めぬ便除外={len(stats['undated'])} "
+          f"刻が未来ゆえ除外={len(stats['future'])}" + canary)
+
+
 def format_alert_message(hit):
     base = (f"🚨 bookkeeping 漏れ検出: {hit['agent']} task YAML "
             f"({hit['task_id']}, {hit['parent_cmd']}) status=assigned のまま、"
@@ -896,6 +1135,18 @@ def main(argv=None):
                     help="起票漏れの突合 (cmd_1459) を走らせぬ。")
     ap.add_argument("--ledger", type=Path, default=None,
                     help="台帳 (shogun_to_karo.yaml) の path を差し替える (試験用)。")
+    ap.add_argument("--qc-inbox-threshold-min", type=int,
+                    default=QC_INBOX_DEFAULT_THRESHOLD_MIN,
+                    help=f"応答なき報告の閾値 (default "
+                         f"{QC_INBOX_DEFAULT_THRESHOLD_MIN})。cmd_1459。"
+                         f"read を見ずに測る検め。")
+    ap.add_argument("--qc-inbox-ceiling-min", type=int,
+                    default=QC_INBOX_DEFAULT_CEILING_MIN,
+                    help=f"これより古い便は鳴らさず名乗るだけにする (default "
+                         f"{QC_INBOX_DEFAULT_CEILING_MIN})。inbox は追記式ゆえ、"
+                         f"上限が無いと古い便が積む分だけ常に赤い検知になる。")
+    ap.add_argument("--no-qc-inbox-scan", action="store_true",
+                    help="応答なき報告の検め (cmd_1459・read を見ぬ側) を走らせぬ。")
     ap.add_argument("--no-liveness-scan", action="store_true",
                     help="定時実行 7 本の『終わった証』の検め (cmd_1465) を走らせぬ。")
     ap.add_argument("--liveness-logs-dir", type=Path, default=None,
@@ -930,6 +1181,15 @@ def main(argv=None):
         ml_hits, ml_quiet, ml_stats = scan_qc_ledger_miss(
             reports_dir, tasks_dir, ledger_path, args.qc_ledger_threshold_min)
 
+    # 応答なき報告 (cmd_1459・read を見ぬ側)。
+    #   前段の突合の後に走らせ、同じ走行で既に鳴らした cmd を渡して二重に鳴らさない。
+    ir_hits, ir_quiet, ir_stats = ([], [], None)
+    if not args.no_qc_inbox_scan:
+        ir_hits, ir_quiet, ir_stats = scan_qc_inbox_response(
+            inbox_dir, tasks_dir, ledger_path,
+            args.qc_inbox_threshold_min, args.qc_inbox_ceiling_min,
+            already_alerted_cmds={h["cmd"] for h in ml_hits})
+
     lv_findings = []
     if not args.no_liveness_scan:
         lv_findings, _lv_total = liveness.scan(args.liveness_logs_dir)
@@ -955,6 +1215,13 @@ def main(argv=None):
             print(json.dumps({"qc_ledger_miss": ml_hits,
                               "qc_ledger_miss_quiet": ml_quiet,
                               "qc_ledger_miss_stats": ml_stats},
+                             ensure_ascii=False))
+        # json の口でも応答なき報告を落とさない (cmd_1459)。
+        #   口ごとに見る範囲が違うと「json に出ない = 無い」と読まれる。
+        if ir_stats is not None:
+            print(json.dumps({"qc_inbox_no_response": ir_hits,
+                              "qc_inbox_no_response_quiet": ir_quiet,
+                              "qc_inbox_no_response_stats": ir_stats},
                              ensure_ascii=False))
         # json の口でも定時実行の見張りを落とさない (cmd_1465)。
         #   口ごとに見る範囲が違うと「json に出ない = 無い」と読まれるため。
@@ -999,6 +1266,10 @@ def main(argv=None):
         if ml_stats is not None:
             print_ledger_miss_result(ml_hits, ml_quiet, ml_stats,
                                      args.qc_ledger_threshold_min)
+        if ir_stats is not None:
+            print_inbox_response_result(ir_hits, ir_quiet, ir_stats,
+                                        args.qc_inbox_threshold_min,
+                                        args.qc_inbox_ceiling_min)
         # 定時実行の見張り (cmd_1465)。母数を必ず載せ、OK の分も名前を出す
         #   (「異常なし」と「そもそも見ていない」を log の上で分けるため)。
         #   欄の名に SL_ を付けるのは、他のチェックの陰性対照を巻き込まないため
@@ -1055,6 +1326,23 @@ def main(argv=None):
         proc = notify_karo_ledger_miss(h, args.qc_ledger_threshold_min)
         if proc.returncode != 0:
             print(f"[stall_watchdog] ERROR: inbox_write failed for ledger miss "
+                  f"{key}: {proc.stderr.strip()}", file=sys.stderr)
+            exit_code = 1
+            continue
+        state[key] = {"last_alert": now.isoformat(timespec="seconds"),
+                      "cmd": h["cmd"]}
+    # ── 応答なき報告の警報 (cmd_1459・read を見ぬ側) ──────────────────
+    # cooldown は同じ簿を使う (key に "qcinbox|" を冠して衝突を避ける)。
+    for h in ir_hits:
+        key = inbox_response_alert_key(h)
+        last = parse_iso_to_naive_local(state.get(key, {}).get("last_alert"))
+        if last is not None and (now - last).total_seconds() < args.cooldown_min * 60:
+            print(f"[stall_watchdog] cooldown 中ゆえ再警報せず: "
+                  f"{key} (cooldown={args.cooldown_min}分)")
+            continue
+        proc = notify_karo_inbox_response(h, args.qc_inbox_threshold_min)
+        if proc.returncode != 0:
+            print(f"[stall_watchdog] ERROR: inbox_write failed for inbox response "
                   f"{key}: {proc.stderr.strip()}", file=sys.stderr)
             exit_code = 1
             continue

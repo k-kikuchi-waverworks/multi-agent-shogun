@@ -345,6 +345,15 @@ DECLARED = {
     # 値を変えても全部 緑のままだった (軍師二号が cmd_1459 の検分で実測)。
     "QC_DEFAULT_THRESHOLD_MIN": 10,          # 軍師の inbox に未読のまま何分で鳴らすか (cmd_1454)
     "QC_LEDGER_DEFAULT_THRESHOLD_MIN": 10,   # 着地した report が台帳に載らないまま何分で鳴らすか (cmd_1459)
+    # ここから下は cmd_1459 の後段 (2026-07-28 夕・足軽五号) で足した。
+    # read を見ずに測る検め = 軍師の inbox に報告の便が着いてから、その cmd に
+    # 応答が無いまま何分で鳴らすか。10 は上と同じ 10 分規律から来ている。
+    "QC_INBOX_DEFAULT_THRESHOLD_MIN": 10,
+    # これより古い便は鳴らさず名乗るだけにする上限。
+    # 動かせば「家老の inbox へ警報が飛ぶ範囲」が現に変わるので契約である。
+    # 上限が必要な理由 = inbox は追記式ゆえ、上限が無いと古い便が積む分だけ
+    # 警告が増え続け、常に赤い検知になって外される (cmd_1359 と同じ理屈)。
+    "QC_INBOX_DEFAULT_CEILING_MIN": 120,
 }
 bad = []
 for name, want in DECLARED.items():

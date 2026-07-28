@@ -4604,6 +4604,221 @@ mutations:
     # 実測 2026-07-28: 1本だけ赤くなる (他14本は緑のまま)。
     red_needle: "task file with status archived is left alone and not named"
 
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # cmd_1467 — 報告の節ごとの掃除 (slim_report_sections) と、タスク帳面の冷却。
+  # 負の主張 (refute) を持つ試験 7 本を載せる。
+  #
+  # 何ゆえ 7 本か:
+  #   門 (gate_mutation_replay.py --negative-assertions) が「その主張を誰も証していない」と
+  #   名指した本数が 7 本。数は写さず、別の探し方で数え直した =
+  #   plans/cmd_1467_negative_census.py (足軽三号が cmd_1467 で足した @test 27 本を git show から
+  #   取り、今の file の本文に負の主張の綴りが在るかを見る) も 7 本。両者は一致した。
+  #
+  # 赤は全部、登録の前に実測した (plans/cmd_1467_registry_probe.py・2026-07-28 18:3x)。
+  # 走査器は消さずに残してある。誰でも同じ手で撃ち直せる。
+  #
+  # paths について (cmd_1462 の申し送りに従う):
+  #   ★baseline を砂場で現に撃って足りない物を見つけた★= 18:2x 実測。
+  #   scripts/stall_watchdog_scan.py と scripts/scheduled_liveness_check.py が要る。
+  #   前者は足軽三号が 2d892a4 で足した試験が現に呼ぶ。後者は前者が import する。
+  #   写さないと baseline が赤になり、門は FAIL ではなく UNDETERMINED で黙る
+  #   (= 検出力を測れていないのに、台帳には載っている形になる)。
+  #   足りた形で撃つと、砂場で 41 本すべてが走り skip 0 本になる。
+  #
+  # 錨は全部 1 行に収めた。scripts/slim_yaml.py は全行 CRLF ゆえ、行を跨ぐ錨は
+  # \r\n を含まないと当たらない (cmd_1463 の註にある六号の hit=0 と同じ罠)。
+  # ══════════════════════════════════════════════════════════════════════════
+  - id: MUT-1467-001
+    origin: cmd_1467
+    suspected_by: ashigaru3
+    desc: |
+      除外表 (CANONICAL_REPORTS) に名が載る報告は、file ごと攫わず、中の古い節だけを
+      控えへ移す。この配線そのものを切る変異である。
+      切ると古い節は永久に残り、報告は膨らみ続ける。cmd_1467 で直したかった形へ戻る。
+      「古い節は控えへ移り、file と今日の節は残る」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 41 本中 12 本が赤くなる (節ごとの掃除を見ている試験がまとまって落ちる)。
+      needle はそのうち陽性側の 1 本に置いた。
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, scripts/stall_watchdog_scan.py, scripts/scheduled_liveness_check.py, tests/unit/test_slim_yaml.bats, tests/test_helper]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      with open(p, encoding="utf-8", newline="") as fh:
+          s = fh.read()
+      old = "            slim_report_sections(filepath, archive_dir, timestamp,"
+      assert s.count(old) == 1, f"MUT-1467-001: 錨が一意でない (hit={s.count(old)})"
+      new = "            None and slim_report_sections(filepath, archive_dir, timestamp,"
+      with open(p, "w", encoding="utf-8", newline="") as fh:
+          fh.write(s.replace(old, new, 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    red_needle: "cmd_1467/報告: 古い節は控えへ移り、file と今日の節は残る"
+
+  - id: MUT-1467-002
+    origin: cmd_1467
+    suspected_by: ashigaru3
+    desc: |
+      節を移すのは「保つ日数より古い節」だけである。その境目の判定を潰し、今日の節まで
+      移す側へ倒す変異である。
+      倒すと、今日 書いたばかりの節が控えへ消える。報告を書いた本人が次に開いた時、
+      自分が今書いた所が無い形になる。
+      「今日の節しか無ければ何も移さず控えも作らない」と主張する陰性側の試験が
+      赤くなるべき。この試験は「控えが作られていないこと」を refute で見ている。
+      実測 2026-07-28: 41 本中 6 本が赤くなる。needle は陰性側の 1 本に置いた。
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, scripts/stall_watchdog_scan.py, scripts/scheduled_liveness_check.py, tests/unit/test_slim_yaml.bats, tests/test_helper]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      with open(p, encoding="utf-8", newline="") as fh:
+          s = fh.read()
+      old = "            if when >= cutoff:"
+      assert s.count(old) == 1, f"MUT-1467-002: 錨が一意でない (hit={s.count(old)})"
+      with open(p, "w", encoding="utf-8", newline="") as fh:
+          fh.write(s.replace(old, "            if False:", 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    red_needle: "cmd_1467/報告: 今日の節しか無ければ何も移さず控えも作らない (陰性)"
+
+  - id: MUT-1467-003
+    origin: cmd_1467
+    suspected_by: ashigaru3
+    desc: |
+      古い節でも、今 動いている cmd の番号を本文に持つ節は移さない。今 その cmd を
+      進めている者が、途中で自分の記録を失うためである。
+      この守りを外す変異である (動いている cmd を1つも見つけない形へ倒す)。
+      「今 動いている cmd を名指す古い節は移さない」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 41 本中 1 本だけが赤くなる (残り 40 本は緑のまま)。
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, scripts/stall_watchdog_scan.py, scripts/scheduled_liveness_check.py, tests/unit/test_slim_yaml.bats, tests/test_helper]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      with open(p, encoding="utf-8", newline="") as fh:
+          s = fh.read()
+      old = "            hit = next((cmd for cmd in active_cmd_ids if cmd and cmd in body), None)"
+      assert s.count(old) == 1, f"MUT-1467-003: 錨が一意でない (hit={s.count(old)})"
+      with open(p, "w", encoding="utf-8", newline="") as fh:
+          fh.write(s.replace(old, "            hit = None", 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    red_needle: "cmd_1467/報告: 今 動いている cmd を名指す古い節は移さない"
+
+  - id: MUT-1467-004
+    origin: cmd_1467
+    suspected_by: ashigaru3
+    desc: |
+      節が全部 古い時でも、最後の 1 節は残す。全部 移すと節の入れ物そのものが消え、
+      報告の形が変わってしまう (読む側の道具が「節が無い報告」を想定していない)。
+      この「器を空にしない」判定を外す変異である。
+      「全部 古くても最後の1節は残す」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 41 本中 1 本だけが赤くなる。
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, scripts/stall_watchdog_scan.py, scripts/scheduled_liveness_check.py, tests/unit/test_slim_yaml.bats, tests/test_helper]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      with open(p, encoding="utf-8", newline="") as fh:
+          s = fh.read()
+      old = "        if movable and len(movable) == len(ranges):"
+      assert s.count(old) == 1, f"MUT-1467-004: 錨が一意でない (hit={s.count(old)})"
+      with open(p, "w", encoding="utf-8", newline="") as fh:
+          fh.write(s.replace(old, "        if False:", 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    red_needle: "cmd_1467/報告: 器を空にしない (全部 古くても最後の1節は残す)"
+
+  - id: MUT-1467-005
+    origin: cmd_1467
+    suspected_by: ashigaru3
+    desc: |
+      報告の中に入れ物 (mapping) が2つ並ぶ形では、report: の下だけを節として見る。
+      範囲を絞らないと、report: の外に在る別の入れ物の key まで節と読み、
+      関わりの無い所を控えへ移す。
+      この範囲の絞りを外す変異である。
+      「入れ物が2つ並ぶ形では report: の側だけを見る」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 41 本中 1 本だけが赤くなる。
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, scripts/stall_watchdog_scan.py, scripts/scheduled_liveness_check.py, tests/unit/test_slim_yaml.bats, tests/test_helper]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      with open(p, encoding="utf-8", newline="") as fh:
+          s = fh.read()
+      old = "            scan_begin, scan_end = block"
+      assert s.count(old) == 1, f"MUT-1467-005: 錨が一意でない (hit={s.count(old)})"
+      new = "            scan_begin, scan_end = begin, end"
+      with open(p, "w", encoding="utf-8", newline="") as fh:
+          fh.write(s.replace(old, new, 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    red_needle: "cmd_1467/報告: 入れ物が2つ並ぶ形では report: の側だけを見る"
+
+  - id: MUT-1467-006
+    origin: cmd_1467
+    suspected_by: ashigaru3
+    desc: |
+      report YAML には document が2つ入る形が在り、その境目は --- の行で決まる。
+      境目を見る所で CR を落とさないと、CRLF の file では --- が「---\r」に見えて
+      一致せず、境目を黙って見落とす。落とすと 2つ目の document の節を 1つ目の
+      入れ物のものとして扱い、切る位置がずれる。
+      この CR の落としを外す変異である。
+      四号が cmd_1441 で踏んだ形 (.gitignore が全行 CRLF で、行末の $ が CR に阻まれ
+      数える一行が黙って 0 を返した) と同じ族である。この repo では二例目になる。
+      「document が2つの形でも、CRLF の行末で境目を見落とさない」と主張する試験が
+      赤くなるべき。
+      実測 2026-07-28: 41 本中 1 本だけが赤くなる。
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, scripts/stall_watchdog_scan.py, scripts/scheduled_liveness_check.py, tests/unit/test_slim_yaml.bats, tests/test_helper]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      with open(p, encoding="utf-8", newline="") as fh:
+          s = fh.read()
+      old = r"    stripped = line.rstrip('\r\n')"
+      assert s.count(old) == 1, f"MUT-1467-006: 錨が一意でない (hit={s.count(old)})"
+      new = r"    stripped = line.rstrip('\n')"
+      with open(p, "w", encoding="utf-8", newline="") as fh:
+          fh.write(s.replace(old, new, 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    red_needle: "cmd_1467/報告: document が2つの形でも、CRLF の行末で境目を見落とさない"
+
+  - id: MUT-1467-007
+    origin: cmd_1467
+    suspected_by: ashigaru3
+    desc: |
+      タスク帳面の掃除には冷却期間が在る。仕事を終えた直後の帳面を消すと、その者が
+      /clear から戻った時に読む物が無い。冷却は「終えてから一定の時間が経つまで
+      見送る」守りである。
+      この変異は冷却を越えても常に見送る側へ倒す。倒しても赤くならないなら、
+      陰性側 (冷却を越えた物は現に片付く) を見ている試験が無いことになる =
+      掃除が全く働かなくなっても誰も気付けない。
+      「冷却を越えた done は現に片付く」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 41 本中 1 本だけが赤くなる。
+    paths: [scripts/slim_yaml.py, scripts/slim_yaml.sh, scripts/stall_watchdog_scan.py, scripts/scheduled_liveness_check.py, tests/unit/test_slim_yaml.bats, tests/test_helper]
+    mutate: |
+      python3 - <<'PY'
+      p = "scripts/slim_yaml.py"
+      with open(p, encoding="utf-8", newline="") as fh:
+          s = fh.read()
+      old = "    if age < cooldown_seconds:"
+      assert s.count(old) == 1, f"MUT-1467-007: 錨が一意でない (hit={s.count(old)})"
+      with open(p, "w", encoding="utf-8", newline="") as fh:
+          fh.write(s.replace(old, "    if True:", 1))
+      PY
+    test: |
+      bats tests/unit/test_slim_yaml.bats
+    expect: nonzero
+    red_needle: "cmd_1467: 冷却を越えた done は現に片付く"
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

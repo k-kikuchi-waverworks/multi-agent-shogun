@@ -414,8 +414,37 @@ def named_paths(doc: dict) -> list[str]:
     return out
 
 
+def _now_naive_local() -> datetime.datetime:
+    """今の刻を、tz を持たぬ現地時刻で返す。★R5e が比べる基準★"""
+    return datetime.datetime.now()
+
+
+def _to_naive_local(value: str):
+    """timestamp の綴りを tz を持たぬ現地時刻へ直す。読めねば None。
+
+    ★何ゆえ揃えるか★= 報告には tz つき ('…+09:00') と tz 無しが混ざる。
+    そのまま引き算すると python が TypeError を投げる。読み手
+    (idle_revive_scan.py の parse_iso_to_naive_local) も同じ形で naive へ寄せておる。
+    """
+    try:
+        dt = datetime.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone().replace(tzinfo=None)
+    return dt
+
+
+# ★どれだけ先なら赤か★ (cmd_1469・軍師二号が決めた)
+#   分単位の丸めは最大 60 秒 先へ倒れる (書き手が「11:52:44」を「11:53:00」と書く形)。
+#   ★丸めは切り上げの側へ寄る★ = 番人が読む欄では此の向きが最も悪い。
+#   ゆえに丸めの幅の倍 (120 秒) を許し、それを超える先は ★丸めでは出ぬ★ と判ずる。
+#   実測 = 軍師二号が現に書いた誤りは 2 分 16 秒 先 ⇒ ★此の閾値で現に捕まる★。
+FUTURE_TOLERANCE_SEC = 120
+
+
 def warn_text(text: str, stem: str, task_lookup=None, path_exists=None,
-              path_is_dir=None) -> list[str]:
+              path_is_dir=None, now=None) -> list[str]:
     """R5 = ★読み手が探す鍵を持っておるか★。返り = 警告 list (空 = 何も言うことなし)。
 
     task_lookup = (task_id, updated_at, 前任 id, target_path) を返す callable。★試験が
@@ -559,6 +588,43 @@ def warn_text(text: str, stem: str, task_lookup=None, path_exists=None,
                     "     ★どちらでも「稿を書いた」と「帳面の指す所に在る」は別である★\n"
                     "     害 = 引く者が指す先を失う。★番人も此の path を出力の漸進の物差しに使う★"
                 )
+
+    # ── R5e = ★timestamp が未来を指しておる★ (cmd_1469) ──
+    #   ★出所★= 2026-07-28、家老が全員の帳面へ刻を手で書き、4〜5 時間 先の値が入った
+    #     (将軍が現物を見て気づいた)。同じ日、軍師二号も報告の timestamp を分単位で
+    #     丸め、実時刻より 2 分 16 秒 先へ倒れておった。★桁は違うが向きは同じ★。
+    #   ★何ゆえ「読めるか」だけでは足りぬか★= R5b は fromisoformat が解けるかしか見ぬ。
+    #     未来の刻は ★綺麗に解ける★。ゆえに R5b は黙る。
+    #   ★害★= 番人 (idle_revive_scan.py / stall_watchdog_scan.py) は此の欄を
+    #     「最後に動いた刻」として読む。未来の刻が入っておれば、其の刻が過ぎるまで
+    #     ★ずっと「今さっき更新された」と読まれ続ける★ ⇒ 止まっておる者を働いておると誤判定。
+    #     R5a〜R5c が守るのは「働いておるのに idle」の側。★R5e は其の逆向きを守る★。
+    #   ★上書きせぬ理由 (家老 12:02 の裁)★= 書き手が何を書いたかを消せば、誰も間違えぬ
+    #     代わりに ★誰も間違いに気づけなくなる★。今回のずれは人が現物を見て割れた。
+    for d in keyed:
+        ts = d.get("timestamp")
+        if not reader_can_parse_time(ts):
+            continue  # ★刻が無い/読めぬは R5b の領分★ (あちらが現に鳴る)
+        stamped = _to_naive_local(ts)
+        if stamped is None:
+            continue
+        ahead = (stamped - (now or _now_naive_local)()).total_seconds()
+        if ahead <= FUTURE_TOLERANCE_SEC:
+            continue
+        tid = d.get("task_id") or d.get("primary_task")
+        warnings.append(
+            f"[R5e] task_id={tid!r} の timestamp が ★未来を指しておる★ "
+            f"({ts!r} = 今より {ahead / 60:.1f} 分 先)\n"
+            f"     許す幅 = {FUTURE_TOLERANCE_SEC} 秒。★丸めは切り上げの側へ寄る★ゆえ"
+            " 分単位の丸め (最大 60 秒) の倍を採った。\n"
+            "     ⇒ 之を超える先の刻は丸めでは出ぬ = ★date を撃たずに書いた値★である。\n"
+            f"     読み手 = {READER} は此の欄を「最後に動いた刻」として読む。\n"
+            "     害 = 其の刻が過ぎるまで ★ずっと『今さっき更新された』と読まれ続ける★\n"
+            "          ⇒ 止まっておる者が働いておると判ぜられ、番人が起こしに来ぬ\n"
+            "     直し = `date '+%Y-%m-%dT%H:%M:%S'` を撃った値をそのまま入れよ。\n"
+            "     ★門は上書きせぬ★ = 書いた物を消せば、誰も間違えぬ代わりに"
+            " ★誰も間違いに気づけなくなる★ (家老 12:02 の裁)"
+        )
     return warnings
 
 
@@ -858,6 +924,32 @@ def live_wiring() -> tuple[bool, list[str]]:
             lines.append(f"  ok  L3 路として読めぬ target_path の帳面 {len(unreadable)} 本で "
                          f"R5d2 が現に鳴った ({[t for _s, _i, _u, t in unreadable][0][:40]}…)")
 
+    # ── L7 (cmd_1469) = ★R5e の【時計】の配線を、差し替えずに撃つ★ ──
+    #   ★何ゆえ要るか★= W5e 系は now を差し替えて撃つゆえ、★既定の時計を読む口
+    #   (_now_naive_local) は一度も走っておらぬ★。cmd_1450 で変異4 が
+    #   「読む口を切って常に None を返す」形のまま selftest 全緑で生き残った、
+    #   ★あの形そのものである★ (CLAUDE.md 条5 の実例2)。
+    #   ⇒ 現物の時計から見て確実に未来／確実に過去の刻を作り、両方向で撃つ。
+    #     刻は現物の時計から作る = ★どの日に撃っても答が変わらぬ★ (条G-2)。
+    _real = _now_naive_local()
+    _future = (_real + datetime.timedelta(hours=4)).isoformat(timespec="seconds")
+    _past = (_real - datetime.timedelta(hours=4)).isoformat(timespec="seconds")
+    _stem_l7 = "ashigaru3_report"
+    _mk = (lambda ts: f"task_id: subtask_9469\nstatus: done\ntimestamp: '{ts}'\n")
+    _no_task = lambda _s: (None, None, set(), None)  # noqa: E731  R5c/R5d を黙らせる
+    hit_f = any("[R5e]" in g for g in
+                warn_text(_mk(_future), _stem_l7, task_lookup=_no_task))
+    hit_p = any("[R5e]" in g for g in
+                warn_text(_mk(_past), _stem_l7, task_lookup=_no_task))
+    if hit_f and not hit_p:
+        determined += 1
+        lines.append("  ok  L7 既定の時計で R5e が両方向に効く "
+                     f"(4 時間 先 → 鳴る / 4 時間 前 → 黙る・許す幅 {FUTURE_TOLERANCE_SEC} 秒)")
+    else:
+        ok = False
+        lines.append(f"  NG  L7 ★既定の時計を読む口が壊れておる★ "
+                     f"未来で鳴ったか={hit_f} (True の筈) / 過去で鳴ったか={hit_p} (False の筈)")
+
     if determined == 0:
         ok = False
         lines.append("  NG  L4 ★determined が 1 つも無い★ = 現物の盤では配線を一度も撃てておらぬ。"
@@ -912,7 +1004,7 @@ def _cases() -> list[tuple[str, str, str | None, str | None]]:
 #   ⇒ 「族がここに在るべし」を ★data として宣言し、走った後に照合する★。
 #   ★之で消えるのは【黙って消える形】だけである★= 下の表から名を消せば依然として外せる。
 #   而して其の時は ★何を捨てたかを明示して消す★ことになる (条6 = 射程を名乗る)。
-REQUIRED_FAMILIES = ("B1", "B2", "B3", "B3n", "L0", "L5", "L6", "N3")
+REQUIRED_FAMILIES = ("B1", "B2", "B3", "B3n", "L0", "L5", "L6", "L7", "N3")
 
 
 def selftest() -> int:
@@ -1027,6 +1119,9 @@ def selftest() -> int:
     #     ★盤面が動けば試験の答も動く★形になる (条G-2)。
     _NOT_DIR = lambda _p: False   # noqa: E731  「其の路はディレクトリでない」
     _IS_DIR = lambda _p: True     # noqa: E731  「其の路は現に在るディレクトリ」
+    #   ★今の刻も差し替える★ (cmd_1469)。実時計で撃つと、試験の答が撃った刻で変わる。
+    #     ここを既定のままにすると、W5e 系は ★盤面 (時計) が動けば答も動く★形になる (条G-2)。
+    _NOW = lambda: datetime.datetime(2026, 7, 28, 12, 0, 0)  # noqa: E731
     _T = "plans/cmd_9450_draft.md"           # 帳面が指す綴り (現物には存在せぬ名)
     _T_OTHER = "plans/cmd_9450_written.md"   # 書き手が己で付けた別の名
     _T_DIR = "plans/cmd_9450_scan"           # 拡張子を持たぬ = 旧い門はここで誤って鳴った
@@ -1172,13 +1267,60 @@ def selftest() -> int:
             lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set()),
             None, _NO_FILE,
         ),
+        # ── R5e (cmd_1469) = ★未来の刻★ を両方向で撃つ ──
+        #   ★刻は差し替える★= 実時計で撃てば、試験の答が撃った刻で変わる (条G-2)。
+        (
+            "W5e 刻が ★4 時間 先★ (家老が現に書いた形) = 鳴る",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T16:00:00'\n",
+            "ashigaru3_report", _NO_TASK, "[R5e]", _NO_FILE, _NOT_DIR, _NOW,
+        ),
+        (
+            "W5e2 刻が ★2 分 16 秒 先★ (軍師二号が現に書いた形) = 鳴る",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T12:02:16'\n",
+            "ashigaru3_report", _NO_TASK, "[R5e]", _NO_FILE, _NOT_DIR, _NOW,
+        ),
+        (
+            "W5en 刻が ★過去★ = 黙る (陰性側・之が鳴れば門を殺しておる)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T11:00:00'\n",
+            "ashigaru3_report", _NO_TASK, None, _NO_FILE, _NOT_DIR, _NOW,
+        ),
+        (
+            "W5en2 刻が ★今そのもの★ = 黙る (陰性側)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T12:00:00'\n",
+            "ashigaru3_report", _NO_TASK, None, _NO_FILE, _NOT_DIR, _NOW,
+        ),
+        (
+            "W5en3 刻が ★許す幅ちょうど (120 秒 先)★ = 黙る (境の内側)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T12:02:00'\n",
+            "ashigaru3_report", _NO_TASK, None, _NO_FILE, _NOT_DIR, _NOW,
+        ),
+        (
+            "W5en4 tz つきの刻でも引き算が落ちぬ (過去ゆえ黙る)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T11:00:00+09:00'\n",
+            "ashigaru3_report", _NO_TASK, None, _NO_FILE, _NOT_DIR, _NOW,
+        ),
+        (
+            # ★家老 12:02 の枷3★=「刻が無い/読めぬ時に何が起きるか」を決めて書け。
+            #   家老の推しは「鳴る」側。★R5b が現に鳴る★ゆえ R5e は其処を重ねて見ぬ。
+            "W5eb 刻が ★無い★ = R5e でなく ★R5b★ が鳴る (枷3 = 無いを正しいと読まぬ)",
+            "task_id: subtask_9450\nstatus: done\n",
+            "ashigaru3_report", _NO_TASK, "[R5b]", _NO_FILE, _NOT_DIR, _NOW,
+        ),
+        (
+            "W5eb2 刻が ★読めぬ★ = 同じく R5b が鳴る (枷3)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: 'きのう'\n",
+            "ashigaru3_report", _NO_TASK, "[R5b]", _NO_FILE, _NOT_DIR, _NOW,
+        ),
     ]:
         name, text, stem, lookup, needle, *rest = case
-        # rest[0] = path_exists の差し替え / rest[1] = path_is_dir の差し替え。
-        # ★どちらも現物へ触れぬための口である★ (条C = 試験の作り物を門の母数へ入れぬ)。
+        # rest[0] = path_exists の差し替え / rest[1] = path_is_dir の差し替え
+        # rest[2] = 今の刻の差し替え (R5e 用・cmd_1469)。
+        # ★どれも現物へ触れぬための口である★ (条C = 試験の作り物を門の母数へ入れぬ)。
+        # ★刻を差し替える理由★= 実時計で撃つと、試験の答が撃った刻で変わる (条G-2)。
         got = warn_text(text, stem, task_lookup=lookup,
                         path_exists=(rest[0] if rest else None),
-                        path_is_dir=(rest[1] if len(rest) > 1 else _NOT_DIR))
+                        path_is_dir=(rest[1] if len(rest) > 1 else _NOT_DIR),
+                        now=(rest[2] if len(rest) > 2 else None))
         if needle is None:
             passed = not got
             detail = "" if passed else " / 出た警告=" + "; ".join(g.split("\n")[0] for g in got)
@@ -1333,5 +1475,17 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except Exception as exc:  # ★fail-OPEN だが黙らぬ★
+        # ★但し --selftest だけは fail-OPEN にせぬ★ (cmd_1469・軍師二号が実測で見つけた)
+        #   何が起きたか = R5e を tz つきの刻で落とす変異を撃った所、selftest が
+        #   ★W5en4 の行で止まり、B4/B5/総judge を一度も刷らぬまま rc=0 を返した★。
+        #   ⇒ ★試験が途中で死んだのに「PASS」と読める★形であった。
+        #   B5 (赤い行を刷りながら PASS を禁ずる) も B4 (宣言した族が走ったか) も、
+        #   ★己が走る前に死んでおれば何も言えぬ★。
+        #   fail-OPEN が守りたいのは「門の不調で全 agent の Write が止まる」ことだけで、
+        #   ★己を検める走行を緑に見せることではない★。ゆえに此処で分ける。
+        if "--selftest" in sys.argv[1:]:
+            print(f"[report_validate] NG: ★selftest が途中で落ちた★ — 之を緑と読むな: "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            sys.exit(1)
         print(f"[report_validate] WARN: 内部異常 — 通す (fail-OPEN): {exc}", file=sys.stderr)
         sys.exit(0)

@@ -237,6 +237,16 @@ scripts/seo_qc.sh
 #   ★見つけ方 = `git status` ではなく `git check-ignore` である★ (ignore された file は
 #   `??` にすら出ないので、git status は「緑」ではなく「見ていない」を返す)。
 !scripts/queue_backup.sh
+# cmd_1470 (2026-07-28): 殿の頁の、印より下を控えへ移す道具 (足軽四号)。
+#   ★この行が要る理由 = 一つ上の cmd_1466 と同じである。★ 移す先の archive/ は追跡下に
+#   1 本も無く、`git clean -xd` 一手で消える。その控えへ移す script が同じ一手で一緒に
+#   消えては、次に頁を畳む手が残らない。
+#   ★足軽一号が 18:28 の便で名指してくれた。★ 拙者は己の道具が見えているかを撃っておらず、
+#   一号に「同じ穴を踏みました」と教えられて初めて `git check-ignore` を撃った。
+#   ★git status には出ない (ignore された file は `??` にすら出ない)。★
+#   なお plans/cmd_1470_mutate.sh (変異試験) は plans/ 配下ゆえ、意図して git 管理外である。
+#   ⇒ ★変異試験そのものは `git clean -xd` で消える側に居る。★ 消えても道具は残る。
+!scripts/dashboard_archive.sh
 # cmd_1352 (2026-07-26): 沈黙する落とし穴gate (gate-1=commit捕捉 / gate-2=変異台帳再走。
 # 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
 !scripts/gate_artifact_capture.sh

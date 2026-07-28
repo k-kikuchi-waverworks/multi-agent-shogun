@@ -28,6 +28,16 @@ setup() {
     export QUARANTINE_DIR="$QUEUE_DIR/archive"
     export LEDGER_LOCK="$LEDGER_FILE.lock"
     export LEDGER_GUARD_LOG="$TEST_TMPDIR/ledger_guard.log"
+
+    # ─── cmd_1468: lifetime lock も tmp へ隔離する ───
+    # cmd_1339 で ledger_guard は proc_lock による二重起動防止を持った。
+    # lock の置き場は既定で $HOME/.local/share/multi-agent-shogun/locks = 本番と同じ場所で、
+    # ★本番の ledger_guard が常に稼働しているため、テストが起動した instance は
+    #   「既に稼働中」と判じて即 退場していた★。
+    # 退場した instance は last_good を作らないので、(4) は「守りが壊れた」ではなく
+    # 「テストが本番の生きた状態を読んでいた」ために赤くなっていた (2026-07-28 08:43 実測)。
+    export SHOGUN_LOCK_DIR="$TEST_TMPDIR/locks"
+    mkdir -p "$SHOGUN_LOCK_DIR"
     export LEDGER_VALIDATOR="$PROJECT_ROOT/scripts/ledger_validate.py"
     export SCRIPT_DIR="$PROJECT_ROOT"
 
@@ -307,4 +317,58 @@ write_valid_ledger() {
     assert_equal "$(cat "$LEDGER_FILE")" "$good"
     run validate_ledger "$LEDGER_FILE"
     assert_success
+}
+
+# ───────────────────────────────────────────────────────────
+# (4b) cmd_1468: 陰性側 — lock が既に取られていれば watcher は退場する
+# ───────────────────────────────────────────────────────────
+# (4) の赤は「守りが壊れた」ではなく「テストが本番の lock を読んでいた」ためだった。
+# 上の setup で lock を tmp へ隔離したが、★隔離しただけでは
+# 「lock が効いているから緑なのか、lock を一度も見ていないから緑なのか」が区別できない★。
+# そこで陰性側を隣へ置く = lock を先に握った状態で起動し、退場することを撃つ。
+# これが赤くなる時は、二重起動防止そのものが死んでいる。
+@test "(4b) e2e: lifetime lock already held → guard exits without touching last_good" {
+    command -v inotifywait >/dev/null || skip "inotifywait not available"
+    write_valid_ledger
+
+    # 一体目 = 本物の ledger_guard を起動して lock を握らせる
+    __LEDGER_GUARD_TESTING__=0 \
+    LEDGER_DEBOUNCE_SEC=1 \
+    LEDGER_FILE="$LEDGER_FILE" LAST_GOOD_FILE="$LAST_GOOD_FILE" \
+    QUARANTINE_DIR="$QUARANTINE_DIR" LEDGER_LOCK="$LEDGER_LOCK" \
+    LEDGER_GUARD_LOG="$LEDGER_GUARD_LOG" LEDGER_VALIDATOR="$LEDGER_VALIDATOR" \
+    LEDGER_PYTHON="$LEDGER_PYTHON" LEDGER_GUARD_INBOX_WRITE="$LEDGER_GUARD_INBOX_WRITE" \
+    SCRIPT_DIR="$PROJECT_ROOT" SHOGUN_LOCK_DIR="$SHOGUN_LOCK_DIR" \
+    bash "$PROJECT_ROOT/scripts/ledger_guard.sh" >/dev/null 2>&1 &
+    local holder_pid=$!
+
+    # ★lock が実際に握られたことを確かめてから二体目を撃つ★
+    # 握られる前に撃つと、二体目は普通に起動して緑になり、陰性側が意味を失う。
+    # shellcheck source=lib/proc_lock.sh
+    source "$PROJECT_ROOT/scripts/lib/proc_lock.sh"
+    local i held=0
+    for i in $(seq 1 40); do
+        if proc_lock_is_held "ledger_guard"; then held=1; break; fi
+        sleep 0.25
+    done
+    [ "$held" -eq 1 ]
+
+    # 二体目が退場する所を見たいので、last_good は一体目が作った物を消しておく
+    rm -f "$LAST_GOOD_FILE"
+
+    __LEDGER_GUARD_TESTING__=0 \
+    LEDGER_DEBOUNCE_SEC=1 \
+    LEDGER_FILE="$LEDGER_FILE" LAST_GOOD_FILE="$LAST_GOOD_FILE" \
+    QUARANTINE_DIR="$QUARANTINE_DIR" LEDGER_LOCK="$LEDGER_LOCK" \
+    LEDGER_GUARD_LOG="$LEDGER_GUARD_LOG" LEDGER_VALIDATOR="$LEDGER_VALIDATOR" \
+    LEDGER_PYTHON="$LEDGER_PYTHON" LEDGER_GUARD_INBOX_WRITE="$LEDGER_GUARD_INBOX_WRITE" \
+    SCRIPT_DIR="$PROJECT_ROOT" SHOGUN_LOCK_DIR="$SHOGUN_LOCK_DIR" \
+    run bash "$PROJECT_ROOT/scripts/ledger_guard.sh"
+
+    kill "$holder_pid" 2>/dev/null || true
+    wait "$holder_pid" 2>/dev/null || true
+
+    assert_success                        # 退場は正常終了 (rc=0)
+    assert_output --partial "DUPLICATE"   # 退場したと名乗っている
+    [ ! -f "$LAST_GOOD_FILE" ]            # 退場した instance は last_good を作らない
 }

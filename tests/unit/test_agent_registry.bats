@@ -66,7 +66,25 @@ join_lines() {
     [ "$result" = "karo ashigaru1 ashigaru2 ashigaru3 ashigaru4 ashigaru5 ashigaru6 ashigaru7 gunshi" ]
 }
 
-@test "agent_registry: pane mapping follows configured order and pane base" {
+# cmd_1468: この2本は tmux を stub して撃つ。
+#
+# cmd_1339 で agent_registry_multiagent_pane_for_agent は
+# ★settings の並び順ではなく、生きた tmux pane の @agent_id を第一正本にした★。
+# ところがテストは settings の fixture だけ差し替えて撃っていたので、
+# 実際には ★本番の pane 配置★ を読んでいた (karo は現に multiagent:agents.0 に居るため、
+# fixture が何と言おうと .0 が返る)。2026-07-28 08:43 に赤で露見。
+#
+# ゆえに二方向を分けて撃つ:
+#   下の「fallback」= @agent_id が引けない時に settings 順が効くこと (旧来の契約)
+#   下の「@agent_id 優先」= 引ける時は settings 順を無視して pane を採ること (今の契約)
+# 片方だけでは、どちらの実装でも緑になってしまう。
+stub_tmux_absent() {
+    # @agent_id を一つも返さない tmux = 旧構成 / tmux 不在に相当
+    tmux() { return 1; }
+}
+
+@test "agent_registry: pane mapping falls back to configured order when @agent_id is absent" {
+    stub_tmux_absent
     local settings="$TEST_TMP/settings.yaml"
     write_settings "$settings" 'cli:
   agents:
@@ -86,6 +104,38 @@ join_lines() {
     [ "$(agent_registry_pane_for_agent shogun 1)" = "shogun:main.0" ]
     [ "$(agent_registry_multiagent_pane_for_agent karo 1)" = "multiagent:agents.1" ]
     [ "$(agent_registry_multiagent_pane_for_agent ashigaru4 1)" = "multiagent:agents.2" ]
+    [ "$(agent_registry_multiagent_pane_for_agent gunshi2 1)" = "multiagent:agents.4" ]
+}
+
+@test "agent_registry: live @agent_id wins over configured order" {
+    # 同じ settings を使い、tmux だけ「settings 順とは違う席」を返す stub にする。
+    # settings 順なら karo=.1 / ashigaru4=.2 になるが、@agent_id が引ける以上
+    # そちらが正本ゆえ .7 / .3 が返らねばならない。
+    tmux() {
+        printf '%s\n' \
+            'multiagent:agents.7 karo' \
+            'multiagent:agents.3 ashigaru4'
+    }
+
+    local settings="$TEST_TMP/settings.yaml"
+    write_settings "$settings" 'cli:
+  agents:
+    shogun:
+      type: codex
+    karo:
+      type: codex
+    ashigaru4:
+      type: codex
+    gunshi:
+      type: codex
+    gunshi2:
+      type: codex'
+
+    load_registry_with "$settings"
+
+    [ "$(agent_registry_multiagent_pane_for_agent karo 1)" = "multiagent:agents.7" ]
+    [ "$(agent_registry_multiagent_pane_for_agent ashigaru4 1)" = "multiagent:agents.3" ]
+    # @agent_id に居ない者は従来どおり settings 順の fallback へ落ちる
     [ "$(agent_registry_multiagent_pane_for_agent gunshi2 1)" = "multiagent:agents.4" ]
 }
 

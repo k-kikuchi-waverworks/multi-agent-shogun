@@ -101,14 +101,54 @@ run_hook_no_agent() {
     [ ! -f "$TEST_TMP/inbox_write_calls.log" ]
 }
 
+# ───────────────────────────────────────────────────────────
+# T-HOOK-011 (cmd_1468): fixture の形が、実際に書く側の形と同じであること
+# ───────────────────────────────────────────────────────────
+# T-HOOK-008/010 は 2026-07-28 08:43 時点で赤だった。原因は hook ではなく fixture である。
+# fixture は `  - id:` (list を2字 下げる形) で書いており、key が4字 下がっていた。
+# 一方 stop_hook_inbox.sh は `^  read: false` = ★2字ちょうど★ で数える。
+# 実際に書く側 (inbox_write.sh) は PyYAML の
+#   yaml.dump(default_flow_style=False, indent=2)
+# を使い、★list を下げない★ ゆえ key は2字である。
+# つまり fixture だけが現物と違う形をしており、
+#   T-HOOK-008/010 = 未読があるのに0件と数えて赤
+#   T-HOOK-009     = 既読だから緑ではなく、★そもそも一件も数えていないから緑★
+# になっていた。009 の緑は「検めて通った」ではなく「見る物が無かった」側である (規 条5)。
+#
+# 本テストは、書く側と同じ dump 設定で1件 吐かせ、hook が使う数え方が
+# ★現に当たる★ ことを撃つ。書く側の serialize 契約が変われば、ここが先に落ちる。
+@test "T-HOOK-011: fixture shape matches what the real writer emits (unread grep hits)" {
+    local generated="$TEST_TMP/generated_inbox.yaml"
+    python3 - "$generated" <<'PY'
+import sys, yaml
+data = {"messages": [{
+    "id": "msg_001", "from": "karo", "timestamp": "2026-07-28T08:43:00",
+    "type": "task_assigned", "content": "新タスクだ", "read": False,
+}]}
+with open(sys.argv[1], "w") as f:
+    yaml.dump(data, f, default_flow_style=False, allow_unicode=True, indent=2)
+PY
+
+    # 陽性: hook と同じ数え方で1件 当たる
+    [ "$(grep -cE '^  read: false' "$generated")" -eq 1 ]
+
+    # 陰性: 旧 fixture の形 (key が4字) では当たらない = 数え方は形に敏感である
+    cat > "$TEST_TMP/old_shape.yaml" << 'YAML'
+messages:
+  - id: msg_001
+    read: false
+YAML
+    [ "$(grep -cE '^  read: false' "$TEST_TMP/old_shape.yaml")" -eq 0 ]
+}
+
 @test "T-HOOK-008: unread inbox messages produce block JSON" {
     cat > "$TEST_TMP/queue/inbox/ashigaru1.yaml" << 'YAML'
 messages:
-  - id: msg_001
-    from: karo
-    type: task_assigned
-    content: "新タスクだ"
-    read: false
+- id: msg_001
+  from: karo
+  type: task_assigned
+  content: "新タスクだ"
+  read: false
 YAML
     run_hook '{"stop_hook_active": false, "last_assistant_message": ""}'
     [ "$status" -eq 0 ]
@@ -119,11 +159,11 @@ YAML
 @test "T-HOOK-009: no unread + completion message exits 0 with notification" {
     cat > "$TEST_TMP/queue/inbox/ashigaru1.yaml" << 'YAML'
 messages:
-  - id: msg_001
-    from: karo
-    type: task_assigned
-    content: "古いメッセージ"
-    read: true
+- id: msg_001
+  from: karo
+  type: task_assigned
+  content: "古いメッセージ"
+  read: true
 YAML
     run_hook '{"stop_hook_active": false, "last_assistant_message": "タスク完了した。report YAML updated。"}'
     [ "$status" -eq 0 ]
@@ -137,11 +177,11 @@ YAML
 @test "T-HOOK-010: unread inbox + completion message blocks AND notifies" {
     cat > "$TEST_TMP/queue/inbox/ashigaru1.yaml" << 'YAML'
 messages:
-  - id: msg_001
-    from: karo
-    type: task_assigned
-    content: "次のタスク"
-    read: false
+- id: msg_001
+  from: karo
+  type: task_assigned
+  content: "次のタスク"
+  read: false
 YAML
     run_hook '{"stop_hook_active": false, "last_assistant_message": "任務完了でござる。"}'
     [ "$status" -eq 0 ]

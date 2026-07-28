@@ -1611,8 +1611,8 @@ mutations:
       import pathlib
       p = pathlib.Path("scripts/ntfy.sh")
       s = p.read_text(encoding="utf-8")
-      old = 'HTTP=${_http_status:-NONE} curl_rc=$_curl_rc title='
-      new = 'HTTP=${_http_status:-NONE} title='
+      old = 'curl_rc=$_curl_rc caller='
+      new = 'caller='
       n = s.count(old)
       assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
       p.write_text(s.replace(old, new, 1), encoding="utf-8")

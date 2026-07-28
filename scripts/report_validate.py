@@ -373,6 +373,22 @@ def repo_path_exists(rel: str) -> bool:
     return (_SCRIPTS_DIR.parent / rel.strip()).exists()
 
 
+def repo_path_is_dir(rel: str) -> bool:
+    """repo 根からの相対で、現に在るディレクトリか。
+
+    何ゆえ要るか (cmd_1395・四号が 2026-07-28 に二度 踏んだ):
+      looks_like_path() は ★拡張子の有無だけ★ を見る。ゆえに
+      ディレクトリは必ず「路として読めぬ」側へ落ちていた。
+      ★ところが読み手 (idle_revive_scan.py の newest_output_mtime) は
+      is_dir() を現に扱い、ディレクトリの中でいちばん新しい mtime を拾う★
+      (現物の綴り = `elif tp_path.is_dir():`)。
+      ⇒ 門が「読めぬ」と名指すので、書き手は帳面を 1 ファイルへ狭める。
+        すると revive の判断が束全体でなくその 1 本だけを見る形になり、
+        ★門が守りを弱める方向へ人を導いていた★。
+    """
+    return (_SCRIPTS_DIR.parent / rel.strip()).is_dir()
+
+
 def named_paths(doc: dict) -> list[str]:
     """報告が己で名乗った成果物の路を集める (deliverable 系の欄のみ)。"""
     out: list[str] = []
@@ -384,13 +400,15 @@ def named_paths(doc: dict) -> list[str]:
     return out
 
 
-def warn_text(text: str, stem: str, task_lookup=None, path_exists=None) -> list[str]:
+def warn_text(text: str, stem: str, task_lookup=None, path_exists=None,
+              path_is_dir=None) -> list[str]:
     """R5 = ★読み手が探す鍵を持っておるか★。返り = 警告 list (空 = 何も言うことなし)。
 
     task_lookup = (task_id, updated_at, 前任 id, target_path) を返す callable。★試験が
     現物の queue/tasks/ を書き換えずに R5c/R5d を撃てるようにする口★ (既定 = current_task)。
     ★3 つ組を返す古い口も受ける★ (target_path 無しと読む = R5d は黙る)。
     path_exists = 路の現物在否を返す callable (既定 = repo_path_exists)。
+    path_is_dir = 路が現に在るディレクトリか返す callable (既定 = repo_path_is_dir)。
     ★試験が此処を差し替える理由 = 条C「己を母数から外す」★ = 試験の作り物が
     plans/ 等へ現物を作れば、門が数える盤面を門の試験が動かす形になる。
     """
@@ -486,6 +504,7 @@ def warn_text(text: str, stem: str, task_lookup=None, path_exists=None) -> list[
     #     = 条C「己を母数から外せ」を、判定に使えば必ず破る形ゆえ採らぬ。
     #     ★手掛かりとしてだけ出す★= 判定には使わず、報告が名乗った路のみを並べる。
     exists = path_exists or repo_path_exists
+    is_dir = path_is_dir or repo_path_is_dir
     if task_id and target_path is not None:
         done_docs = [
             d for d in keyed
@@ -494,12 +513,17 @@ def warn_text(text: str, stem: str, task_lookup=None, path_exists=None) -> list[
             and d.get("status").strip().lower() in COMPLETION_WORDS
         ]
         if done_docs:
-            if not looks_like_path(target_path):
+            # ★ディレクトリを「読めぬ」と名指してはならぬ★ (cmd_1395)。
+            #   読み手は is_dir() を現に扱うので、ディレクトリは現に読める。
+            #   ここを外すと、門が「帳面を 1 ファイルへ狭めよ」と誤って導く。
+            if not (looks_like_path(target_path) or is_dir(target_path)):
                 warnings.append(
                     "[R5d2] 帳面の target_path が ★路として読めぬ★\n"
                     f"     task YAML = {task_id!r} の target_path = {target_path!r}\n"
-                    "     読み手 = scripts/idle_revive_scan.py:1505-1536 (newest_output_mtime) は\n"
+                    "     読み手 = scripts/idle_revive_scan.py の newest_output_mtime は\n"
                     "     ★target_path を【路として】読み、読めねば警告も出さず黙って候補から捨てる★\n"
+                    "     (読み手が現に持つ綴り = `elif tp_path.is_dir():` ゆえ\n"
+                    "      ★現に在るディレクトリは【読める】。此の警告は出ぬ★)\n"
                     "     害 = 「出力が漸進しておれば revive せぬ」守りが、註釈 1 つで黙って外れる\n"
                     "     ⇒ ★直すのは帳面の側★ (註は target_path_note へ書き、path 欄は路のみ)"
                 )
@@ -801,8 +825,11 @@ def live_wiring() -> tuple[bool, list[str]]:
         lines.append("  ??  L2n UNDETERMINED 現物の盤に「指す先が在る」帳面が今 1 本も無い")
 
     # ── L3 = R5d2 の配線。★路として読めぬ target_path を持つ帳面で撃つ★ ──
+    # ★門と同じ見分けを使う★= 門が「ディレクトリは読める」と判ずるのに
+    #   此処が拡張子だけで数えると、配線の試験が門と食い違う盤面を作る。
     unreadable = [(st, t_id, t_upd, tgt) for st, t_id, t_upd, _pv, tgt in ledgers
-                  if tgt is not None and not looks_like_path(tgt)]
+                  if tgt is not None
+                  and not (looks_like_path(tgt) or repo_path_is_dir(tgt))]
     if not unreadable:
         lines.append("  ??  L3 UNDETERMINED ★路として読めぬ target_path を持つ帳面が今 無い★ "
                      "= R5d2 の配線を現物では撃てておらぬ (七号の帳面が直れば此処へ来る)")
@@ -981,8 +1008,14 @@ def selftest() -> int:
     #     (条C = 門の試験が門の数える盤面を動かす形にせぬ)。
     _NO_FILE = lambda _p: False   # noqa: E731  「其の路に物は無い」
     _HAS_FILE = lambda _p: True   # noqa: E731  「其の路に物が在る」
+    #   ★ディレクトリか否かも差し替える★ (cmd_1395)。既定は「どれもディレクトリでない」。
+    #     此処を既定のままにすると、試験が現物の repo を見に行き、
+    #     ★盤面が動けば試験の答も動く★形になる (条G-2)。
+    _NOT_DIR = lambda _p: False   # noqa: E731  「其の路はディレクトリでない」
+    _IS_DIR = lambda _p: True     # noqa: E731  「其の路は現に在るディレクトリ」
     _T = "plans/cmd_9450_draft.md"           # 帳面が指す綴り (現物には存在せぬ名)
     _T_OTHER = "plans/cmd_9450_written.md"   # 書き手が己で付けた別の名
+    _T_DIR = "plans/cmd_9450_scan"           # 拡張子を持たぬ = 旧い門はここで誤って鳴った
     for case in [
         (
             "W1 任意名の下へ入れた task_id (三号の現物と同じ形) = 読み手から見えぬ",
@@ -1089,6 +1122,36 @@ def selftest() -> int:
             "[R5d2]", _NO_FILE,
         ),
         (
+            # ★陽性側★ = 直しが現に効いておるか。
+            # 旧い門は拡張子だけを見たので、ここで必ず [R5d2] を出しておった。
+            # 読み手は is_dir() を扱うので、現に在るディレクトリは【読める】。
+            "W5d1 target_path が ★現に在るディレクトリ★ = R5d2 も R5d も ★黙る★ (cmd_1395)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(), _T_DIR),
+            None, _HAS_FILE, _IS_DIR,
+        ),
+        (
+            # ★陰性側 その一★ = 直しが門を殺しておらぬか。
+            # 同じ綴りでも、現物が無ければ今までどおり鳴らねばならぬ。
+            # ★之が鳴らねば、拡張子の無い路が悉く素通りする門になっておる。★
+            "W5d2 同じ綴りだが ★現物が無い★ = R5d2 は今までどおり ★鳴る★ (陰性の対照)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(), _T_DIR),
+            "[R5d2]", _NO_FILE, _NOT_DIR,
+        ),
+        (
+            # ★陰性側 その二★ = ディレクトリの口が、註釈の抜け道にならぬか。
+            # 七号の現物と同じ「路 + 日本語の註」は、ディレクトリでもないので鳴り続ける。
+            "W5d3 註つきの target_path は ★ディレクトリの口が在っても鳴る★ (抜け道にせぬ)",
+            "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n",
+            "ashigaru3_report",
+            lambda _s: ("subtask_9450", "2026-07-28T05:00:00", set(),
+                        "plans/cmd_9450_scan (調査報告・実装なし)"),
+            "[R5d2]", _HAS_FILE, _NOT_DIR,
+        ),
+        (
             "W5c 古い 3 つ組を返す task_lookup では R5d は ★黙る★ (後方互換)",
             "task_id: subtask_9450\nstatus: done\ntimestamp: '2026-07-28T06:00:00'\n",
             "ashigaru3_report",
@@ -1097,8 +1160,11 @@ def selftest() -> int:
         ),
     ]:
         name, text, stem, lookup, needle, *rest = case
+        # rest[0] = path_exists の差し替え / rest[1] = path_is_dir の差し替え。
+        # ★どちらも現物へ触れぬための口である★ (条C = 試験の作り物を門の母数へ入れぬ)。
         got = warn_text(text, stem, task_lookup=lookup,
-                        path_exists=(rest[0] if rest else None))
+                        path_exists=(rest[0] if rest else None),
+                        path_is_dir=(rest[1] if len(rest) > 1 else _NOT_DIR))
         if needle is None:
             passed = not got
             detail = "" if passed else " / 出た警告=" + "; ".join(g.split("\n")[0] for g in got)

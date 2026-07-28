@@ -39,7 +39,13 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-BACKUP_DIR="${QUEUE_BACKUP_DIR:-$DATA_HOME/multi-agent-shogun/queue_backup}"
+# 置き場は D: にする (cmd_1466・家老の命 18:24)。
+#   理由 = WSL の / の実体は C:\Users\...\wsl\{…}\ext4.vhdx で、repo と同じ物理 disk の上に在る。
+#   木の外ではあるが別の disk ではないので、C: が飛べば控えも一緒に消える。
+#   D: は別の物理 disk で、現に mount されており書ける (実測 18:25 = 空き 1.1T / 1.9T 中 44% 使用)。
+BACKUP_DIR="${QUEUE_BACKUP_DIR:-/mnt/d/backup/multi-agent-shogun/queue_backup}"
+# 移す前の置き場。古い控えは消さずに此処へ残す
+LEGACY_BACKUP_DIR="$DATA_HOME/multi-agent-shogun/queue_backup"
 # 保持本数。30 分ごとに取るなら 48 本 = 約 24 時間 前まで戻せる
 KEEP="${QUEUE_BACKUP_KEEP:-48}"
 
@@ -52,6 +58,31 @@ SORT=/usr/bin/sort
 READLINK=/usr/bin/readlink
 
 die() { printf 'queue_backup: %s\n' "$*" >&2; exit 2; }
+
+# 置き場が /mnt/<英字1文字>/ の下に在る時、その drive が現に mount されているかを確かめる。
+#
+# なぜ「dir が在るか」では足りないか:
+#   D: が mount されていなくても /mnt/d という空の dir は残る。そこへ書くと、
+#   ★書けたつもりで、実は WSL の root (= C: の中の vhdx) へ落ちている★形になる。
+#   控えを C: から D: へ逃がした意味が、黙って消える。ゆえに mount そのものを見る。
+#
+# 見えなければ落とす。既定の置き場へ勝手に戻さない (黙って戻すと、上の形をこの script が自分で作る)。
+require_mount() {
+  local dir="$1"
+  case "$dir" in
+    /mnt/?/*|/mnt/?) : ;;
+    *) return 0 ;;   # /mnt/ の下でなければ、この検めの対象外 (砂場での試験など)
+  esac
+  local root; root="$(printf '%s' "$dir" | /usr/bin/cut -d/ -f1-3)"   # /mnt/d
+  if ! $GREP -qE " ${root} " /proc/mounts; then
+    printf 'queue_backup: ★%s が mount されていない★\n' "$root" >&2
+    printf '  控え先 = %s\n' "$dir" >&2
+    printf '  ここへ書くと、書けたつもりで WSL の root (C: の中の vhdx) へ落ちる。\n' >&2
+    printf '  ゆえに落とす。既定の置き場へは勝手に戻さない。\n' >&2
+    printf '  mount を戻すか、QUEUE_BACKUP_DIR で置き場を名指しで替えよ。\n' >&2
+    exit 3
+  fi
+}
 
 now() { date '+%Y-%m-%dT%H:%M:%S%z'; }
 
@@ -89,6 +120,12 @@ cmd_list() {
   printf '採取刻   = %s\n' "$(now)"
   printf '置き場   = %s\n' "$BACKUP_DIR"
   printf '保持本数 = %s 本\n' "$KEEP"
+  # 移す前の置き場に残っている分も刷る。消していないことが目で分かるようにする
+  if [ -d "$LEGACY_BACKUP_DIR" ] && [ "$LEGACY_BACKUP_DIR" != "$BACKUP_DIR" ]; then
+    printf '移す前の置き場 (%s) に残っている控え = %s 本 (消していない)\n' \
+      "$LEGACY_BACKUP_DIR" \
+      "$($FIND "$LEGACY_BACKUP_DIR" -maxdepth 1 -name 'queue_*.tar.gz' -type f 2>/dev/null | $GREP -c .)"
+  fi
   local n; n=$($FIND "$BACKUP_DIR" -maxdepth 1 -name 'queue_*.tar.gz' -type f 2>/dev/null | $GREP -c .)
   printf '今 在る  = %s 本\n' "$n"
   if [ "$n" -eq 0 ]; then
@@ -163,6 +200,9 @@ cmd_backup() {
   else
     printf '         ★queue/inbox の symlink が辿れなかった。便の中身は控えに入っていない★\n'
   fi
+
+  # 置き場の drive が現に mount されているかを、書く前に見る
+  require_mount "$BACKUP_DIR"
 
   if [ "$dry" = "--dry-run" ]; then
     printf '乾式ゆえ 1 バイトも書かない\n'

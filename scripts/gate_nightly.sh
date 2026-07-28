@@ -11,6 +11,42 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 STAMP="$(date '+%Y-%m-%dT%H:%M:%S')"
 
+# ── 所要時間と件数を log へ出す (cmd_1465) ──────────────────────────────────
+# なぜ足したか: このスクリプトは各チェックの出力を変数に溜め、全部終わってから
+#   まとめて出力する。そのため走行中の log には1行も出ない。
+#   2026-07-28 の走行は 2 時間 33 分のあいだ (09:03 時点・まだ走行中)、
+#   log に「開始」の1行しか無かった。
+#   終わらないチェックは、合格も不合格も誰にも届かない。
+#   加えて終了時刻・所要時間・件数のどれも log に残っておらず、
+#   「毎朝どれだけ掛かっているか」を後から数えることができなかった。
+# 判定には手を入れていない。足したのは出力だけで、rc の計算も合否も従来どおり。
+RUN_T0="$(date +%s)"
+STAGE_T0="$RUN_T0"
+# $2 = 変異リストのファイルパス (省略可)。所要時間は件数に比例して伸びるので、
+# 所要時間と件数は必ず対で出す。片方だけでは読めない。
+stage_mark() {
+    local now cnt
+    now="$(date +%s)"
+    cnt=""
+    if [ "$#" -ge 2 ] && [ -n "${2:-}" ]; then
+        cnt=" 台帳 $(count_mutations "$2") 件"
+    fi
+    printf '[gate_nightly] %s 終了 = 所要 %d 秒%s (開始から %d 分) %s\n' \
+        "$1" "$((now - STAGE_T0))" "$cnt" "$(( (now - RUN_T0) / 60 ))" "$(date '+%F %T')"
+    STAGE_T0="$now"
+}
+# 読めなかった時に 0 と書かない。「0 件だった」と「そもそも読めなかった」を
+# 同じ表示で返すと、区別がつかなくなるため。
+count_mutations() { python3 - "$1" <<'PY'
+import sys, yaml
+try:
+    d = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
+    print(len(d.get("mutations") or []))
+except Exception:
+    print("読めなかった")
+PY
+}
+
 # bats は nvm 配下ゆえ cron の素の PATH からは見えぬ。台帳の bats 系 entry (MUT-1339-*)
 # が「bats: command not found = baseline 赤」で毎朝偽 UNDETERMINED 警告を出さぬよう、
 # 見つからぬ時のみ最新 nvm bin を足す (常に赤い検知は無視されて死ぬ)。
@@ -48,9 +84,12 @@ PY
 # --committed = HEAD blob を正とする (fresh clone が受け取る中身の検分。作業ツリーを信ぜぬ
 #  = 軍師二号が cmd_1349 QC で示した流儀。index 視点は pre-commit hook 側が受け持つ)
 out1="$(bash "$SCRIPT_DIR/scripts/gate_artifact_capture.sh" --all --committed 2>&1)"; rc1=$?
+stage_mark 'gate-1 commit捕捉'
 out2="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" 2>&1)"; rc2=$?
+stage_mark 'gate-2 shogun台帳 replay' "$SCRIPT_DIR/config/mutation_registry.yaml"
 # gate-2 付帯 (cmd_1352b): 台帳登録検知 — 変異testらしき file が台帳に無ければ名指しで警告
 out3="$(python3 "$SCRIPT_DIR/scripts/gate_mutation_replay.py" --coverage 2>&1)"; rc3=$?
+stage_mark 'shogun 登録検知'
 watched "$SCRIPT_DIR"
 
 # ── backend 台帳延長 (cmd_1355): 順序検査 (9396d95) / gate X (cb873e9) の「検査の検査」──
@@ -74,6 +113,7 @@ else
     rc4=2; out4="[gate-2 backend] UNDETERMINED: backend 台帳が見えぬ ($BACKEND_REG) = submodule 未init / path 違いの疑い。検分できておらぬは緑ではない"
     rc5=2; out5="[gate-2 backend coverage] UNDETERMINED: backend 台帳が見えぬ ($BACKEND_REG) = 同上"
 fi
+stage_mark 'backend 台帳 replay+登録検知' "$BACKEND_REG"
 
 # ── ★app 本体 台帳延長 (cmd_1374)★ ─────────────────────────────────────────────
 # ★backend (子) は見ておったが、その親である app 本体は【どの gate も見ておらぬ】★
@@ -103,6 +143,7 @@ else
     rc6=2; out6="[gate-2 app coverage] UNDETERMINED: app 本体の台帳が見えぬ ($APP_REG) = path 違い / disk 喪失の疑い。検分できておらぬは緑ではない"
     rc6b=2; out6b="[gate-2 app replay] UNDETERMINED: 同上 (台帳が見えぬゆえ replay も撃てておらぬ)"
 fi
+stage_mark 'app 台帳 replay+登録検知' "$APP_REG"
 
 # ── ★waverworks web repo 台帳延長 (cmd_1374 A-1)★ ─────────────────────────────
 # 木の点呼が掘り出した2本目の未監視木 (牙 1 件 = scripts/check-shippable-theme.py)。
@@ -122,6 +163,7 @@ else
     rc7=2; out7="[gate-2 web] UNDETERMINED: web 台帳 ($WEB_REG) か repo ($WEB_ROOT) が見えぬ = 検分できておらぬは緑ではない"
     rc8=2; out8="[gate-2 web coverage] UNDETERMINED: 同上"
 fi
+stage_mark 'web 台帳 replay+登録検知' "$WEB_REG"
 # ── ★ai-automate-engine 台帳延長 (cmd_1376)★ ────────────────────────────────
 # 木の点呼が掘り出した3本目 = ★走査元 33 本に対し牙 0 件★ (cmd_1374 census) の木。
 # ★0 件であった理由は二重であった (cmd_1376 実測)★:
@@ -146,6 +188,7 @@ else
     rc9=2; out9="[gate-2 engine] UNDETERMINED: engine 台帳が見えぬ ($ENGINE_REG) = path 違い / disk 喪失の疑い。検分できておらぬは緑ではない"
     rc10=2; out10="[gate-2 engine coverage] UNDETERMINED: 同上"
 fi
+stage_mark 'engine 台帳 replay+登録検知' "$ENGINE_REG"
 # ── ★aituber-project-ml 台帳延長 (cmd_1408)★ ────────────────────────────────
 # 木の点呼が 07-27 06:30 に掘り出した4本目 = ★牙 1 件を持つのに どの門も見ておらぬ木★。
 # ★牙の齢は【4 時間半】であった★ (三号実測) = 本朝 02:00 の backup sync commit で初めて
@@ -168,6 +211,7 @@ else
     rc11=2; out11="[gate-2 ml] UNDETERMINED: ml 台帳 ($ML_REG) か repo ($ML_ROOT) が見えぬ = path 違い / disk 未 mount の疑い。検分できておらぬは緑ではない"
     rc12=2; out12="[gate-2 ml coverage] UNDETERMINED: 同上"
 fi
+stage_mark 'ml 台帳 replay+登録検知' "$ML_REG"
 # ── ★ml の登録検知の【免除】は返済した (cmd_1409・2026-07-27 10:00:38 実測)★ ────────────
 # ★免除の理由は「runner の内側の二つの物差しが本 repo で互いに素」であった★ (cmd_1408・六号 09:11)。
 # ★三号が 09:56 に其の二つを揃えた★ (【走らせる物】と【同伴】を別けて数える形へ) ⇒
@@ -400,6 +444,7 @@ verdict() { case "$1" in 0) echo PASS;; 1) echo FAIL;; *) echo UNDETERMINED;; es
 # ★免除は返済済 (cmd_1409)★= 札に添える註が要らなくなったゆえ、素の判定を返す。
 #   ★函数は残す★= 呼び手 (警報本文と終了行) が 2 箇所に在り、次に註を添える日が来たら此処 1 箇所で足りる。
 mlcov() { verdict "$rc12"; }
+stage_mark '残りの門 (配布・木の点呼・通知路・呑まれ・捏造・置換の名簿)'
 
 # ★切り詰めたなら【切り詰めたと言え】★ (cmd_1367 N1・軍師一号の差し戻し)
 #   本 script は所見を 3 箇所で head により畳んでおるが、いずれも ★入り切らなんだ分を
@@ -492,6 +537,16 @@ if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] 
         || echo "[gate_nightly] WARN: 家老への inbox_write が失敗 (次回 cron で再警告)" >&2
 fi
 
+# 終了時刻・総所要時間・件数の出力 (cmd_1465)。従来はどれも log に残っていなかった。
+RUN_T1="$(date +%s)"
+printf '[gate_nightly] 総所要 = %d 分 %d 秒 (開始 %s / 終了 %s)\n' \
+    "$(( (RUN_T1 - RUN_T0) / 60 ))" "$(( (RUN_T1 - RUN_T0) % 60 ))" \
+    "$STAMP" "$(date '+%Y-%m-%dT%H:%M:%S')"
+printf '[gate_nightly] 変異の件数 shogun=%s backend=%s app=%s web=%s engine=%s ml=%s\n' \
+    "$(count_mutations "$SCRIPT_DIR/config/mutation_registry.yaml")" \
+    "$(count_mutations "$BACKEND_REG")" "$(count_mutations "$APP_REG")" \
+    "$(count_mutations "$WEB_REG")" "$(count_mutations "$ENGINE_REG")" \
+    "$(count_mutations "$ML_REG")"
 echo "── [gate_nightly] 終了 gate-1=$(verdict "$rc1") gate-2=$(verdict "$rc2") 登録検知=$(verdict "$rc3") backend台帳=$(verdict "$rc4") backend登録検知=$(verdict "$rc5") app登録検知=$(verdict "$rc6") app台帳=$(verdict "$rc6b") web台帳=$(verdict "$rc7") web登録検知=$(verdict "$rc8") engine台帳=$(verdict "$rc9") engine登録検知=$(verdict "$rc10") ml台帳=$(verdict "$rc11") ml登録検知=$(mlcov) hook=$([ "$hook_rc" -eq 0 ] && echo OK || echo MISSING) 配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING) 配布=$(verdict "$undist_rc") 木の点呼=$(verdict "$census_rc") 通知路=$(verdict "$ntfy_rc") 台帳の呑まれ=$(verdict "$append_rc")$([ "$APPEND_STRICT" = "1" ] || echo "（報告のみ）") 捏造の門=$(verdict "$fab_rc")$([ "$FAB_STRICT" = "1" ] || echo "（報告のみ）") 置換の名簿=$(verdict "$clisub_rc")$([ "$CLISUB_STRICT" = "1" ] || echo "（報告のみ）") ──"
 if [ "$rc1" -eq 1 ] || [ "$rc2" -eq 1 ] || [ "$rc3" -eq 1 ] || [ "$rc4" -eq 1 ] || [ "$rc5" -eq 1 ] || [ "$rc6" -eq 1 ] || [ "$rc6b" -eq 1 ] || [ "$rc7" -eq 1 ] || [ "$rc8" -eq 1 ] || [ "$rc9" -eq 1 ] || [ "$rc10" -eq 1 ] || [ "$rc11" -eq 1 ] || [ "$ml_cov_gate" -eq 1 ] || [ "$undist_rc" -eq 1 ] || [ "$census_rc" -eq 1 ] || [ "$ntfy_rc" -eq 1 ] || [ "$append_gate" -eq 1 ] || [ "$fab_gate" -eq 1 ] || [ "$clisub_gate" -eq 1 ]; then exit 1; fi
 if [ "$rc1" -ne 0 ] || [ "$rc2" -ne 0 ] || [ "$rc3" -ne 0 ] || [ "$rc4" -ne 0 ] || [ "$rc5" -ne 0 ] || [ "$rc6" -ne 0 ] || [ "$rc6b" -ne 0 ] || [ "$rc7" -ne 0 ] || [ "$rc8" -ne 0 ] || [ "$rc9" -ne 0 ] || [ "$rc10" -ne 0 ] || [ "$rc11" -ne 0 ] || [ "$ml_cov_gate" -ne 0 ] || [ "$hook_rc" -ne 0 ] || [ "$wiring_rc" -ne 0 ] || [ "$undist_rc" -ne 0 ] || [ "$census_rc" -ne 0 ] || [ "$ntfy_rc" -ne 0 ] || [ "$append_gate" -ne 0 ] || [ "$fab_gate" -ne 0 ] || [ "$clisub_gate" -ne 0 ]; then exit 2; fi

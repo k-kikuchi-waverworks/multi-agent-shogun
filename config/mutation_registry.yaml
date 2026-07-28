@@ -4819,6 +4819,76 @@ mutations:
     expect: nonzero
     red_needle: "cmd_1467: 冷却を越えた done は現に片付く"
 
+  - id: MUT-1470-001
+    origin: cmd_1470
+    suspected_by: ashigaru4
+    desc: |
+      殿の頁を控えへ移す道具は、印 (KARO_CUT_HERE) が2本以上 在れば止まる。
+      どちらで切るかを機械が決められないためである。
+      この変異はその守りを外し、常に1本目で切らせる。
+      「印が 2 本 在れば止まり、1 バイトも動かない」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
+    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
+    mutate: |
+      sed -i 's|^if \[ "$MARK_COUNT" -ge 2 \]; then|if false; then|' scripts/dashboard_archive.sh
+    test: |
+      bats tests/unit/test_dashboard_archive.bats
+    expect: nonzero
+    red_needle: "cmd_1470/陰性: 印が 2 本 在れば止まり、1 バイトも動かない"
+
+  - id: MUT-1470-002
+    origin: cmd_1470
+    suspected_by: ashigaru4
+    desc: |
+      印が頁の頭 (既定 50 行以内) に在れば止まる。頁を丸ごと控えへ移す事故を防ぐためである。
+      この変異はその守りを外す。外しても赤くならないなら、頁が丸ごと消える形を
+      誰も見ていないことになる。
+      「印が頁の頭に在れば止まる」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
+    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
+    mutate: |
+      sed -i 's|^if \[ "$MARK_LINE" -le "$MIN_HEAD_LINES" \]; then|if false; then|' scripts/dashboard_archive.sh
+    test: |
+      bats tests/unit/test_dashboard_archive.bats
+    expect: nonzero
+    red_needle: "cmd_1470/陰性: 印が頁の頭に在れば止まる (頁を丸ごと移す事故)"
+
+  - id: MUT-1470-003
+    origin: cmd_1470
+    suspected_by: ashigaru4
+    desc: |
+      対象の頁が無ければ、道具は名指して止まる (rc=2)。
+      この入口の検めを外すと、後続の行が空の値を掴んだまま走り、
+      何を見ているのか分からない失敗の仕方へ変わる。
+      「対象が無ければ止まる」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
+    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
+    mutate: |
+      # 区切りは # を使う。本文に || が在るので | を区切りにすると sed が途中で切れる
+      sed -i 's#^\[ -f "$DASH" \] || die "対象が無い: $DASH" 2#true#' scripts/dashboard_archive.sh
+    test: |
+      bats tests/unit/test_dashboard_archive.bats
+    expect: nonzero
+    red_needle: "cmd_1470/陰性: 対象が無ければ止まる"
+
+  - id: MUT-1470-004
+    origin: cmd_1470
+    suspected_by: ashigaru4
+    desc: |
+      canary は「探し方が生きているか」を答える段である。必ず 1 件 当たる綴りが
+      0 件で返ったら赤にする。この検めを外すと、走査そのものが死んでいても
+      canary が緑を返す = 「0 件」と「見ていない」が同じ顔になる。
+      ★守りを検める段が、守られていない形である。★
+      「canary は走査が死んでいれば赤になる」と主張する試験が赤くなるべき。
+      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
+    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
+    mutate: |
+      sed -i 's|^  \[ "$hit" -ge 1 \]|  [ 1 -ge 1 ]|' scripts/dashboard_archive.sh
+    test: |
+      bats tests/unit/test_dashboard_archive.bats
+    expect: nonzero
+    red_needle: "cmd_1470: canary は走査が死んでいれば赤になる"
+
 coverage_waivers: []
 
 # ─────────────────────────────────────────────────────────────────────────────

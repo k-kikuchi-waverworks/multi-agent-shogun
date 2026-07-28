@@ -63,7 +63,7 @@ SKIP_PAT = r"\[(?:gate_nightly|stall_watchdog|idle_revive)\] 見送り"
 #   grace_min   … 遅れを許す幅。走行そのものに掛かる時間を含める
 #                 (毎朝のチェックは現に 3 時間 掛かる日がある = cmd_1465 実測)
 #   end_pat     … 終わりの印 (log の中)。None = 終わりの印を持たない
-#   stamp       … 成功の刻を書くファイル (logs/ の中)。軍師一号が cmd_1439 で据えた 2 本
+#   stamp       … 成功の刻を書くファイル (logs/ の中)。足軽一号が cmd_1439 で据えた 2 本
 JOBS = [
     dict(name="gate_nightly", period_min=1440, grace_min=360,
          log="gate_nightly.log", end_pat=r"── \[gate_nightly\] 終了 ", stamp=None,
@@ -83,10 +83,10 @@ JOBS = [
          note="8/3 09:00 の 1 度きり。期日前は検めない", due="2026-08-03T09:00:00"),
     dict(name="AituberFBackupToD", period_min=1440, grace_min=360,
          log=None, end_pat=None, stamp="last_backup_f_to_d.txt",
-         note="毎日 02:00 (Windows)。証は軍師一号が cmd_1439 で据えた"),
+         note="毎日 02:00 (Windows)。証は足軽一号が cmd_1439 で据えた"),
     dict(name="AituberDvcGc", period_min=1440, grace_min=360,
          log=None, end_pat=None, stamp="last_dvc_gc_mirror.txt",
-         note="毎日 03:00 (Windows)。証は軍師一号が cmd_1439 で据えた"),
+         note="毎日 03:00 (Windows)。証は足軽一号が cmd_1439 で据えた"),
 ]
 
 _TS_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})")
@@ -134,7 +134,7 @@ def _parse_ts(text):
     """文字列の中の最初の日時を naive local として返す。読めなければ None。
 
     BOM と CR を先に落とします。Windows 側が書いたファイルには BOM が付くことが
-    あるためです (軍師一号が cmd_1439 で現に踏みました = テストは全数 緑なのに
+    あるためです (足軽一号が cmd_1439 で現に踏みました = テストは全数 緑なのに
     本番は初日から読めていませんでした)。
     """
     if text is None:
@@ -174,7 +174,7 @@ def check_job(job, logs_dir: Path, now: datetime.datetime):
             out["detail"] = f"期日 {job['due'][:10]} の前なので検めていません"
             return out
 
-    # ① 成功の刻をファイルへ書く形 (軍師一号が据えた 2 本)
+    # ① 成功の刻をファイルへ書く形 (足軽一号が据えた 2 本)
     if job.get("stamp"):
         p = logs_dir / job["stamp"]
         if not p.is_file():
@@ -264,6 +264,12 @@ def format_alert(findings):
             + (f"証を持たない={missing} " if missing else "")
             + "対応=古い側は、その定時実行が現に走っているかを見てください。"
             + "証を持たない側は、走行の終わりに 1 行 書く形を足せば検められます。"
+            # 名指しの向きを直す (軍師一号が cmd_1465 の検分で辿った道筋)。
+            #   AituberDvcGc の証は F: の原本を gate_nightly が毎朝 写した物である。
+            #   ゆえに gate_nightly が死ぬと、写しが古びて AituberDvcGc の名で鳴る
+            #   = 別の者の死が、この者の名で鳴る。塞げなくとも、向きは名乗れる。
+            + "なお AituberDvcGc の証は毎朝 06:30 の gate_nightly が写しているので、"
+            + "gate_nightly が死んでも この名で鳴ります (鳴った時は そちらも見てください)。"
             + "この見張り自身は 15 分毎の監視スクリプトに相乗りしているので、"
             + "そちらが死ねば一緒に黙ります (そこは塞げていません・cmd_1465)")
 

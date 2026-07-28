@@ -12,7 +12,8 @@
 
 ■ ★★本件の芯 = 冊 (台帳 file) と 木 (repo-root) は 1 対 1 だが【同じ場所に在るとは限らぬ】★★
   web の冊は ★shogun 側★ (config/mutation_registry.web.yaml) に在り、木は /mnt/c/Users 配下に在る。
-  理由は設計に書いてある (scripts/gate_nightly.sh:107-115) =
+  理由は設計に書いてある (scripts/gate_nightly.sh の
+  「★waverworks web repo 台帳延長 (cmd_1374 A-1)★」の見出しの下・★行番号で指さぬ★ = 条F) =
     ★web repo は殿の変更禁止領域ゆえ、そこへ機構を置かず runner を --repo-root で跨がせる★。
   ⇒ ★木の中を `git ls-files | grep mutation` で探す計器は、此の冊を【原理的に】見つけられぬ★。
   ⇒ ★「探して出なんだ」は「無い」ではない★= ★探した場所の外は、探した者の射程の外である★。

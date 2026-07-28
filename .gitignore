@@ -403,6 +403,12 @@ scripts/seo_qc.sh
 #   tests/unit/test_gate_census_wiring.bats が配線を見張っておる。毎朝の門が使う道具である。
 !scripts/fang_domain_census.py
 
+# cmd_1469 (2026-07-28): 註へ焼かれた行番号を数え直す口。
+#   --anchors は「綴りで指し直した先が現に在るか」を陽性・陰性の両方で撃つ。
+#   数を出した走査そのものを消えぬ所へ残すため追跡下へ置く
+#   (plans/ は git 管理外で控えが 0 本ゆえ、今より消えやすい)。
+!scripts/line_ref_audit.py
+
 # cmd_1445 (2026-07-28): 追跡下だが白名簿へ足さぬと判じた 9 本 (次の者が同じ判断を繰り返さぬための覚書)。
 #   規則は書かぬ。書けば配る側へ回るゆえ、ここは註のみである。
 #   scripts/retired/ 3 本 (dashboard-viewer.py / discord_post.sh / ratelimit_check.sh)

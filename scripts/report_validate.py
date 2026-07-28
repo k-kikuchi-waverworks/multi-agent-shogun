@@ -19,10 +19,16 @@
     ゆえに規則1本ごとに、守っておる読み手の行を名指しできる:
 
     R1 safe_load_all が落ちる
-       読み手 = scripts/idle_revive_scan.py:1302 / scripts/stall_watchdog_scan.py:112
+       読み手 = scripts/idle_revive_scan.py の report_completion_state /
+                scripts/stall_watchdog_scan.py の parse_report_latest
+                (どちらも `list(yaml.safe_load_all(f))` で報告を読む口である)
+       ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
+                探し方 = grep -n "safe_load_all" scripts/idle_revive_scan.py scripts/stall_watchdog_scan.py
        害     = 番人が完遂を読めぬ ⇒ ★働いておる者を idle と誤判定★ (本夜の実害そのもの)
     R2 safe_load (単一 document) が落ちる ＆ 当該 stem が slim_yaml の除外表に無い
-       読み手 = scripts/slim_yaml.py:273 load_yaml (safe_load。失敗すると {} を返す)
+       読み手 = scripts/slim_yaml.py の load_yaml (safe_load。失敗すると {} を返す)
+                ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (条F)。
+                探し方 = grep -n "def load_yaml" scripts/slim_yaml.py
        害     = parent_cmd を読めぬ ⇒ 非 active と見なされ ★queue/reports/ から archive へ移される★
                 (cmd_1395 で sandbox 実走にて実証。同条件の健全 file は残り、壊れた方だけが移った)
        ★除外表 CANONICAL_REPORTS は slim_yaml から import する★= 読み手が変われば此の門も
@@ -287,7 +293,13 @@ RED_PLAN = (
 
 
 def reader_view(text: str) -> list[dict] | None:
-    """★読み手が見る高さ★ の mapping を並べて返す (idle_revive_scan.py:1569-1572 の写し)。
+    """★読み手が見る高さ★ の mapping を並べて返す。
+
+    写し元 = idle_revive_scan.py の report_completion_state に在る
+    `inner = doc["report"] if isinstance(doc.get("report"), dict) else doc`
+    (report: を1枚 被せた形と、被せぬ形の両方を同じ高さで読む所)。
+    ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
+
 
     None = parse できぬ (R1 が既に名指しておる)。
     """

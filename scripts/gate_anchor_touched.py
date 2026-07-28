@@ -11,6 +11,9 @@
     ★同日 21:11 の 7d35e40 (cmd_1385) が別の目的で 2 本目を足した其の瞬間に非一意へ転じた★。
       7d35e40^ : scripts/idle_revive_scan.py:142 のみ            = 1 箇所
       7d35e40  : 同 150 行目 + 170 行目 (UPSTREAM_TIMED_HEAD_PATTERNS) = 2 箇所
+    ★此の三つの行番号は【commit に固定してある】ゆえ動かぬ★ = 条F の「行番号を焼くな」の
+    例外である。読むには `git show 7d35e40^:scripts/idle_revive_scan.py` と撃つ。
+    ★HEAD を指す行番号と混ぜるな★ = HEAD 側は動く。此処は動かぬ。
     mutate は `sed -i '/"session limit",/d'` = 行削除ゆえ ★2 行とも消える★。
     ⇒ ★7d35e40 を書いた者は、己が他人の牙を鈍らせたことを知る術を持たなんだ★。
 

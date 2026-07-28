@@ -55,7 +55,10 @@ PRUNE_DIRS = frozenset({
 # 行頭の否定: `! cmd`
 LEAD = re.compile(r"^\s*!\s+\S")
 # 行の途中の否定: `... && ! cmd` / `... || ! cmd` / `; ! cmd` / `then ! cmd`
-# ★本夜の実測★= 此の形も免除に掛かり、当たっても緑であった (test_stop_hook.bats:130)。
+# ★本夜の実測★= 此の形も免除に掛かり、当たっても緑であった。
+#   現物 = tests/unit/test_stop_hook.bats の「旧 `[ -z "$output" ] || ! echo … | grep -q` は
+#   ★行途中の否定も set -e 免除★」と書いた註 (cmd_1401)。
+#   ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
 INLINE = re.compile(r"(?:&&|\|\||;|\bthen\b)\s+!\s+\S")
 
 

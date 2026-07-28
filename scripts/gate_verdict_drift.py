@@ -53,7 +53,9 @@ LEDGER = REPO_ROOT / "queue" / "state" / "mutation_verdict_ledger.yaml"
 
 PASS, FAIL, UNDET = "PASS", "FAIL", "UNDETERMINED"
 
-# gate_mutation_replay.py:890 の印字 = f"  {mark} {verdict:12s} {eid}:{tag} {why}"
+# gate_mutation_replay.py の印字 = f"  {mark} {verdict:12s} {eid}:{tag} {why} [刻 …]"
+#   ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
+#   探し方 = grep -n 'verdict:12s' scripts/gate_mutation_replay.py
 #   mark = "ok  " / "★NG★" / "未定 "
 # ★mark でなく verdict の語を鍵にする★= ★mark は飾りであり、語は判定そのものゆえ★。
 VERDICT_RE = re.compile(

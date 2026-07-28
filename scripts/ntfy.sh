@@ -18,7 +18,10 @@ source "$SCRIPT_DIR/lib/ntfy_auth.sh"
 #   ■ ★之は cmd_1381 F-2 / morning_readiness.sh と同じ族にござる★=
 #     ★「log が無い」は「届かなんだ」ではない★ ⇒ ★「settings.yaml が無い」は「通知が死んでおる」ではない★。
 #   ■ ★config/settings.yaml は .gitignore:7 (`*`) ゆえ配られぬのが【正しい】★=
-#     ★first_setup.sh:620 が其の機で作る物である★ (実物を読んで確かめた = 推測ではない)。
+#     ★first_setup.sh が其の機で作る物である★ (実物を読んで確かめた = 推測ではない)。
+#     現物 = first_setup.sh の「STEP 7: 設定ファイル初期化」の中の
+#     `if [ ! -f "$SCRIPT_DIR/config/settings.yaml" ]` の分岐。
+#     ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
 #   ■ ★rc は変えておらぬ★= ★従前も grep の rc がそのまま 2 で出ておった★ ⇒ ★呼び手から見て 1 つも変わらぬ★。
 #     ★変えたのは【口上】だけである★。
 if [ ! -f "$SETTINGS" ]; then

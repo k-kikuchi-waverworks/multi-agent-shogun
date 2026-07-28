@@ -595,7 +595,9 @@ def skip_evidence(out: str):
 #   ③ ★旧物差しとの読みの差を毎朝 数える★ = [RULER-SHADOW]。是正が黙って巻き戻された時や、
 #      新しい綴りの形が現れた時に、★門が己の物差しについて口を利く★形にしておく。
 # ─────────────────────────────────────────────────────────────────────────────
-# 物差し (census scripts/ledger_id_census.py:35 の ID_RE と ★同一★ — 二つ持てば必ずずれる)
+# 物差し (census scripts/ledger_id_census.py の `ID_RE` と ★同一★ — 二つ持てば必ずずれる)
+#   ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
+#   探し方 = grep -n "^ID_RE" scripts/ledger_id_census.py
 REGISTRY_ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*(?:-[A-Za-z0-9]+)+")
 # ★捨てた綴り★ = 今も影を数える為だけに残す (これで判定してはならぬ)
 REGISTRY_ID_RE_DISCARDED = re.compile(r"MUT-\d{3,4}-[A-Za-z0-9]+")
@@ -1224,8 +1226,9 @@ def run_all(registry: Path, repo: Path) -> int:
         who = e.get("suspected_by") if isinstance(e, dict) else None
         tag = f" [疑い:{who}]" if who else ""
         # ★刻は【行末】へ置く★= ★行頭へ置けば、此の出力を読む二人が黙って盲になる★:
-        #   gate_verdict_drift.py VERDICT_RE = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…` /
-        #   gate_nightly.sh:300 の `grep -vE '^\s*ok\s'` (PASS 行を除く口)
+        #   gate_verdict_drift.py の `VERDICT_RE` = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…` /
+        #   gate_nightly.sh の `grep -vE '^\s*ok\s'` (PASS 行を除く口。detail を組む所に在る)
+        #   ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
         #   ⇒ ★形を変える時は【読む者】を先に数える★ (2026-07-27 六号が実測して確かめた)
         print(f"  {mark} {verdict:12s} {eid}:{tag} {why} [刻 {_clock()}]")
         if verdict == PASS:
@@ -1881,7 +1884,9 @@ def stage2_blade_witness(registry: Path, repo: Path, verbose: bool = False,
     返り = (rc, 出力行)。rc は 0=緑 / 2=UNDETERMINED (★FAIL にはせぬ★ — 家老 02:40 の枷)。
 
     ★touched_only (pre-commit) の理由を隠さず記す★:
-      全数 (現況 = 未登録 80 本) を毎 commit 鳴らせば ★全 agent の commit が毎回 ⚠ を出す★ =
+      全数 (未登録の負の主張。★数は日々 動くゆえ此処へ焼かぬ★ =
+      知りたければ `--negative-assertions` を撃て) を毎 commit 鳴らせば
+      ★全 agent の commit が毎回 ⚠ を出す★ =
       ★常に鳴る門は外される★ (本 file の anchor 層が cmd_1382 で学んだ当のこと) ⇒
       ★gate-3 と同じ流儀 (触った file の分だけ見る) を採り、【新しく書けば其の場で鳴る】形にする★。
       ★分母の全数は殺しておらぬ★ = `--negative-assertions` が ★数え直す口★ である

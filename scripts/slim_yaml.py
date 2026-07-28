@@ -77,7 +77,9 @@ CMD_ACTIVE_STATUSES = {'pending', 'in_progress', 'deferred', 'dispatched'}
 TASK_TERMINAL_STATUSES = {'done', 'failed', 'cancelled'}
 TASK_ACTIVE_STATUSES = {'idle', 'assigned', 'blocked', 'in_progress',
                         'pending_blocked', 'archived'}
-# ntfy_inbox (task_flow.md:18)。
+# ntfy_inbox の語彙。正本 = instructions/common/task_flow.md の
+#   「`queue/ntfy_inbox.yaml`: `pending`, `processed`」の行。
+#   ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (条F。同じ罠を上の註でも踏んだ)。
 NTFY_TERMINAL_STATUSES = {'processed'}
 INVENTORY_AGE_SECONDS = 30 * 86400
 # 掃除を見送る冷却期間 (cmd_1467)。

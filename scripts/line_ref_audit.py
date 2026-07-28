@@ -21,13 +21,27 @@
   python3 scripts/line_ref_audit.py --only-broken    # 外れている物だけ
   python3 scripts/line_ref_audit.py --counts         # 動く数 (N本/N件) の一覧
   python3 scripts/line_ref_audit.py --canary         # 探し方が生きているかを先に示す
+  python3 scripts/line_ref_audit.py --anchors        # 綴りで指した先が現に在るか (陽性+陰性)
+
+出力には採取の刻が焼かれる。数を写して持ち歩かず、この口を撃ち直すこと。
 """
 from __future__ import annotations
 
 import argparse
 import re
 import sys
+from datetime import datetime
 from pathlib import Path
+
+
+def stamp() -> str:
+    """出力へ採取の刻を焼く。
+
+    人が「date を撃って書く」を心掛けで守るのは現に効かなかった (2026-07-28)。
+    帳面 8 本の刻が約4時間 先になり、機械が焼いた側は 1 つも外れなかった。
+    ゆえに走査器の側で刻を焼く (家老 11:58 の裁 = これから走査器を書く時の型)。
+    """
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 REPO = Path(__file__).resolve().parent.parent
 SELF = Path(__file__).resolve()
@@ -213,7 +227,7 @@ def check_anchors() -> int:
     陰性 = 在りもせぬ綴りは現に見つからないこと (探し方が生きている証)。
     """
     rc = 0
-    print(f"# 陽性 {len(ANCHORS)} 本 / 陰性 {len(ANCHORS_NEGATIVE)} 本 を撃つ")
+    print(f"# 陽性 {len(ANCHORS)} 本 / 陰性 {len(ANCHORS_NEGATIVE)} 本 を撃つ (採取 {stamp()})")
     for rel, needle in ANCHORS:
         target = REPO / rel
         if not target.is_file():
@@ -248,7 +262,7 @@ def canary(include_self: bool) -> int:
     """
     rc = 0
     refs = collect_refs(include_self)
-    print(f"[canary] 走査した file = {len(scan_files(include_self))} 本")
+    print(f"[canary] 走査した file = {len(scan_files(include_self))} 本 (採取 {stamp()})")
     print(f"[canary] 拾った指し先 = {len(refs)} 件")
 
     # 陽性: 正規表現が現に「名前:数字」を掴むか
@@ -291,14 +305,14 @@ def main() -> int:
 
     if args.counts:
         rows = collect_counts(args.include_self)
-        print(f"# 走査 file = {len(scan_files(args.include_self))} 本 / 拾った動く数 = {len(rows)} 件")
+        print(f"# 走査 file = {len(scan_files(args.include_self))} 本 / 拾った動く数 = {len(rows)} 件 (採取 {stamp()})")
         for r in rows:
             print(f"{r['src']}:{r['src_line']}\t{r['num']}{r['unit']}\t{r['note'][:110]}")
         return 0
 
     rows = collect_refs(args.include_self)
     files = scan_files(args.include_self)
-    print(f"# 走査 file = {len(files)} 本 / 註の中の指し先 = {len(rows)} 件")
+    print(f"# 走査 file = {len(files)} 本 / 註の中の指し先 = {len(rows)} 件 (採取 {stamp()})")
     if not rows:
         print("# 母数 0。見る物が一つも無い側かを先に疑え")
         return 2

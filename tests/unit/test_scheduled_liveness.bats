@@ -186,3 +186,59 @@ _verdict_of() {
     [ "$(echo "$output" | grep -c '^SL_JOB=')" -eq 7 ]
     echo "$output" | grep -q "母数=7本"
 }
+
+# ── 並べ方 (encoding) を見る側 ────────────────────────────────────
+# 2026-07-28 に四号と軍師二号が現物で示した形を縛ります。
+#   UTF-16 を utf-8 として読んでも、改行の \n が 1 バイト残るので行は刻まれます。
+#   ゆえに「1 行でも読めたか」を見る canary は、UTF-16 のファイルで現に緑になります。
+#   見るべきは行数ではなく、並べ方そのものです。
+# 何ゆえこの suite に要るか = 成功の記録を書くのは Windows の PowerShell で、
+#   読むのは WSL の python です。書く側と読む側が別の道具ゆえ、現に起こりえます。
+
+@test "T-SL-014: UTF-16 で書かれた成功の記録でも、日時として読める" {
+    _fresh_all
+    python3 -c "
+import pathlib,sys
+pathlib.Path(sys.argv[1]).write_bytes((sys.argv[2]+'\n').encode('utf-16'))
+" "$L/last_dvc_gc_mirror.txt" "$NOW"
+    _liveness
+    [ "$(_verdict_of AituberDvcGc)" = "OK" ]
+}
+
+@test "T-SL-015: BOM の無い UTF-16 でも読める (判じる手掛かりが NUL だけの形)" {
+    _fresh_all
+    python3 -c "
+import pathlib,sys
+pathlib.Path(sys.argv[1]).write_bytes((sys.argv[2]+'\n').encode('utf-16-le'))
+" "$L/last_dvc_gc_mirror.txt" "$NOW"
+    _liveness
+    [ "$(_verdict_of AituberDvcGc)" = "OK" ]
+}
+
+@test "T-SL-016: 読めない時は、並べ方を名乗る (直す先が別ゆえ)" {
+    _fresh_all
+    # 日時が 1 つも書かれていない記録。読めないこと自体は正しい。
+    echo "no timestamp here" > "$L/last_dvc_gc_mirror.txt"
+    _liveness
+    [ "$(_verdict_of AituberDvcGc)" = "MISSING" ]
+    echo "$output" | grep -q "並べ方="
+}
+
+@test "T-SL-017: canary は行数でなく並べ方の内訳を刷る" {
+    _fresh_all
+    python3 -c "
+import pathlib,sys
+pathlib.Path(sys.argv[1]).write_bytes(b'x\n'.decode().encode('utf-16'))
+" "$L/last_dvc_gc_mirror.txt"
+    run python3 "$LIVENESS" --canary --logs-dir "$L"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "enc=utf-16"
+    echo "$output" | grep -q "内訳="
+}
+
+@test "T-SL-018: canary は、並べ方を判じる口が現に生きているかを己で撃つ" {
+    _fresh_all
+    run python3 "$LIVENESS" --canary --logs-dir "$L"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "判じる口=生きています"
+}

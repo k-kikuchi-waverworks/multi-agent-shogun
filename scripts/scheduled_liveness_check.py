@@ -92,6 +92,44 @@ JOBS = [
 _TS_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})")
 
 
+def sniff_encoding(raw: bytes):
+    """バイト列の並べ方 (encoding) を判じて名前を返す。
+
+    何ゆえ「行が読めたか」では足りないか (2026-07-28 に四号と軍師二号が現物で示した)
+    UTF-16 を utf-8 として読んでも、改行の \\n が 1 バイト残るので行は刻まれます。
+    ゆえに「1 行でも読めたか」を見る canary は、UTF-16 のファイルで現に緑になります。
+    中身の綴りには一つも当たらないのに、です。
+    見るべきは行数ではなく、並べ方そのものです。
+    """
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        return "utf-32"
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return "utf-16"
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    # BOM の無い UTF-16。NUL が多いことで判じます (utf-8 の本文に NUL は出ません)。
+    if raw and raw.count(b"\x00") / len(raw) > 0.05:
+        return "utf-16"
+    return "utf-8"
+
+
+def read_text(path: Path):
+    """並べ方を先に判じてから読む。(本文, 判じた並べ方) を返す。読めなければ (None, 理由)。
+
+    書く側は Windows の PowerShell で、読む側は WSL の python です。
+    書いた者は正しく、読む者も正しく、間に在る並べ方だけが食い違います。
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None, "読めません"
+    enc = sniff_encoding(raw)
+    try:
+        return raw.decode(enc, errors="replace"), enc
+    except (LookupError, UnicodeError):
+        return raw.decode("utf-8", errors="replace"), enc
+
+
 def _parse_ts(text):
     """文字列の中の最初の日時を naive local として返す。読めなければ None。
 
@@ -114,14 +152,13 @@ def _parse_ts(text):
 def _last_match(path: Path, pat):
     """path の中で pat に当たる最後の行を返す (無ければ None)。"""
     rx = re.compile(pat)
-    last = None
-    try:
-        with path.open(encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if rx.search(line):
-                    last = line
-    except OSError:
+    text, _enc = read_text(path)
+    if text is None:
         return None
+    last = None
+    for line in text.splitlines():
+        if rx.search(line):
+            last = line
     return last
 
 
@@ -144,10 +181,14 @@ def check_job(job, logs_dir: Path, now: datetime.datetime):
             out["verdict"] = "MISSING"
             out["detail"] = f"成功の記録がありません ({p.name})"
             return out
-        dt = _parse_ts(p.read_text(encoding="utf-8", errors="replace"))
+        text, enc = read_text(p)
+        dt = _parse_ts(text)
         if dt is None:
+            # 並べ方を必ず名乗ります。「日時が書かれていない」と
+            # 「書いてあるが並べ方が違って読めない」は、直す先が別のためです。
             out["verdict"] = "MISSING"
-            out["detail"] = f"成功の記録を日時として読めません ({p.name})"
+            out["detail"] = (f"成功の記録を日時として読めません ({p.name}・"
+                             f"並べ方={enc})")
             return out
         age = (now - dt).total_seconds() / 60
         out["age_min"] = int(age)
@@ -227,11 +268,60 @@ def format_alert(findings):
             + "そちらが死ねば一緒に黙ります (そこは塞げていません・cmd_1465)")
 
 
+def canary(logs_dir: Path = None):
+    """読む file の並べ方の内訳そのものを刷る。判じる口が死んでいれば ここで判る。
+
+    「何か出るか」ではなく「並べ方を現に見たか」を見る形です。
+    utf-8 以外が 1 本も出ない状態が続いたら、判じる口が死んでいる公算があります
+    (その時こそ、作り物で撃って口が生きていることを確かめてください)。
+    """
+    logs_dir = logs_dir or LOGS_DIR
+    seen, missing = {}, []
+    for job in JOBS:
+        name = job.get("stamp") or job.get("log")
+        if not name:
+            continue
+        p = logs_dir / name
+        if not p.is_file():
+            missing.append(name)
+            continue
+        try:
+            raw = p.read_bytes()
+        except OSError:
+            missing.append(name)
+            continue
+        enc = sniff_encoding(raw)
+        seen.setdefault(enc, []).append((name, len(raw), raw.count(b"\x00")))
+
+    print(f"# canary 採取 {time.strftime('%F %T')} / logs={logs_dir}")
+    for enc in sorted(seen):
+        for name, size, nul in seen[enc]:
+            print(f"SL_CANARY enc={enc} bytes={size} nul={nul} file={name}")
+    print("SL_CANARY 内訳=" + str({k: len(v) for k, v in sorted(seen.items())})
+          + f" file無し={len(missing)}本"
+          + ("" if missing else "")
+          + " (行数ではなく並べ方を見ています。"
+            "UTF-16 は utf-8 として読んでも行は刻まれるので、行数では捕えられません)")
+    if missing:
+        print("SL_CANARY file無し=" + "・".join(missing))
+    # 判じる口そのものを、既知の作り物で撃ちます (この一行が緑の理由を分けます)。
+    probe = {"utf-16": "x".encode("utf-16"), "utf-8-sig": "﻿x".encode("utf-8"),
+             "utf-8": b"x"}
+    bad = [k for k, v in probe.items() if sniff_encoding(v) != k]
+    print("SL_CANARY 判じる口=" + ("生きています" if not bad
+                                   else f"死んでいます (外した={bad})"))
+    return 1 if bad else 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="定時実行 7 本の『終わった証』を検める")
     ap.add_argument("--logs-dir", type=Path, default=None, help="テスト用に logs/ を差し替える")
     ap.add_argument("--now", type=str, default=None, help="テスト用に『今』を差し替える (ISO)")
+    ap.add_argument("--canary", action="store_true",
+                    help="読む file の並べ方の内訳を刷る (中身でなく『現に見たか』を見る)")
     a = ap.parse_args(argv)
+    if a.canary:
+        return canary(a.logs_dir)
     now = _parse_ts(a.now) if a.now else None
     findings, total = scan(a.logs_dir, now)
     print(f"# 採取 {time.strftime('%F %T')} / 母数 {total} 本")

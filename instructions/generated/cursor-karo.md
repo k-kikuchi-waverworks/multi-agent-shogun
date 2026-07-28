@@ -1663,7 +1663,9 @@ LoC 見積差異 / scope creep / micro-deviation 等は隠蔽せず正直明示�
 
 **engine (ai-automate-engine 等 Windows-canonical repo) 系の ash/gunshi task を発行する際、constraints に必ず以下を明示注入する** (task 発行時 強制・うっかり漏れの構造的防止):
 
-> ★ping-pong 規律 (R2-1)=engine 配下で WSL から `npm install`/`npm ci`/`npm rebuild`/`vitest`/`npm run test`/`npm run build`/`npm run dev` (native-toolchain 実行) は**絶対禁**=殿 Windows 手番★。WSL 側で許可されるのは **tsc / eslint / design / read / grep / git / DS build (node sd.config.js 等 pure-JS)** のみ。native binary (better-sqlite3/lightningcss/node-pty) は WSL で rebuild すると Windows 版を Linux 版で上書きし殿環境を破壊する (cmd_1274 B0 incident 16:37 + B1 E2E 中 ping-pong 再発の実害)。追加 install/native 検証が要るなら「殿 Windows 手番」と明示し ash は実行しない。
+> ★R2-1 = engine 配下で WSL から **npm を通る道は絶対禁**★ = `npm install` / `npm ci` / `npm rebuild` / `npm run test` / `npm run build` / `npm run dev`。これらは殿の Windows 手番である。理由 = npm が native の部品 (better-sqlite3 / lightningcss / node-pty) を Linux 版で上書きし、殿の Windows 環境を壊すため (cmd_1274 で二度 現に壊した)。
+> ★禁じているのは npm を通る道であって、node を直に呼ぶ道ではない★ = cmd_1422 で安全が実測されている (node_modules へ1バイトも書かない / native を作り直さない / package-lock に触れない の3点)。ゆえに `node ...` の直接実行と、それを内側で呼ぶ hook (engine の pre-commit が vitest を全数 走らせる形を含む) は禁じていない。
+> WSL 側で許可されるのは tsc / eslint / design / 読み / 検索 / git / DS build (`node sd.config.js` 等の pure-JS) と、上記の node 直接実行である。追加の install や native の検証が要るなら「殿の Windows 手番」と明示し、足軽は実行しない。
 
 **背景**: cmd_1274 で ash の WSL `npm install` が Windows native binary (lightningcss-win32 / better_sqlite3.node) を Linux 版で上書きし、殿 dev/test を二度破壊した。R2 規律は既に存在したが「task ごとに書き忘れる」余地があったため、本規律 6 で**発行時強制**に格上げする。詳細 incident=`logs/incidents/cmd_1274_wsl_install_ping_pong.md` + `logs/incidents/cmd_1274_pingpong_recurrence_rca.md`。
 

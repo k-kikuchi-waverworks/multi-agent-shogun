@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""定時実行 7 本が「現に終わったか」を検める (cmd_1465・足軽五号)。
+"""JOBS に並べた定時実行が「現に終わったか」を検める (cmd_1465・足軽五号)。
 
 なぜ必要か
 ----------
@@ -19,7 +19,7 @@
 
 何を返すか
 ----------
-7 本それぞれを 4 つに分けます:
+JOBS の 1 本ずつを 4 つに分けます:
   OK       … 終わった証があり、期限内
   STALE    … 終わった証はあるが古い            ← 鳴らす
   MISSING  … 終わった証を書く仕掛けが無い      ← 鳴らす (ただし下記の「一度だけ」)
@@ -58,7 +58,8 @@ LOGS_DIR = REPO_ROOT / "logs"
 # 自分で「見送った」と名乗る印 (理由は上記)。今はまだこれを書く者が居ない = 将来の約束事。
 SKIP_PAT = r"\[(?:gate_nightly|stall_watchdog|idle_revive)\] 見送り"
 
-# 7 本の定義。出所 = plans/cmd_1439_silent_death.md (軍師一号) と crontab の現物。
+# 検める定時実行の定義。出所 = plans/cmd_1439_silent_death.md (軍師一号) と crontab の現物。
+#   ここへ 1 本 足せば、検める数も鳴る文の母数も自動で増える (数を註へ焼かない理由)。
 #   period_min  … 走る間隔 (分)
 #   grace_min   … 遅れを許す幅。走行そのものに掛かる時間を含める
 #                 (毎朝のチェックは現に 3 時間 掛かる日がある = cmd_1465 実測)
@@ -247,7 +248,7 @@ def check_job(job, logs_dir: Path, now: datetime.datetime):
 
 
 def scan(logs_dir: Path = None, now: datetime.datetime = None):
-    """7 本を検めて (所見の一覧, 母数) を返す。"""
+    """JOBS を検めて (所見の一覧, 母数) を返す。母数は数えた結果であって、書いた数ではない。"""
     logs_dir = logs_dir or LOGS_DIR
     now = now or datetime.datetime.now()
     return [check_job(j, logs_dir, now) for j in JOBS], len(JOBS)
@@ -320,7 +321,7 @@ def canary(logs_dir: Path = None):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="定時実行 7 本の『終わった証』を検める")
+    ap = argparse.ArgumentParser(description="定時実行 (JOBS) の『終わった証』を検める")
     ap.add_argument("--logs-dir", type=Path, default=None, help="テスト用に logs/ を差し替える")
     ap.add_argument("--now", type=str, default=None, help="テスト用に『今』を差し替える (ISO)")
     ap.add_argument("--canary", action="store_true",

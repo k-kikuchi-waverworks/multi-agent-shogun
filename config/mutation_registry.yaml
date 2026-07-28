@@ -2336,12 +2336,16 @@ mutations:
       import pathlib
       p = pathlib.Path("scripts/idle_revive_scan.py")
       s = p.read_text(encoding="utf-8")
+      # ★錨を「emit_outcome を呼ぶ 2 行」だけに絞った (五号・cmd_1465 の丙)★
+      #   元は下の return 0 まで含めていたが、2026-07-28 にその間へ別の行
+      #   (終わりの証を書く 1 行と註) が入り、錨が盤面から消えて hit=0 になった。
+      #   変異の狙い = 「dry-run で emit_outcome が呼ばれない」形へ戻すこと。
+      #   ゆえに return 0 は錨に含めなくてよい。含めると、間に行が入るたび折れる。
       old = ('        for r in results:\n'
-             '            emit_outcome(r, False, PRE_SUPPRESSED_REASONS.get(r["action"], "dry_run"))\n'
-             '        return 0\n')
+             '            emit_outcome(r, False, PRE_SUPPRESSED_REASONS.get(r["action"], "dry_run"))\n')
       n = s.count(old)
       assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, "        return 0\n", 1), encoding="utf-8")
+      p.write_text(s.replace(old, "", 1), encoding="utf-8")
       PY
     test: |
       mkdir -p .venv/bin && ln -sf "$(command -v python3)" .venv/bin/python3

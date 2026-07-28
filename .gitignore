@@ -229,6 +229,10 @@ scripts/seo_qc.sh
 !scripts/legacy_guard_swap.sh
 # cmd_1333 (2026-07-25): cmd採番の排他払い出しgate (番号衝突根絶)
 !scripts/cmd_id_alloc.sh
+# cmd_1475 (2026-07-28): 台帳へ「自己修正か」「承認の状態」を書く道具 (殿のご下命)。
+#   この行が要る理由 = .gitignore:7 の * が新しい script を黙って弾く。
+#   弾かれても手元では動くので、配らずに済んでいることに気づけない。
+!scripts/cmd_approval.py
 # cmd_1466 (2026-07-28): queue/ を repo の木の外へ控える道具 (足軽一号)。
 #   ★この行が要る理由 = 守り自身が、守るべき事故の射程の中に居た★。
 #   queue/ 配下は 1 本も追跡下に無い (実測 2026-07-28T17:57 = `git ls-files queue` が 0 本) ゆえ

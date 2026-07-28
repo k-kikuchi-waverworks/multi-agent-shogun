@@ -12,7 +12,8 @@
 #   予約 (正式採番。払い出しと同時に slim entry schema v2 を台帳へ追記):
 #     bash scripts/cmd_id_alloc.sh --title "短名" --origin karo \
 #         --project multi-agent-shogun --priority high \
-#         [--status pending] [--evidence "1行根拠" | --evidence-file <path>] \
+#         [--status pending] [--self-repair true|false] \
+#         [--evidence "1行根拠" | --evidence-file <path>] \
 #         [--timestamp 'YYYY-MM-DDTHH:MM:SS']
 #     → stdout に払い出した id (例: cmd_1334) のみを出力。log は stderr。
 #   番号のみ払い出し (cmd_1336 — 緊急の手書き起票・改番の充当先用。台帳へは書かない):
@@ -305,6 +306,7 @@ PRIORITY=""
 STATUS="pending"
 EVIDENCE=""
 EVIDENCE_FILE=""
+SELF_REPAIR=""
 TIMESTAMP=""
 INIT_HIGHWATER=""
 HIGHWATER_NOW=""
@@ -324,6 +326,9 @@ while [ $# -gt 0 ]; do
         --project) PROJECT="${2:-}"; shift 2 ;;
         --priority) PRIORITY="${2:-}"; shift 2 ;;
         --status) STATUS="${2:-}"; shift 2 ;;
+        # cmd_1475: 起票の時点で「自己修正か」を記録する。
+        # 後から推測で判定すると、殿が誤った物を承認なさる。書けるのは起票する本人だけである。
+        --self-repair) SELF_REPAIR="${2:-}"; shift 2 ;;
         --evidence) EVIDENCE="${2:-}"; shift 2 ;;
         --evidence-file) EVIDENCE_FILE="${2:-}"; shift 2 ;;
         --timestamp) TIMESTAMP="${2:-}"; shift 2 ;;
@@ -390,6 +395,16 @@ if [ "$MODE" = "reserve" ]; then
         || die "--project must match [A-Za-z0-9._-]+ (got: $PROJECT)"
     printf '%s' "$PRIORITY" | grep -qE '^[a-z][a-z_-]*$' \
         || die "--priority must match [a-z][a-z_-]* (got: $PRIORITY)"
+
+    # cmd_1475: 自己修正かどうか。指定しなければ欄を書かない (= 未記入)。
+    # 未記入を false と読ませないため、既定値を勝手に入れない。
+    case "$SELF_REPAIR" in
+        ''|true|false) ;;
+        *) die "--self-repair must be true|false (got: $SELF_REPAIR)。
+  true  = この仕組み自身の改修 (殿の承認が要る)
+  false = 殿の指令そのもの
+  省略  = 未記入 (後から scripts/cmd_approval.py で書ける)" ;;
+    esac
 
     if [ -n "$EVIDENCE_FILE" ]; then
         [ -f "$EVIDENCE_FILE" ] || die "--evidence-file not found: $EVIDENCE_FILE"
@@ -512,6 +527,11 @@ fi
     printf '  project: %s\n' "$PROJECT"
     printf '  priority: %s\n' "$PRIORITY"
     printf "  timestamp: '%s'\n" "$TIMESTAMP"
+    # cmd_1475: 自己修正と名乗った時だけ、承認待ちとして起こす (殿の裁可を待つ形)
+    if [ -n "$SELF_REPAIR" ]; then
+        printf '  self_repair: %s\n' "$SELF_REPAIR"
+        [ "$SELF_REPAIR" = "true" ] && printf '  approval: awaiting\n'
+    fi
     printf '  evidence: |\n'
     printf '%s\n' "$EVIDENCE" | indent4
 } >> "$LEDGER_FILE"

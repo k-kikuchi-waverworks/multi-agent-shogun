@@ -1110,6 +1110,37 @@ def notify_liveness(findings, state, cooldown_min, now, exit_code):
     return exit_code
 
 
+def _write_end_stamp(args, rc):
+    """走り畢えた刻を 1 行 残す (cmd_1465 の丙)。
+
+    何ゆえ log の更新時刻を使わないか:
+      log は途中で死んでも更新される。「誰かが何か書いた」しか言えないので、
+      「終わった」の証にならない。ゆえに、最後まで来た時にだけ別の file を書く。
+
+    何ゆえ rc で書く / 書かないを分けないか:
+      この監視は異常を見つけると rc=1 で終わる。それは「走り畢えた」側である。
+      rc で分けると、異常を見つけた日だけ「死んだ」と読まれる。
+
+    書く条件 (試験が本番の証を汚さないため):
+      ・--stamp-dir を渡された    → 必ず そこへ書く (試験はこれを使う)
+      ・本番の走行 (差し替え無し) → 本番の logs/ へ書く
+      ・上記以外 (試験の走行)     → 書かない
+    """
+    if args.stamp_dir is not None:
+        target = args.stamp_dir
+    elif args.queue_root is None and not args.dry_run:
+        target = None          # None = 本番の logs/
+    else:
+        return
+    try:
+        liveness.write_completion_stamp("stall_watchdog_scan", target, rc)
+    except OSError as e:
+        # 証が書けなかったことを黙らせない (次の走行で「証が無い」と鳴るため、
+        # 何ゆえ無いのかがここに残っていないと、原因を辿る手掛かりが消える)。
+        print(f"[stall_watchdog] WARN: 終わりの証の書込に失敗 ({e}) — "
+              f"次の見張りで『証を持たない』と鳴る", file=sys.stderr)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true",
@@ -1151,6 +1182,9 @@ def main(argv=None):
                     help="定時実行 7 本の『終わった証』の検め (cmd_1465) を走らせぬ。")
     ap.add_argument("--liveness-logs-dir", type=Path, default=None,
                     help="定時実行の見張りが読む logs/ を差し替える (試験用)。")
+    ap.add_argument("--stamp-dir", type=Path, default=None,
+                    help="終わりの証 (cmd_1465 の丙) を書く先を差し替える (試験用)。"
+                         "渡せば必ず書く。渡さねば、本番の走行の時だけ本番の logs/ へ書く。")
     ap.add_argument("--cooldown-min", type=int, default=DEFAULT_COOLDOWN_MIN,
                     help=f"同一 (agent, task_id) の再警報を抑える分数 "
                          f"(default {DEFAULT_COOLDOWN_MIN})。★常に赤い検知は無視されて死ぬ★")
@@ -1278,6 +1312,7 @@ def main(argv=None):
             print_liveness_result(lv_findings)
 
     if args.dry_run or args.queue_root is not None:
+        _write_end_stamp(args, 0)
         return 0
 
     exit_code = 0
@@ -1355,6 +1390,8 @@ def main(argv=None):
     #     読む者はやがて無視する = 検知そのものが死ぬ。顔ぶれが変われば新しい知らせなので鳴る。
     exit_code = notify_liveness(lv_findings, state, args.cooldown_min, now, exit_code)
     _save_alert_state(state)
+    # ★ここが最後である。ここより後に処理を足さないこと★ (cmd_1465 の丙)
+    _write_end_stamp(args, exit_code)
     return exit_code
 
 

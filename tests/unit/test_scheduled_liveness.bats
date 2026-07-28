@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # test_scheduled_liveness.bats — cmd_1465:
-# 定時実行 7 本の「終わった証」を検める仕掛け (scripts/scheduled_liveness_check.py) と、
+# 定時実行 (JOBS) の「終わった証」を検める仕掛け (scripts/scheduled_liveness_check.py) と、
 # それを 15 分毎の監視スクリプトへ相乗りさせた配線を縛る。
 #
 # ■ なぜ必要か
@@ -8,6 +8,17 @@
 #   そのため「全部 緑で終わった」と「途中で死んだ」が、どちらも 0 通で同じ顔になります。
 #   同じ形が定時実行 7 本のうち 5 本にあり、AituberDvcGc は現に 73 日 止まったまま
 #   誰も気づいていませんでした。
+#
+# ■ 2026-07-28 の丙で足した分
+#   証を持たなかった 3 本 (idle_revive_scan / stall_watchdog_scan / queue_backup) に、
+#   走り畢えた刻を 1 行 書かせました。書くのは「最後まで来た時だけ」で、途中で死ねば
+#   出ません。ここでは書く側 (T-SL-019〜022) と読む側の両方を縛ります。
+#   ★母数は 7 → 8 へ動きました★ (8 本目 = queue の控え・cmd_1466)。
+#   ゆえに ★この suite に焼いてある本数は 7 ではなく 8 です★。前の数と突き合わせる者へ。
+#
+# ■ 本数を試験に焼いてある理由 (家老 2026-07-28 13:34 の裁)
+#   註は黙って古くなりますが、試験は JOBS が変われば現に赤くなり、人に見させます。
+#   ★JOBS を増やして此処が赤くなるのは、壊れたのではなく報せです。★
 #
 # ■ この suite が守る物 (CLAUDE.md 条4 = 陽性と陰性の二つを撃つ)
 #   (あ) 鳴るべき時に鳴る       … T-SL-002 / 003 / 004
@@ -39,17 +50,19 @@ teardown() {
     [ -n "${Q:-}" ] && rm -rf "$Q"
 }
 
-# 5 本すべてに新しい「終わった証」を置く。
-# 残る 2 本 (idle_revive_scan / stall_watchdog_scan) は、そもそも終わりの印を
-# 持たない作りなので、ここでは作れない。それ自体がこの cmd の見つけた穴である。
+# 8 本すべてに新しい「終わった証」を置く。
+# 丙 (2026-07-28) より前は、うち 2 本が終わりの印を持たない作りで、ここでは作れなかった。
+# 今は 3 本 (idle_revive_scan / stall_watchdog_scan / queue_backup) が証を書くので、
+# 8 本すべてを揃えられる。★揃えられること自体が、丙で塞いだ穴の姿である。★
 _fresh_all() {
     echo "── [gate_nightly] 終了 gate-1=PASS  ($NOW)" > "$L/gate_nightly.log"
     echo "[$NOW] OK — http=200" > "$L/engine_devserver_morning_check.log"
-    : > "$L/idle_revive_scan.log"
-    : > "$L/stall_watchdog_scan.log"
     : > "$L/pf_account_rename_reminder.log"
     echo "$NOW" > "$L/last_backup_f_to_d.txt"
     echo "$NOW" > "$L/last_dvc_gc_mirror.txt"
+    echo "$NOW idle_revive_scan 終了 rc=0" > "$L/last_idle_revive_scan_end.txt"
+    echo "$NOW stall_watchdog_scan 終了 rc=0" > "$L/last_stall_watchdog_scan_end.txt"
+    echo "$NOW queue_backup 終了" > "$L/last_queue_backup_end.txt"
 }
 
 # 部品を直に撃つ。$1 以降は追加の引数。
@@ -69,7 +82,7 @@ _verdict_of() {
 
 # ── (い) 鳴らないべき時に黙る ───────────────────────────────────────
 
-@test "T-SL-001: 証を持つ 5 本が新しければ、その 5 本は 1 本も鳴らない" {
+@test "T-SL-001: 証を持つ 8 本が新しければ、1 本も鳴らない" {
     _fresh_all
     _liveness
     [ "$(_verdict_of gate_nightly)" = "OK" ]
@@ -77,8 +90,11 @@ _verdict_of() {
     [ "$(_verdict_of pf_account_rename_reminder)" = "OK" ]
     [ "$(_verdict_of AituberFBackupToD)" = "OK" ]
     [ "$(_verdict_of AituberDvcGc)" = "OK" ]
-    # 古い物は 0 本。残る 2 本は「証を持たない」側であって「古い」側ではない。
-    echo "$output" | grep -q "STALE=0"
+    [ "$(_verdict_of idle_revive_scan)" = "OK" ]
+    [ "$(_verdict_of stall_watchdog_scan)" = "OK" ]
+    [ "$(_verdict_of queue_backup)" = "OK" ]
+    # 丙より前は、ここで 2 本が「証を持たない」側に残っていた。今は 0 本である。
+    echo "$output" | grep -q "STALE=0 MISSING=0"
 }
 
 @test "T-SL-005: 古くても、自分で見送りを名乗っていれば鳴らない" {
@@ -134,7 +150,10 @@ _verdict_of() {
 
 @test "T-SL-013: log の更新時刻を「終わった証」の代わりに使わない" {
     _fresh_all
-    # 中身は開始の行だけ。更新時刻は今この瞬間 = 「走った証」はあるが「終わった証」は無い。
+    # 終わりの証だけを消し、log は今この瞬間の更新時刻で置く。
+    # = 「走った証」はあるが「終わった証」は無い状態。ここで OK と出れば、
+    #   更新時刻を証の代わりに使っている証拠になる。
+    rm -f "$L/last_idle_revive_scan_end.txt"
     echo "[idle_revive] ===== scan $NOW =====" > "$L/idle_revive_scan.log"
     _liveness
     [ "$(_verdict_of idle_revive_scan)" = "MISSING" ]
@@ -142,12 +161,12 @@ _verdict_of() {
 
 # ── (う) 配線を現に通る (部品でなく監視スクリプト本体を撃つ) ─────────────
 
-@test "T-SL-007: 監視スクリプトを撃つと、7 本の所見と母数が現に出る" {
+@test "T-SL-007: 監視スクリプトを撃つと、8 本の所見と母数が現に出る" {
     _fresh_all
     _watchdog
     [ "$status" -eq 0 ]
-    [ "$(echo "$output" | grep -c '^SL_JOB=')" -eq 7 ]
-    echo "$output" | grep -q "定時実行の見張り (cmd_1465) 母数=7本"
+    [ "$(echo "$output" | grep -c '^SL_JOB=')" -eq 8 ]
+    echo "$output" | grep -q "定時実行の見張り (cmd_1465) 母数=8本"
     # 塞げていない範囲を、緑と同じ大きさで名乗っているか (条G)。
     echo "$output" | grep -q "そこは塞げていない"
 }
@@ -176,15 +195,15 @@ _verdict_of() {
     # 「STALE が 0 本」を、STALE という綴りが出ない状態と取り違えないための対照。
     # 同じ走行で、判定の 4 つの綴りが集計行に必ず並ぶ。
     echo "$output" | grep -q "OK=.*STALE=.*MISSING=.*SKIPPED="
-    [ "$(echo "$output" | grep -c '^SL_JOB=')" -eq 7 ]
+    [ "$(echo "$output" | grep -c '^SL_JOB=')" -eq 8 ]
 }
 
-@test "T-SL-011: 本番の logs/ に対しても 7 本ぶん現に届く (読むだけ・書き込み 0)" {
+@test "T-SL-011: 本番の logs/ に対しても 8 本ぶん現に届く (読むだけ・書き込み 0)" {
     # fixture だけで緑になり、本番の置き場には一度も届いていない、という形を防ぐ。
     # 判定の中身は問わない (現物は日々 動くため。条B = 数を釘付けにしない)。
     run python3 "$LIVENESS"
-    [ "$(echo "$output" | grep -c '^SL_JOB=')" -eq 7 ]
-    echo "$output" | grep -q "母数=7本"
+    [ "$(echo "$output" | grep -c '^SL_JOB=')" -eq 8 ]
+    echo "$output" | grep -q "母数=8本"
 }
 
 # ── 並べ方 (encoding) を見る側 ────────────────────────────────────
@@ -241,4 +260,70 @@ pathlib.Path(sys.argv[1]).write_bytes(b'x\n'.decode().encode('utf-16'))
     run python3 "$LIVENESS" --canary --logs-dir "$L"
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "判じる口=生きています"
+}
+
+# ── 証を書く側 (cmd_1465 の丙・2026-07-28) ────────────────────────────
+# 読む側だけを縛ると、書く側が黙って止まった日に気づけない。
+# ここは ★書き手の script そのものを撃ち、証が現に出るか★ を見る。
+# 途中で殺した時に出ないことは、時計を測って撃つ要が在るので
+# plans/cmd_1465_liveness_proof_mutants.sh の側に置いてある (窓の中で殺せたかを数で刷る)。
+
+@test "T-SL-019: 監視スクリプトが走り畢えると、終わりの証を現に書く" {
+    S="$(mktemp -d)"
+    run python3 "$SCAN" --dry-run --queue-root "$Q" --liveness-logs-dir "$L" --stamp-dir "$S"
+    [ "$status" -eq 0 ]
+    # 「何か出たか」でなく「此の名の証が此処に出たか」で見る
+    [ -s "$S/last_stall_watchdog_scan_end.txt" ]
+    grep -q "stall_watchdog_scan 終了" "$S/last_stall_watchdog_scan_end.txt"
+    rm -rf "$S"
+}
+
+@test "T-SL-020: 番人 (idle_revive_scan) が走り畢えると、終わりの証を現に書く" {
+    S="$(mktemp -d)"
+    echo '{}' > "$Q/panes.json"
+    run python3 "$STALL_SCAN_ROOT/scripts/idle_revive_scan.py" --dry-run \
+        --queue-root "$Q" --stamp-dir "$S" --pane-state-file "$Q/panes.json"
+    [ "$status" -eq 0 ]
+    [ -s "$S/last_idle_revive_scan_end.txt" ]
+    grep -q "idle_revive_scan 終了" "$S/last_idle_revive_scan_end.txt"
+    rm -rf "$S"
+}
+
+@test "T-SL-021: queue の控えが走り畢えると、終わりの証を現に書く" {
+    S="$(mktemp -d)"; B="$(mktemp -d)"
+    # env を明に噛ませる。bats の run の前へ置く書き方だと、渡ったかどうかが
+    # 出力から読めず、渡っていなくても控えは出来てしまう (本番の置き場が汚れる)。
+    run env QUEUE_BACKUP_DIR="$B" QUEUE_STAMP_DIR="$S" \
+        bash "$STALL_SCAN_ROOT/scripts/queue_backup.sh"
+    [ "$status" -eq 0 ]
+    # 控えが差し替えた置き場へ現に出来たこと (= env が渡った証)
+    [ -n "$(ls "$B"/queue_*.tar.gz 2>/dev/null)" ]
+    [ -s "$S/last_queue_backup_end.txt" ]
+    grep -q "queue_backup 終了" "$S/last_queue_backup_end.txt"
+    rm -rf "$S" "$B"
+}
+
+@test "T-SL-022: 試験の走行は、本番の logs/ へ証を 1 バイトも書かない (条C)" {
+    # 己の作り物が本番の数を動かさぬこと。--stamp-dir を渡さず --queue-root だけ渡す形。
+    before="$(ls -la "$REPO/logs/last_stall_watchdog_scan_end.txt" 2>/dev/null || echo none)"
+    run python3 "$SCAN" --dry-run --queue-root "$Q" --liveness-logs-dir "$L"
+    [ "$status" -eq 0 ]
+    after="$(ls -la "$REPO/logs/last_stall_watchdog_scan_end.txt" 2>/dev/null || echo none)"
+    [ "$before" = "$after" ]
+}
+
+@test "T-SL-023: 書く側と読む側が、同じ名前の付け方を通っている" {
+    # 名前の付け方が二箇所に分かれると、片方だけ直った日に読む側が黙って
+    # 「証が無い」と答える。それは「走らなかった」と同じ顔で返る。
+    run python3 -c "
+import sys; sys.path.insert(0, '$STALL_SCAN_ROOT/scripts')
+import scheduled_liveness_check as l
+names = [j['name'] for j in l.JOBS if j.get('stamp')]
+for n in ('idle_revive_scan', 'stall_watchdog_scan', 'queue_backup'):
+    j = [x for x in l.JOBS if x['name'] == n][0]
+    assert j['stamp'] == l.stamp_filename(n), (n, j['stamp'], l.stamp_filename(n))
+print('ok', len(names))
+"
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "^ok "
 }

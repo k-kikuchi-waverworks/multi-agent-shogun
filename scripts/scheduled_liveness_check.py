@@ -74,11 +74,11 @@ JOBS = [
          log="gate_nightly.log", end_pat=r"── \[gate_nightly\] 終了 ", stamp=None,
          note="毎朝 06:30"),
     dict(name="idle_revive_scan", period_min=3, grace_min=27,
-         log="idle_revive_scan.log", end_pat=None, stamp=None,
-         note="3 分毎。開始の印だけ持ち、終わりの印を持たない"),
+         log=None, end_pat=None, stamp="last_idle_revive_scan_end.txt",
+         note="3 分毎。証は cmd_1465 の丙で据えた (main の最後で書く)"),
     dict(name="stall_watchdog_scan", period_min=15, grace_min=45,
-         log="stall_watchdog_scan.log", end_pat=None, stamp=None,
-         note="15 分毎。印を 1 つも持たない。この検めの相乗り先そのもの"),
+         log=None, end_pat=None, stamp="last_stall_watchdog_scan_end.txt",
+         note="15 分毎。この検めの相乗り先そのもの。証は cmd_1465 の丙で据えた"),
     dict(name="engine_devserver_morning_check", period_min=1440, grace_min=360,
          log="engine_devserver_morning_check.log",
          end_pat=r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] ", stamp=None,
@@ -92,9 +92,49 @@ JOBS = [
     dict(name="AituberDvcGc", period_min=1440, grace_min=360,
          log=None, end_pat=None, stamp="last_dvc_gc_mirror.txt",
          note="毎日 03:00 (Windows)。証は足軽一号が cmd_1439 で据えた"),
+    # 8 本目 (cmd_1466 の queue の控え)。軍師二号が「落ちた時に気付く口が log だけ」と
+    # 名指したので、ここへ足した。母数が 7 → 8 へ動いた日 = 2026-07-28。
+    dict(name="queue_backup", period_min=30, grace_min=30,
+         log=None, end_pat=None, stamp="last_queue_backup_end.txt",
+         note="30 分毎 (cmd_1466)。証は cmd_1465 の丙で据えた"),
 ]
 
 _TS_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})")
+
+
+def stamp_filename(name):
+    """終わりの証のファイル名。書く側も読む側もここを通す (cmd_1465 の丙)。
+
+    書き手と読み手を同じファイルに置いてある理由:
+    名前の付け方が別々の場所にあると、片方だけ直った日に、読み手は黙って
+    「証が無い」と答えます。それは「走らなかった」と同じ顔で返ります。
+    """
+    return f"last_{name}_end.txt"
+
+
+def write_completion_stamp(name, logs_dir=None, rc=None):
+    """走り畢えた刻を 1 行 書く (cmd_1465 の丙)。書けた path を返す。
+
+    ここで守っている約束が 1 つあります。
+      ★この関数は、呼ぶ側の処理がすべて終わった後でしか呼んではいけません。★
+      atexit や finally から呼ぶと、途中で死んでも証が出ます。それは
+      「終わった証」ではなく「始まった証」で、log の更新時刻と同じ物になります
+      (この cmd がずっと狩ってきた形を、自分で作ることになります)。
+
+    rc は「終わったか」とは別の事実なので、載せるが判定には使いません。
+    定時実行は異常を見つけた時に rc=1 で終わることがあり、それは
+    「走り畢えた」の側だからです。
+    """
+    logs_dir = Path(logs_dir) if logs_dir else LOGS_DIR
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    p = logs_dir / stamp_filename(name)
+    line = (f"{datetime.datetime.now():%F %T} {name} 終了"
+            + (f" rc={rc}" if rc is not None else "") + "\n")
+    # 途中で切れた証を残さないため、別名で書いてから差し替えます。
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(line, encoding="utf-8")
+    tmp.replace(p)
+    return p
 
 
 def sniff_encoding(raw: bytes):
@@ -330,7 +370,16 @@ def main(argv=None):
     ap.add_argument("--now", type=str, default=None, help="テスト用に『今』を差し替える (ISO)")
     ap.add_argument("--canary", action="store_true",
                     help="読む file の並べ方の内訳を刷る (中身でなく『現に見たか』を見る)")
+    ap.add_argument("--stamp", metavar="NAME", default=None,
+                    help="終わりの証を 1 行 書く (bash の定時実行から呼ぶ口)。"
+                         "★処理が全部 終わった後でだけ呼ぶこと★")
+    ap.add_argument("--stamp-rc", type=int, default=None,
+                    help="--stamp と併せて、呼んだ側の終了コードを証へ載せる")
     a = ap.parse_args(argv)
+    if a.stamp:
+        p = write_completion_stamp(a.stamp, a.logs_dir, a.stamp_rc)
+        print(f"[liveness] 終わりの証を書いた: {p}")
+        return 0
     if a.canary:
         return canary(a.logs_dir)
     now = _parse_ts(a.now) if a.now else None

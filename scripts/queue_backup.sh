@@ -264,6 +264,32 @@ cmd_backup() {
   else
     printf '保持 %s 本以内 (今 %s 本)。消す物は無い\n' "$KEEP" "$total"
   fi
+
+  # ★ここが最後である。ここより後に処理を足さないこと★ (cmd_1465 の丙)
+  #   走り畢えた刻を 1 行 残す。log の更新時刻は途中で死んでも動くので証にならない。
+  #   軍師二号が「落ちた時に気付く口が log だけ」と名指した所を、これで塞ぐ。
+  #   書く場所は $QUEUE_STAMP_DIR で差し替えられる (試験が本番の証を汚さないため)。
+  write_end_stamp
+  return 0
+}
+
+# 終わりの証を 1 行 書く。書き手と読み手の形を 1 箇所に寄せるため、
+# 名前の付け方は scheduled_liveness_check.py に持たせてある (この script は呼ぶだけ)。
+write_end_stamp() {
+  local py stamp_args=()
+  py="$([ -x "$REPO/.venv/bin/python3" ] && echo "$REPO/.venv/bin/python3" \
+        || command -v python3 || true)"
+  if [ -z "$py" ]; then
+    printf '⚠ python3 が無く、終わりの証を書けなかった。次の見張りで「証を持たない」と鳴る\n' >&2
+    return 0
+  fi
+  [ -n "${QUEUE_STAMP_DIR:-}" ] && stamp_args=(--logs-dir "$QUEUE_STAMP_DIR")
+  if ! "$py" "$REPO/scripts/scheduled_liveness_check.py" \
+        --stamp queue_backup "${stamp_args[@]}"; then
+    # 書けなかったことを黙らせない (次の走行で「証が無い」と鳴った時、
+    # 何ゆえ無いのかを辿る手掛かりがここに残る)
+    printf '⚠ 終わりの証を書けなかった。次の見張りで「証を持たない」と鳴る\n' >&2
+  fi
   return 0
 }
 

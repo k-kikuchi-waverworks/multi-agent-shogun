@@ -85,6 +85,9 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# 終わりの証を書く口 (cmd_1465 の丙)。書き手と読み手を同じ file に置いてある。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import scheduled_liveness_check as liveness  # noqa: E402
 DEFAULT_TASKS_DIR = REPO_ROOT / "queue" / "tasks"
 DEFAULT_REPORTS_DIR = REPO_ROOT / "queue" / "reports"
 DEFAULT_STATE_DIR = REPO_ROOT / "queue" / "state"
@@ -2587,6 +2590,33 @@ def send_inbox(target, body, msg_type, from_agent):
     )
 
 
+def _write_end_stamp(args, rc):
+    """走り畢えた刻を 1 行 残す (cmd_1465 の丙)。
+
+    この script は既に「走った刻」を state へ書いている (cmd_1394 の欠測判定用)。
+    それは走行の ★入口★ に在り、途中で死んでも残る = 「始まった」しか言えない。
+    ここで書くのは ★出口★ の証で、最後まで来た時にだけ残る。二つは別物ゆえ、
+    片方をもう片方の代わりに使わないこと。
+
+    rc で書く / 書かないを分けない理由は stall_watchdog_scan.py と同じ
+    (異常を見つけた走行も「走り畢えた」側である)。
+
+    書く条件: --stamp-dir を渡されたら必ずそこへ。渡されず本番の走行なら本番の
+    logs/ へ。試験の走行 (--queue-root / --dry-run) では書かない。
+    """
+    if args.stamp_dir is not None:
+        target = args.stamp_dir
+    elif args.queue_root is None and not args.dry_run:
+        target = None
+    else:
+        return
+    try:
+        liveness.write_completion_stamp("idle_revive_scan", target, rc)
+    except OSError as e:
+        print(f"[idle_revive] WARN: 終わりの証の書込に失敗 ({e}) — "
+              f"次の見張りで『証を持たない』と鳴る", file=sys.stderr)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -2645,6 +2675,9 @@ def main(argv=None):
     ap.add_argument("--json", action="store_true", help="結果を JSON で出力。")
     ap.add_argument("--queue-root", type=Path, default=None,
                     help="queue root 上書き(tasks/ reports/ state/ を含む)。主にテスト用。")
+    ap.add_argument("--stamp-dir", type=Path, default=None,
+                    help="終わりの証 (cmd_1465 の丙) を書く先を差し替える (試験用)。"
+                         "渡せば必ず書く。渡さねば、本番の走行の時だけ本番の logs/ へ書く。")
     args = ap.parse_args(argv)
 
     if args.selftest_upstream:
@@ -2783,6 +2816,10 @@ def main(argv=None):
         # ★log だけで★言えるようにする唯一の行 (2026-07-27 に家老が誤った其の点)。
         for r in results:
             emit_outcome(r, False, PRE_SUPPRESSED_REASONS.get(r["action"], "dry_run"))
+        # 乾式も「走り畢えた」側なので、ここも終わりの証を書く出口である
+        # (2026-07-28 に、ここを見落としたまま陽性側を撃って現に取り落とした。
+        #  canary が「この file が出るか」を見ていたので、その場で判った = 条5)
+        _write_end_stamp(args, 0)
         return 0
 
     # ── 実発行(非 dry-run) ──
@@ -3016,6 +3053,8 @@ def main(argv=None):
             print(f"[idle_revive] 再開通知を家老へ発行 ({resume_hit['reason']})",
                   file=sys.stderr)
 
+    # ★ここが最後である。ここより後に処理を足さないこと★ (cmd_1465 の丙)
+    _write_end_stamp(args, exit_code)
     return exit_code
 
 

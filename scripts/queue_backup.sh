@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# queue/ を repo の木の外へ控える (cmd_1466)
+# queue/ と、同じ一手で消える殿の頁を repo の木の外へ控える (cmd_1466)
+#
+# ■ 何を控えるか (実測 2026-07-28T18:1x)
+#   queue/         913 本 / 21.79 MiB   台帳・task YAML・報告・queue/archive
+#   dashboard.md   897,623 byte         殿の頁。queue/dashboard.md は此処を指す symlink で、
+#                                       link と指す先が同じ一手で消える
+#   archive/       14 本 / 2.85 MiB     四号が cmd_1470 で殿の頁の古い節を攫う先
 #
 # ■ 何を守るか
 #   `git clean -xd` を一手 撃つと queue/ が丸ごと消える。queue/ 配下は 1 本も git の
@@ -57,6 +63,18 @@ inbox_target() {
   [ -n "$t" ] && [ -d "$t" ] && printf '%s' "$t"
 }
 
+# queue/ の他に、同じ一手で消えて、かつ小さい物を一緒に控える。
+# dashboard.md は queue/dashboard.md が指す先で、link だけ控えても中身が残らない。
+# archive/ は四号が cmd_1470 で殿の頁の古い節を攫う先である (家老 18:11 の便)。
+EXTRA_PATHS=(dashboard.md archive)
+
+existing_extras() {
+  local p
+  for p in "${EXTRA_PATHS[@]}"; do
+    [ -e "$REPO/$p" ] && printf '%s\n' "$p"
+  done
+}
+
 newest_archive() {
   $FIND "$BACKUP_DIR" -maxdepth 1 -name 'queue_*.tar.gz' -type f 2>/dev/null \
     | $SORT | /usr/bin/tail -1
@@ -104,6 +122,17 @@ cmd_canary() {
   local tracked; tracked=$(cd "$REPO" && git ls-files queue 2>/dev/null | $GREP -c .)
   printf '  queue/ で git の追跡下の本数  : %s (0 なら git clean -xd で丸ごと消える側)\n' "$tracked"
 
+  # queue/ の外だが同じ一手で消える物。追跡下に無ければ控える要が在る
+  local p
+  for p in "${EXTRA_PATHS[@]}"; do
+    if [ -e "$REPO/$p" ]; then
+      printf '  %-13s : 在り / 追跡下 %s 本 (0 なら控える要が在る)\n' "$p" \
+        "$(cd "$REPO" && git ls-files "$p" 2>/dev/null | $GREP -c .)"
+    else
+      printf '  %-13s : 無し (控えの対象から自動で外れる)\n' "$p"
+    fi
+  done
+
   printf '\n=== 陰性 — 在らぬ物が現に出ない証 ===\n'
   local ghost; ghost=$($FIND "$REPO/queue" -name 'no_such_file_zzz_canary' -type f 2>/dev/null | $GREP -c .)
   printf '  在らぬ名で探した本数          : %s (期待 0)\n' "$ghost"
@@ -124,13 +153,15 @@ cmd_backup() {
   local stamp; stamp=$(date '+%Y%m%d_%H%M%S')
   local out="$BACKUP_DIR/queue_${stamp}.tar.gz"
   local tgt; tgt="$(inbox_target || true)"
+  local extras; mapfile -t extras < <(existing_extras)
 
   printf '採取刻 = %s\n' "$(now)"
   printf '控え先 = %s\n' "$out"
+  printf '同梱   = queue/ %s\n' "$(printf '%s ' "${extras[@]:-}")"
   if [ -n "$tgt" ]; then
-    printf '同梱   = queue/ と、queue/inbox が指す先 %s\n' "$tgt"
+    printf '         と、queue/inbox が指す先 %s\n' "$tgt"
   else
-    printf '同梱   = queue/ のみ (queue/inbox の symlink が辿れなかった)\n'
+    printf '         ★queue/inbox の symlink が辿れなかった。便の中身は控えに入っていない★\n'
   fi
 
   if [ "$dry" = "--dry-run" ]; then
@@ -147,11 +178,11 @@ cmd_backup() {
   if [ -n "$tgt" ]; then
     $TAR -czf "$out" \
       --warning=no-file-changed \
-      -C "$REPO" queue \
+      -C "$REPO" queue "${extras[@]}" \
       -C "$(dirname "$tgt")" "$(basename "$tgt")"
     rc=$?
   else
-    $TAR -czf "$out" --warning=no-file-changed -C "$REPO" queue
+    $TAR -czf "$out" --warning=no-file-changed -C "$REPO" queue "${extras[@]}"
     rc=$?
   fi
 
@@ -252,6 +283,23 @@ cmd_verify() {
     printf '⚠ 赤: 台帳が控えの中に無いか、空である\n'
     rc=1
   fi
+
+  # queue/ の外だが同じ一手で消える物も、中身を持って入っていること。
+  # dashboard.md は queue/dashboard.md が指す先で、link だけでは中身が残らない。
+  local p
+  for p in $(existing_extras); do
+    if [ -e "$work/$p" ]; then
+      if [ -f "$work/$p" ] && [ ! -s "$work/$p" ]; then
+        printf '⚠ 赤: %s が控えの中で空である\n' "$p"; rc=1
+      elif [ -L "$work/$p" ]; then
+        printf '⚠ 赤: %s が控えの中で symlink のままである (中身が入っていない)\n' "$p"; rc=1
+      else
+        printf '%-9s : 控えの中に在り、中身を持つ\n' "$p"
+      fi
+    else
+      printf '⚠ 赤: %s が控えの中に無い\n' "$p"; rc=1
+    fi
+  done
 
   printf '\n判定: %s\n' "$([ "$rc" -eq 0 ] && echo '緑 = 今 現に戻せる' || echo '赤 = 戻せない')"
   printf 'この判定が答えないこと: 控えを取った刻より後の書き替えは、この控えに入っていない\n'

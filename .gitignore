@@ -229,6 +229,14 @@ scripts/seo_qc.sh
 !scripts/legacy_guard_swap.sh
 # cmd_1333 (2026-07-25): cmd採番の排他払い出しgate (番号衝突根絶)
 !scripts/cmd_id_alloc.sh
+# cmd_1466 (2026-07-28): queue/ を repo の木の外へ控える道具 (足軽一号)。
+#   ★この行が要る理由 = 守り自身が、守るべき事故の射程の中に居た★。
+#   queue/ 配下は 1 本も追跡下に無い (実測 2026-07-28T17:57 = `git ls-files queue` が 0 本) ゆえ
+#   `git clean -xd` 一手で 913 本 / 21.79 MiB が消える。その控えを取る script が
+#   同じ一手で一緒に消えては、控えを取り直す手が残らない。
+#   ★見つけ方 = `git status` ではなく `git check-ignore` である★ (ignore された file は
+#   `??` にすら出ないので、git status は「緑」ではなく「見ていない」を返す)。
+!scripts/queue_backup.sh
 # cmd_1352 (2026-07-26): 沈黙する落とし穴gate (gate-1=commit捕捉 / gate-2=変異台帳再走。
 # 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
 !scripts/gate_artifact_capture.sh

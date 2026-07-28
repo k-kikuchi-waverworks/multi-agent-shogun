@@ -313,8 +313,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --peek) MODE="peek"; shift ;;
         --claim) MODE="claim"; shift ;;
-        # 値が無い時に `shift 2` を撃つと set -e で【何も刷らずに】落ちる (既存の旗と同じ形)。
-        # 此の旗は人が手で撃つ復旧の口ゆえ、必ず理由を刷ってから止まるようにする。
+        # 値が無い時に `shift 2` すると set -e で何も表示せずに落ちる (既存のオプションと同じ形)。
+        # このオプションは人が手で実行する復旧用なので、必ず理由を表示してから止める。
         --init-highwater)
             MODE="init_highwater"; INIT_HIGHWATER="${2:-}"; shift
             [ $# -gt 0 ] && shift || true

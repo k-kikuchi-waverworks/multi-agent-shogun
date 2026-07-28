@@ -658,7 +658,13 @@ Fixed status set (do not add casually):
 - `queue/tasks/ashigaruN.yaml`: `assigned`, `blocked`, `in_progress`, `done`, `failed`,
   `cancelled`, `archived` (+ placeholder-only `idle`, see below)
 - `queue/tasks/pending.yaml`: `pending_blocked`
+  - **現物がありません** (2026-07-28 18:04 実測)。この綴りを持つのは本文書と、
+    本文書から作られる写しだけです。読む口も書く口も 0 本で、git の履歴にも
+    一度も現れません。**消さずに残しています** — 未実装の設計かもしれず、
+    消すのは戻しにくいためです。**使う前に、まず現物を作る所から始めてください。**
 - `queue/ntfy_inbox.yaml`: `pending`, `processed`
+- `queue/reports/*_report.yaml`: **この欄の正本は本文書ではありません。**
+  下の「Report File」の節を見てください。
 
 Do NOT invent new status values without updating this section.
 
@@ -817,6 +823,39 @@ Note:
 - `processed`: processed; keep record
   - Allowed: read-only
   - Forbidden: flipping back to pending without creating a new entry
+
+### Report File: `queue/reports/*_report.yaml` (cmd_1461 で明文化)
+
+**この欄だけは、正本が本文書ではありません。正本は読み手のコードです** —
+`scripts/idle_revive_scan.py` の `COMPLETION_STATUSES`。
+
+そう決めた理由: この欄を読む機械が 3 本あり、**文書を直しても機械の判定は変わらない**
+ためです。文書を正本にすると、規と振る舞いが二度と揃いません。
+
+完了として読まれる語 = `done` / `completed` / `success`
+(2026-07-28 18:04 実測。3 本とも同じ集合でした)。
+
+| 機械 | 完了と読めた時に何が決まるか |
+|---|---|
+| `scripts/idle_revive_scan.py` | 完了と読めなければ、その足軽を revive する |
+| `scripts/stall_watchdog_scan.py` | 完了と読めた報告だけを「着地」と数える |
+| `scripts/report_validate.py` | 完了と読めた報告にだけ R5c/R5d を当てる |
+
+**語を足す時は 3 本まとめて足してください。** 1 本だけ足すと、同じ報告が
+「完了」と「未完了」の両方に読まれます。
+
+実例 (2026-07-28 まで現に在りました): `report_validate.py` は完了語を手で写して
+持っており、その写しは **読み手が一度も持たない語** (`complete` / `finished`) を
+完了と読み、**読み手が持つ語** (`success`) を完了と読みませんでした。
+写した本人は「読み手のコードを写した」と註に書いています。**誰も嘘をついておらず、
+写しが照合されないまま残っていただけです。**
+今は `report_validate.py` が読み手から借りる形になり、食い違いは
+`python3 scripts/report_validate.py --selftest` の **B6** が機械で捕えます。
+
+**`aligned` は報告の status ではありません。** 報告の中に `status: aligned` が
+現に出ますが、これは `north_star_alignment:` の下の欄です
+(2026-07-28 18:00 実測 = 35 箇所すべてがこの入れ子)。
+`status:` を行で数えると混ざります。**数える時は階層を見てください。**
 
 ## Immediate Delegation Principle (Shogun)
 

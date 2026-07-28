@@ -275,7 +275,33 @@ def validate_text(text: str, stem: str) -> list[str]:
 # ★警告のみ★= 返り値は problems と別の list。CLI の rc を赤にせぬ。
 # ══════════════════════════════════════════════════════════════════════════
 READER = "scripts/idle_revive_scan.py"
-COMPLETION_WORDS = {"done", "completed", "complete", "finished"}
+
+# ★完了語は【写さず借りる】★ (cmd_1461)
+#
+# 何が在ったか。此処は元は手で写した集合であった。上の註は「読み手の code を写した物」と
+# 名乗っておるが、★写した中身は読み手が一度も持たなんだ集合であった★ (2026-07-28 17:59 実測):
+#     読み手 (idle_revive_scan の COMPLETION_STATUSES) = {done, completed, success}
+#     此処の写し                                        = {done, completed, complete, finished}
+#     読み手にだけ在った = success  /  写しにだけ在った = complete, finished
+#
+# 害 (現物では未発現・下の「撃っていない所」も見よ):
+#   ・報告が `status: success` → 読み手は完遂と読む (revive せぬ) が、
+#     此の門は完遂と読まぬゆえ ★R5c/R5d の検めを黙って素通りする★
+#   ・報告が `status: finished` → 此の門は完遂と読むが、読み手は読まぬゆえ
+#     ★完遂を報せた者が revive される★
+#   ⇒ 同じ 1 つの欄を、二つの機械が違う語彙で判じておった。
+#
+# ゆえに借りる形へ替える。読み手が語を足せば此の門も追随し、写しが化ける道が塞がる。
+# 借り損ねた時は ★読み手が今 持つ集合★ へ倒し、其の旨を名乗る (fail-OPEN・B6 が捕える)。
+# ★倒す先も手書きの定数ゆえ、いずれ読み手から離れる★ — 之も B6 が照合する。
+COMPLETION_WORDS_FALLBACK = {"done", "completed", "success"}
+try:
+    from idle_revive_scan import COMPLETION_STATUSES as COMPLETION_WORDS  # noqa: E402
+
+    COMPLETION_BORROW_ERROR = None
+except Exception as _exc:  # fail-OPEN (loud) — 借りられねば倒し、其の旨を名乗る
+    COMPLETION_WORDS = COMPLETION_WORDS_FALLBACK
+    COMPLETION_BORROW_ERROR = f"{type(_exc).__name__}: {_exc}"
 
 # ★門が「今は警告である」と「いつ赤へ変えるか」を己の口で名乗る★ (cmd_1407・軍師一号 22:4x)
 #   理 = 軍師一号が本日 二度「警告は出るが読む者が居らぬ」を名指した。R5a の読み手は現に
@@ -1004,7 +1030,7 @@ def _cases() -> list[tuple[str, str, str | None, str | None]]:
 #   ⇒ 「族がここに在るべし」を ★data として宣言し、走った後に照合する★。
 #   ★之で消えるのは【黙って消える形】だけである★= 下の表から名を消せば依然として外せる。
 #   而して其の時は ★何を捨てたかを明示して消す★ことになる (条6 = 射程を名乗る)。
-REQUIRED_FAMILIES = ("B1", "B2", "B3", "B3n", "L0", "L5", "L6", "L7", "N3")
+REQUIRED_FAMILIES = ("B1", "B2", "B3", "B3n", "B6", "L0", "L5", "L6", "L7", "N3")
 
 
 def selftest() -> int:
@@ -1025,6 +1051,28 @@ def selftest() -> int:
         say(f"  NG  B1 slim_yaml の除外表を借りられなんだ = ★R2 が黙って消えておる★: {BORROW_ERROR}")
     else:
         say(f"  ok  B1 除外表を借りられた ({len(CANONICAL_REPORTS)} 件)")
+
+    # ★B6 (cmd_1461) = 【完了語の写し】が【読み手】から離れておらぬかを機械で照合する★
+    #   ★何ゆえ要るか★= 此処は元々 手写しで、★読み手が一度も持たなんだ語を持っておった★
+    #   (借りる前の実測 = 読み手に success / 写しに complete・finished)。
+    #   借りる形にしたので ★同じ物であること自体は構造で決まる★。ゆえに B6 が見るのは
+    #   ★構造が外れる二つの道★ である:
+    #     (1) 借り損ねて黙って倒れる — 倒れた先は別の語彙ゆえ、判定が静かに変わる
+    #     (2) 倒す先の手書き定数が、読み手から離れる — 借り損ねた日に初めて牙を剥く
+    #   ★(2) を見るのが要である★= 借りられておる間は倒す先が一度も使われず、
+    #   ★誰も間違いに気づけぬまま寝ておる★形になる (「使われぬ守り」は腐る)。
+    if COMPLETION_BORROW_ERROR is not None:
+        ok = False
+        say(f"  NG  B6 読み手の完了語を借りられなんだ = ★R5c/R5d が読み手と別の語彙で判じておる★"
+            f": {COMPLETION_BORROW_ERROR}")
+    elif set(COMPLETION_WORDS) != set(COMPLETION_WORDS_FALLBACK):
+        ok = False
+        say(f"  NG  B6 ★倒す先が読み手から離れておる★ = 借り損ねた日に別の語彙で判ずる"
+            f" (読み手={sorted(COMPLETION_WORDS)} / 倒す先={sorted(COMPLETION_WORDS_FALLBACK)}"
+            f" / 差={sorted(set(COMPLETION_WORDS) ^ set(COMPLETION_WORDS_FALLBACK))})"
+            f" ⇒ {READER} に合わせて COMPLETION_WORDS_FALLBACK を直せ")
+    else:
+        say(f"  ok  B6 完了語を読み手から借り、倒す先も一致 ({sorted(COMPLETION_WORDS)})")
 
     # ★B2 = 前提そのものを名乗る★ (cmd_1404)。M2/M2n は「表の外/中」を撃つ試験ゆえ、
     #   其の stem が現に外/中に在ることを ★先に言葉で出す★。焼き付けた綴りが黙って

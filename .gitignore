@@ -220,19 +220,8 @@ scripts/seo_qc.sh
 # cmd_1255 (2026-07-11): 台帳parse自己検証gate (ledger_guard watcher + 手動検証CLI)
 !scripts/ledger_guard.sh
 !scripts/ledger_validate.py
-# cmd_1339 (2026-07-26): ledger_guard の旧 instance を無停止で入れ替える道具 (足軽一号)。
-# cmd_1436 (2026-07-28): .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
-#   ★配らぬと死ぬのは「呼び出し」ではなく「案内」である★ =
-#   process_signal_guard.py の拒みの便が本 script を ★殺す力を構造化した先例★ として名指しており、
-#   拒まれた者は其の便を読んで本 script を開きに行く。配らねば fresh clone では其の path が存在せぬ。
-#   ★而も静かに存在せぬ★ = 呼び出しではないゆえ何も落ちず、案内だけが宛先を失う。
-!scripts/legacy_guard_swap.sh
 # cmd_1333 (2026-07-25): cmd採番の排他払い出しgate (番号衝突根絶)
 !scripts/cmd_id_alloc.sh
-# cmd_1475 (2026-07-28): 台帳へ「自己修正か」「承認の状態」を書く道具 (殿のご下命)。
-#   この行が要る理由 = .gitignore:7 の * が新しい script を黙って弾く。
-#   弾かれても手元では動くので、配らずに済んでいることに気づけない。
-!scripts/cmd_approval.py
 # cmd_1466 (2026-07-28): queue/ を repo の木の外へ控える道具 (足軽一号)。
 #   ★この行が要る理由 = 守り自身が、守るべき事故の射程の中に居た★。
 #   queue/ 配下は 1 本も追跡下に無い (実測 2026-07-28T17:57 = `git ls-files queue` が 0 本) ゆえ
@@ -256,14 +245,13 @@ scripts/seo_qc.sh
 #   ★之を通さねば「作業ツリーでは呑まれを見張り、配る物では見張らぬ」★ =
 #   gate_precommit.sh が呼ぶ先を失うて ★毎 commit「道具が居らぬ」で鳴る門★になる (T-RA-004 が縛る形)。
 !scripts/gate_registry_append.py
-# cmd_1386 (2026-07-26): 台帳の id を数える物差し (手2 の 178/178 突合で使う)。
-# ★またしても .gitignore:7 の * に黙って弾かれておった★ = 本日 同型の 4 度目ゆえ明示で通す。
+# (下の 5 行は、上の白名簿の行に対する註ではない。cmd_1386 の道具 ledger_id_census.py への註だったが、
+#  其の道具は cmd_1479 で撤去した。註の中身は .gitignore 自身の話ゆえ残す = 台帳を .d へ割る時の注意)
 #   ★手2 で台帳を .d へ割る時は【shard も同じ穴に落ちる】= 実測済 (2026-07-26T22:37)★:
 #   `git add --dry-run config/mutation_registry.d/*.yaml` が ignored を返し、
 #   且つ 手2 は旧 file を消すゆえ ★HEAD から台帳が丸ごと消え、作業ツリーだけ緑のまま★になる。
 #   ⇒ 割る commit と同じ commit で次の 2 行 (web 台帳を割るなら 4 行) を足すこと:
 #     !config/mutation_registry.d/  /  !config/mutation_registry.d/*.yaml
-!scripts/ledger_id_census.py
 # cmd_1363 (2026-07-26): 「道具へ渡す前に shell が食う」関所 (PreToolUse hook)。
 # ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
 #   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。

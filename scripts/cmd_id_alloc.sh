@@ -403,7 +403,8 @@ if [ "$MODE" = "reserve" ]; then
         *) die "--self-repair must be true|false (got: $SELF_REPAIR)。
   true  = この仕組み自身の改修 (殿の承認が要る)
   false = 殿の指令そのもの
-  省略  = 未記入 (後から scripts/cmd_approval.py で書ける)" ;;
+  省略  = 未記入。★後から書く道具 (scripts/cmd_approval.py) は cmd_1479 第4束で撤去した★ゆえ、
+          ★台帳の該当 entry を手で直すこと★ (欄そのものは今も台帳に在る)。" ;;
     esac
 
     if [ -n "$EVIDENCE_FILE" ]; then

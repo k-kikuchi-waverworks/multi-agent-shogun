@@ -498,8 +498,10 @@ def format_denial(result: dict) -> str:
         "  ・一覧/版表示 : kill -l / killall --help",
         "",
         "★真に殺す要が在るなら★ = ★判定を構造化して script へ落とせ★",
-        "  先例 = scripts/legacy_guard_swap.sh (cmd_1339) =",
-        "    「対象の cmdline が想定と違えば拒む・落とした後 再起動まで実測で見届ける」",
+        "  形 = 「対象の cmdline が想定と違えば拒む・落とした後 再起動まで実測で見届ける」",
+        "  ★先例だった scripts/legacy_guard_swap.sh (cmd_1339) は cmd_1479 第4束で撤去した★",
+        "    = 呼び手が 1 本も無かったゆえ (殿が承認された掃除)。★今 開ける現物は無い★。",
+        "    読みたい時 = git show f887dae:scripts/legacy_guard_swap.sh",
         "  ★迂回ではなく、殺してよい理由を機械が検める形にせよ★。",
     ]
     # ★★退化しておるなら【拒みの便へも】焼く (cmd_1411 (b))★★
@@ -565,6 +567,9 @@ _CASES: list[tuple[str, str, str]] = [
     ("grep -rn 'pkill' scripts/",        "ALLOW", "★同上 — 之を止めれば調査が出来ぬ★"),
     ("echo 'kill -9 1'",                 "ALLOW", "★引用の中は字★"),
     ("git commit -m 'fix: kill を禁ずる'", "ALLOW", "★commit message の中の字★"),
+    # ★標本の file (legacy_guard_swap.sh) は cmd_1479 第4束で撤去済★ = ★入力の文字列はそのまま残す★。
+    #   理由 = 此の標本が問うのは「bash <script> という形を通すか」であって、
+    #   ★file が在るか無いかを見ていない★ (判定は綴りだけを読む)。書き替えれば標本の意味が変わる。
     ("bash scripts/legacy_guard_swap.sh --dry-run",
                                          "ALLOW", "★構造化された script は通す (射程外)★"),
     # ── ★裁(2) = tmux の pane 殺し (家老 10:26 の命で射程へ足した)★ ──

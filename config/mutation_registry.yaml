@@ -1782,7 +1782,19 @@ mutations:
     timeout: 300
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # ★★census 配線の牙 6 本 (2026-07-27 05:4x・六号)★★
+  # ★★census 配線の変異テスト — 6 本 登録したうち、今 残っているのは 1 本 (MUT-1408-C4) だけ★★
+  #   ★消えた 5 本の行き先 (cmd_1479・殿が承認された掃除)★:
+  #     C1 / C2 / C5 = 88aa167 (第2束) で削除 — 変異させる対象 (registry_census.py /
+  #       fang_domain_census.py / gate_verdict_drift.py) を毎朝の門ごと撤去したため。
+  #     C3 = cmd_1479 第4束で削除 — 変異させる対象 ledger_id_census.py を撤去したため。
+  #       ★C3 の desc は「捨てた筈の壊れた物差しが gate_mutation_replay.py に現役で居る」と
+  #       申していたが、消す前に突き合わせたら ★其の主張は既に成り立っていなかった★ =
+  #       REGISTRY_ID_RE (:604) は census の ID_RE と ★綴りまで同一の正しい側★であった
+  #       (壊れた側 = 繰り返しの (?:...)+ を持たぬ形。機械で比べて別物と確かめた)。
+  #       ⇒ ★ゆえに、生きている警めを捨てたのではない。既に古くなっていた註を畳んだのである。★
+  #     ★物差しを 2 つ持たぬ形は、今は「門の側の 1 本だけが在る」で成っている★
+  #       (突き合わせる相手を消したので、ずれる余地そのものが無くなった)。
+  #   以下 (出所・登録の理由) は 6 本 登録した当時の記録である。★過去形として読め。★
   #   出所 = 家老 04:33 の任 (軍師二号が「実体 7/7・配線 4/7」を実測した件)。
   #   ★★此の 6 本を登録する理由は【commit した其の場で門が名指したゆえ】★★=
   #     6804106 の pre-commit が ★段2 UNDETERMINED = 負の主張 3 本 (T-CW-000/T-CW-004/T-CW-007) を誰も証しておらぬ★
@@ -1793,32 +1805,6 @@ mutations:
   #   ★錨は全て hit=1 を明示 path で実測済 (2026-07-27 05:35)★= 再帰 grep は使うておらぬ
   #     (白名簿 repo では再帰 grep が追跡下しか見ぬゆえ = 本夜 01:37 の全軍規律)。
   # ═══════════════════════════════════════════════════════════════════════════
-  - id: MUT-1408-C3
-    desc: |
-      ★ledger_id_census.py (建てたのは足軽三号) の芯 = ★枝つき id を 1 本へ潰さぬ物差し★。
-      ★変異は「三号が cmd_1386 で捨てた壊れた物差し (BROKEN_ID_RE)」を現役へ戻すだけ★=
-      ★己の repo が既に持っておる【対照】を、そのまま牙に使うた形★。
-      ★実測 (07:44 六号)★= baseline rc=0 (9/9) → 変異後 rc=1・T1 が名指しで落ちた。
-      ★★併せて申す = 此の壊れた物差しは、今 gate_mutation_replay.py:504 REGISTRY_ID_RE に現役で居る★★
-      = ★三号が己の口で捨てた欠陥が、門の側では捨てられておらぬ★ (報告 2 節・幽霊 13 件の出所)。
-    suspected_by: ashigaru6
-    paths: [scripts/ledger_id_census.py, scripts/gate_mutation_replay.py]
-    anchor_sites: 1
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/ledger_id_census.py"
-      s = open(p, encoding="utf-8").read()
-      a = 'ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*(?:-[A-Za-z0-9]+)+")\n'
-      assert a in s, "MUT-1408-C3: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
-      open(p, "w", encoding="utf-8").write(s.replace(
-          a, 'ID_RE = re.compile(r"(?<![A-Za-z0-9])MUT-[0-9]+[A-Za-z]*-[A-Za-z0-9]+")  # MUT-1408-C3\n', 1))
-      PY
-    test: |
-      python3 scripts/ledger_id_census.py --selftest
-    expect: nonzero
-    red_needle: "T1 MUT-1330-R3-M1"
-    timeout: 300
-
   - id: MUT-1408-C4
     desc: |
       ★gate_anchor_touched.py (建てたのは足軽三号) の芯 = 「commit が触れた牙の錨が鈍っておらぬか」を其の場で名指す口★。

@@ -3,6 +3,5 @@
 # 注: backend repo 側の成果物 (config/mutation_registry.yaml, tests/harness/gate2_env.sh) は
 #     別 repo ゆえ本 manifest の管轄外 — backend commit の git show --stat で自己実証する
 scripts/gate_mutation_replay.py
-scripts/gate_nightly.sh
 docs/content/ops/cmd_1355_backend_registry_extension.md
 config/artifact_manifests/cmd_1355b_backend_registry.manifest

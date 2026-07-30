@@ -12,6 +12,12 @@
 #
 # ★mtime を代理に使う道は意図して捨てた★ = task file に触れさえすれば genuine な
 # 漏れが黙って消える = 家老が 23:39 に dashboard mtime で誤って死と判定された型の再演。
+#
+# 2026-07-30 (cmd_1479 段② レーンA 第2束) に 3 本 外した:
+#   T-WIR-001/002/003 は scripts/gate_nightly.sh から「配線消失検知」の block を抜いて
+#   検めていた。その gate を撤去したので、抜き出す元が無い。
+#   牙 MUT-1359-004 も同じ commit で外し、001〜003 の paths からも gate_nightly.sh を落とした。
+#   なお stall_watchdog 自身の cron 配線は cmd_1476 で既に止まっている。
 
 setup() {
     REPO="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
@@ -137,49 +143,6 @@ st = {s.alert_key(old): {'last_alert': now.isoformat()}}
 print('別task:', s.in_cooldown(new, st, 360, now))
 "
     [[ "$output" == *"別task: False"* ]]
-}
-
-# ── ★配線消失検知 (cmd_1359 の核心)★ ──────────────────────────────────
-# 本 cmd の病 = 「番人は書かれたが【呼ぶ者が居らぬ】」。3ヶ月 発報0件であった。
-# ゆえに ★配線が消えたら気付ける★ ことまでを契約にする (gate_nightly が毎朝検める)。
-#
-# 検分対象は ★実 file から機械抽出した当の行★ = 手写しの写しを検めても意味が無い
-# (fixture が実体と乖離する罠は本日繰り返し見た)。
-
-_extract_wiring_check() {
-    sed -n '/配線消失検知 (cmd_1359)/,/^fi$/p' "$REPO/scripts/gate_nightly.sh" \
-        > "$Q/wiring_check.sh"
-    echo 'echo "配線=$([ "$wiring_rc" -eq 0 ] && echo OK || echo MISSING)"' >> "$Q/wiring_check.sh"
-    # 抽出できておらぬのに緑にせぬ (空を緑と読む型の防止)
-    [ "$(wc -l < "$Q/wiring_check.sh")" -ge 5 ]
-}
-
-@test "T-WIR-001: cron 配線が在れば OK" {
-    _extract_wiring_check
-    mkdir -p "$Q/stub"
-    printf '#!/bin/sh\necho "*/15 * * * * x # stall_watchdog_cmd1359"\n' > "$Q/stub/crontab"
-    chmod +x "$Q/stub/crontab"
-    run env PATH="$Q/stub:$PATH" bash "$Q/wiring_check.sh"
-    [[ "$output" == *"配線=OK"* ]]
-}
-
-@test "T-WIR-002: ★cron 配線が消えたら名指しで MISSING★ (番人が誰にも呼ばれておらぬ)" {
-    _extract_wiring_check
-    mkdir -p "$Q/stub"
-    printf '#!/bin/sh\necho "*/3 * * * * x # idle_revive_scan_cmd1154"\n' > "$Q/stub/crontab"
-    chmod +x "$Q/stub/crontab"
-    run env PATH="$Q/stub:$PATH" bash "$Q/wiring_check.sh"
-    [[ "$output" == *"配線=MISSING"* ]]
-    [[ "$output" == *"誰にも呼ばれておらぬ"* ]]
-}
-
-@test "T-WIR-003: crontab 自体が見えぬ時は UNDETERMINED 側へ倒す (緑にせぬ)" {
-    _extract_wiring_check
-    mkdir -p "$Q/minbin"
-    for t in bash grep sed cat echo; do ln -sf "$(command -v $t)" "$Q/minbin/$t" 2>/dev/null; done
-    run env PATH="$Q/minbin" bash "$Q/wiring_check.sh"
-    [[ "$output" == *"配線=MISSING"* ]]
-    [[ "$output" == *"検分できぬ"* ]]
 }
 
 @test "T-CD-003: state が壊れておっても番人は死なず鳴る側へ倒れる (fail-LOUD)" {

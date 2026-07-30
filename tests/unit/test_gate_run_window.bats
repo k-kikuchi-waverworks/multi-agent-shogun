@@ -14,18 +14,19 @@
 # ★★exit code は動かしておらぬ★★= ★盤面が動く度に門が赤くなれば【常に鳴る門】になり、必ず外される★
 #   (cmd_1388 の族)。★退くのは【一行目の名乗り】だけで足る★ = 家老 08:39 が最も重く見た点。
 #
-# ★刻を【行末】へ置いた理由 (行頭でない)★= ★此の出力には読み手が二人 居る★:
-#   (1) scripts/gate_verdict_drift.py VERDICT_RE = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…`
-#   (2) scripts/gate_nightly.sh:300 の `grep -vE '^\s*ok\s'` (PASS 行を除く口)
-#   ⇒ ★行頭へ置けば二人とも黙って盲になる★= ★★形を変える時は【読む者】を先に数える★★。
-#   T-WIN-004/005 が其の契約を縛る (= 将来 行頭へ移す者が居れば、其の場で赤くなる)。
+# 刻を【行末】へ置いた理由 (行頭でない): この出力には読み手が居り、いずれも行頭を見ていた。
+#   ⇒ 形を変える時は【読む者】を先に数えること。
+#
+# 2026-07-30 (cmd_1479 段② レーンA 第2束) に 2 本 外した:
+#   T-WIN-004 (gate_verdict_drift が今も読める) と T-WIN-005 (gate_nightly の PASS 除外が
+#   今も効く) は、どちらも撤去した scripts/gate_verdict_drift.py と scripts/gate_nightly.sh を
+#   読み手として検めていた。読み手が消えたので契約の相手も消えた。
+#   牙 MUT-1408-W4 も同じ commit で外し、W1〜W3 の paths からも撤去した path を落とした。
 
 setup_file() {
     export PROJECT_ROOT="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
     export GATE="$PROJECT_ROOT/scripts/gate_mutation_replay.py"
-    export DRIFT="$PROJECT_ROOT/scripts/gate_verdict_drift.py"
     [ -f "$GATE" ] || return 1
-    [ -f "$DRIFT" ] || return 1
 }
 
 setup() {
@@ -107,33 +108,3 @@ PY
     [[ "$output" != *"走行中に盤面が動いた"* ]]
 }
 
-# ═══════════ T-WIN-00x: 出力の【形】の契約 (読む者が二人 居る) ═══════════
-
-@test "T-WIN-004: ★契約★ 刻を足した entry 行を gate_verdict_drift が今も読める" {
-    # ★刻を【行頭】へ移せば此処が落ちる★= VERDICT_RE は `^\s+` の次に mark を要求するゆえ。
-    cd "$TESTDIR"
-    cp "$DRIFT" scripts/
-    run _run_gate
-    [ "$status" -eq 0 ]
-    printf '%s\n' "$output" > gate_out.txt
-    run python3 - <<'PY'
-import importlib.util, pathlib
-spec = importlib.util.spec_from_file_location("D", "scripts/gate_verdict_drift.py")
-D = importlib.util.module_from_spec(spec); spec.loader.exec_module(D)
-got = D.parse_verdicts(pathlib.Path("gate_out.txt").read_text(encoding="utf-8"))
-assert got.get("MUT-WINTEST-001") == "PASS", f"読めなんだ: {got}"
-print("READABLE")
-PY
-    [ "$status" -eq 0 ]
-    [[ "$output" == *"READABLE"* ]]
-}
-
-@test "T-WIN-005: ★契約★ gate_nightly の PASS 除外 (^\\s*ok\\s) が今も効く" {
-    # ★刻を行頭へ移せば PASS 行が家老への警報本文へ漏れ出す★= 毎朝 全 PASS が警報に混ざる。
-    run _run_gate
-    [ "$status" -eq 0 ]
-    printf '%s\n' "$output" | grep -E 'MUT-WINTEST-001' | grep -qE '^\s*ok\s'
-    # ★除外した後に当該 PASS 行が残っておらぬこと★
-    leaked="$(printf '%s\n' "$output" | grep -E 'MUT-WINTEST-001' | grep -vE '^\s*ok\s' | wc -l)"
-    [ "$leaked" -eq 0 ]
-}

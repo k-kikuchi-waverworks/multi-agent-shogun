@@ -141,10 +141,6 @@ plans/**/README.md
 !config/mutation_registry.ml.yaml
 !config/artifact_manifests/
 !config/artifact_manifests/*.manifest
-# cmd_1455: 置換が触れる行の名簿。門 (scripts/gate_cli_substitution_roster.py) が読む。
-#   この 1 行を落とすと fresh clone に名簿が届かず、門は「名簿が無い = 何も除いておらぬ」と
-#   全行を名指す側へ倒れる (安全側だが毎朝鳴る = 外される)。
-!config/cli_substitution_roster.yaml
 
 # Templates
 !templates/
@@ -251,16 +247,6 @@ scripts/seo_qc.sh
 #   gate_precommit.sh が呼ぶ先を失い、★他の誰の手元でも走らぬのに、拙者の手元だけ緑★という
 #   cmd_1386 で掘り当てた当の穴に、其れを掘った者が落ちる形になる。
 !scripts/gate_anchor_touched.py
-# cmd_1396 (2026-07-27): ★台帳の冊を人の記憶でなく機械で数え直す口★ (三者が同じ偽陰性を踏んだ夜の産物)。
-# ★本日 同型の 9 度目 = .gitignore:7 の * に黙って弾かれておった★ (git add -n で実測・03:22)。
-#   ★数え方を直す道具そのものが配られぬ形★ = ★手元では通るが fresh clone には無い★ =
-#   ★之を通さねば、次に数える者は再び人の記憶で数える★。
-!scripts/registry_census.py
-# cmd_1396 (2026-07-27): ★牙が【いつ死んだか】を名乗らせる口★ (登録時 PASS → 今 UNDETERMINED を名指す)。
-# ★同型の 10 度目 = .gitignore:7 の * に黙って弾かれておった★ (git add で現に拒まれた・04:11 実測)。
-#   ★退行を見張る道具そのものが配られぬなら、見張りは拙者の手元にしか無い★ =
-#   ★毎朝の門は fresh clone の側で走る★ゆえ、通さねば ★永久に一度も呼ばれぬ★。
-!scripts/gate_verdict_drift.py
 # cmd_1409 (2026-07-27): gate-4 = ★台帳へ書いたのに登録されておらぬ★ を名指す層 (gate_precommit が呼ぶ先)。
 # ★同型の 11 度目 = .gitignore:7 の * に黙って弾かれておった★ (git add が現に拒んだ・09:45 実測)。
 #   ★之を通さねば「作業ツリーでは呑まれを見張り、配る物では見張らぬ」★ =
@@ -274,10 +260,6 @@ scripts/seo_qc.sh
 #   ⇒ 割る commit と同じ commit で次の 2 行 (web 台帳を割るなら 4 行) を足すこと:
 #     !config/mutation_registry.d/  /  !config/mutation_registry.d/*.yaml
 !scripts/ledger_id_census.py
-# cmd_1455 (2026-07-28): CLI 名の置換が触れる行のうち、名簿に無い物を毎朝 名指す門。
-# gate_nightly.sh が呼ぶ先ゆえ、配られなければ「道具が居らぬ」で毎朝 UNDETERMINED が出る。
-# .gitignore:7 の * に黙って弾かれる (git check-ignore --no-index で実測・06:5x)。同型はこれで 13 度目。
-!scripts/gate_cli_substitution_roster.py
 # cmd_1363 (2026-07-26): 「道具へ渡す前に shell が食う」関所 (PreToolUse hook)。
 # ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
 #   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。
@@ -306,17 +288,8 @@ scripts/seo_qc.sh
 # 無かった』と同型を、この道具自身が抱えておった)。
 # ★logs/production_stop_journal.log は追跡せぬ★ (運用記録は肥大し秘匿情報が混じりうる=家老裁定)。
 !scripts/gpu_sidecar_stop.sh
-# cmd_1367 (2026-07-26): ★配られておらぬ道具★の検知 (whitelist漏れの【族】を見る関所)。
-# 本 file 自身が追跡外なら gate_nightly が呼ぶ先を失う = 本 gate が検知する当の病ゆえ明示で通す。
-!scripts/gate_undistributed_tooling.sh
 !scripts/gate_precommit.sh
 !scripts/install_gate_hooks.sh
-!scripts/gate_nightly.sh
-# cmd_1439 (2026-07-28): 控えが最後に成功した日時を見る検査 (gate_nightly が呼ぶ先)。
-# ここへ書き忘れると、この検査そのものが git から見えない。
-# 見えないと 2 つ起きる: clone へ配られない / git clean -xd で消える。
-# どちらの場合も「控えが古い」を誰も知らせなくなり、しかも黙って そうなる。
-!scripts/backup_freshness_check.sh
 # cmd_1465 (2026-07-28): 定時実行 7 本の「終わった証」を検める側 (stall_watchdog_scan.py が呼ぶ先)。
 # 一号が 44fa684 で名指した穴と同じ物を、その 40 分後に五号が己の script で踏んでいた。
 # 気づけたのは git status が緑だったためではなく、git status がこの file を見ていなかったため。
@@ -327,10 +300,6 @@ scripts/seo_qc.sh
 #   cron の 5 本のうち、呼ぶ先が git から見えないのはこの 1 本だけ。
 #   中身の commit は持ち主 (cmd_1393) の手番ゆえ、ここでは「見える」ようにするまで。
 !scripts/engine_devserver_morning_check.sh
-# cmd_1381 段3 (2026-07-26): ★殿への通知路の生死★を毎朝読む番人 (gate_nightly が呼ぶ先)。
-# ★之を whitelist へ書き忘れれば、通知路の番人自身が clone へ配られず、
-#  fresh clone の毎朝は「通知路=見ておらぬ」に静かに戻る★ = cmd_1367 が名指した当の族ゆえ明示で通す。
-!scripts/gate_ntfy_alive.py
 # cmd_1381 段5b (2026-07-27): ★我らが現に撃った矢★ (logs/ntfy_send.log) を読む第二の口。
 # ★段3 の兄弟は engine 側の自己試験を読む★ = engine が緑でも scripts/ntfy.sh が死んでおれば
 #  殿へは届かぬ ⇒ ★見ておる物が別ゆえ、両方 clone へ渡らねば片目になる★。
@@ -397,10 +366,6 @@ scripts/seo_qc.sh
 !scripts/branch_drift_check.sh
 !scripts/pre_deploy_verify.sh
 !scripts/setup_cron.sh
-# cmd_1445 (2026-07-28): 変異テストの守備範囲を数え直す口 (cmd_1394)。
-#   config/mutation_registry.yaml と scripts/gate_nightly.sh が呼び、
-#   tests/unit/test_gate_census_wiring.bats が配線を見張っておる。毎朝の門が使う道具である。
-!scripts/fang_domain_census.py
 
 
 # cmd_1445 (2026-07-28): 追跡下だが白名簿へ足さぬと判じた 9 本 (次の者が同じ判断を繰り返さぬための覚書)。

@@ -859,7 +859,7 @@ mutations:
       = 本 cmd が直した病 (呼ばれぬ番人) を、別の形 (鳴かぬ番人) で再発させることになる。
       由来 = 軍師二号の警告「配線した途端に真の漏れでないのに鳴り続ける」への対処が
       行き過ぎておらぬかを見張る側の変異。
-    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, tests/unit/test_stall_watchdog_redispatch.bats]
     mutate: |
       sed -i 's/    return (dt > report_dt), "updated_at"/    return True, "updated_at"/' scripts/stall_watchdog_scan.py
     test: |
@@ -875,7 +875,7 @@ mutations:
       ★黙った事実を黙って黙る★ = 再dispatch判定が効きすぎて全部握り潰しておる状態と
       本当に漏れが無い状態が log 上で見分けられなくなる (分母印字 eligible=N /
       assigned=N と同じ考え方の、抑制側の顔)。
-    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, tests/unit/test_stall_watchdog_redispatch.bats]
     mutate: |
       sed -i '/再dispatchと判定し鳴らさず/d' scripts/stall_watchdog_scan.py
     test: |
@@ -891,31 +891,13 @@ mutations:
       ★cooldown は諸刃★ = 鳴りすぎを抑えるための仕掛けが、倒れると ★一度鳴った漏れが
       二度と鳴らぬ★ へ変わる。緑のままなら「無視されて死ぬ」を避けたつもりが
       「鳴らずに死ぬ」へ移っただけになる。
-    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
+    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, tests/unit/test_stall_watchdog_redispatch.bats]
     mutate: |
       sed -i 's/^    return (now - last).total_seconds() < cooldown_min \* 60/    return True/' scripts/stall_watchdog_scan.py
     test: |
       bats tests/unit/test_stall_watchdog_redispatch.bats --filter T-CD-001
     expect: nonzero
     red_needle: "not ok 1 T-CD-001"
-
-  - id: MUT-1359-004
-    origin: cmd_1359
-    suspected_by: ashigaru1
-    desc: |
-      gate_nightly の ★配線消失検知★ (毎朝 crontab を読んで stall_watchdog の呼び口が
-      在ることを確かめる) を「常に在る」へ倒すと T-WIR-002 が赤くなるべき。
-      ★これが本 cmd で最も大事な変異である★ = 配線は repo の外 (crontab) に在るゆえ、
-      誰かが crontab を書き直せば ★3ヶ月 発報0件の状態へ静かに戻る★。
-      しかも ★alert の不在は無音と区別がつかぬ★ ゆえ、戻ったことに誰も気付けぬ。
-      「番人を作る」だけでなく「番人が呼ばれておることを毎朝確かめる」までが本 cmd の任。
-    paths: [scripts/stall_watchdog_scan.py, scripts/stall_watchdog_scan.sh, scripts/gate_nightly.sh, tests/unit/test_stall_watchdog_redispatch.bats]
-    mutate: |
-      sed -i 's/grep -q "stall_watchdog_cmd1359"/grep -q ""/' scripts/gate_nightly.sh
-    test: |
-      bats tests/unit/test_stall_watchdog_redispatch.bats --filter T-WIR-002
-    expect: nonzero
-    red_needle: "not ok 1 T-WIR-002"
 
   - id: MUT-1370-001
     origin: cmd_1370
@@ -1245,180 +1227,6 @@ mutations:
   # ── cmd_1381 段3 (足軽四号) — ★殿への通知路の生死を読む番人★ の牙 ────────────
   #   守る物 = ★「無い」を「届かなんだ」と読ませぬこと★ が本 gate の急所ゆえ、
   #   ★三値を二値へ潰す変異★ を主に当てる (軍師二号が §4 で名指しした罠そのもの)。
-  - id: MUT-1381-101
-    origin: cmd_1381
-    suspected_by: ashigaru4
-    desc: |
-      ★★本 gate の急所★★= state file が【無い】時を UNDETERMINED (据わっておらぬ) でなく
-      FAIL (届かなんだ) へ倒す。★之を許せば、通知路は健在なのに毎朝「壊れておる」と嘘を言う★
-      = ★仕掛けが1度も走っておらぬ (HMR で再登録されぬ) だけの状態を、故障と見分けられぬ★
-      ⇒ ★軍師二号の言う「本設計自身が cmd_1359 の再演を起こす」形★。
-      倒せば T1 (state file が無い) と T2 (engine が見えぬ) の2本が落ちるべき。
-    paths: [scripts/gate_ntfy_alive.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_ntfy_alive.py"
-      s = open(p, encoding="utf-8").read()
-      old = '            "⇒ 解錠条件=★殿が engine dev server を再起動なされること★ (それで此の行は消える)"\n        )\n        return UNDET, out'
-      # ★規律(8)★ 撃つ前に数える = 一意でなければ狙いは別の場所へ着弾する
-      assert s.count(old) == 1, f"MUT-1381-101: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(s.replace(old, old.replace("return UNDET, out", "return FAIL, out"), 1))
-      PY
-    test: |
-      python3 scripts/gate_ntfy_alive.py --selftest
-    expect: nonzero
-    red_needle: "★NG★ T1 state file が無い"  # 実測 2026-07-26: 未検分→届かなんだ の潰しを T1 が捕える
-
-  - id: MUT-1381-102
-    origin: cmd_1381
-    suspected_by: ashigaru4
-    desc: |
-      ★齢の検査を殺す★= 自己試験が何日 前であろうと「届いた」なら PASS へ倒す。
-      ★昔届いたことは、今 生きておることの証にならぬ★ — 之を許せば、dev server が
-      止まって canary が撃たれなくなっても ★最後の緑が永久に効き続ける★ =
-      ★通知路が死んでも毎朝 PASS が出る★ (本 cmd の北極星が丸ごと空振りになる形)。
-      殺せば T8 (30h) T15 (24.1h 境界の外) T9 (60h) が落ちるべき。
-    paths: [scripts/gate_ntfy_alive.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_ntfy_alive.py"
-      s = open(p, encoding="utf-8").read()
-      old = "    if age > FRESH_HOURS:"
-      assert s.count(old) == 1, f"MUT-1381-102: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(s.replace(old, "    if False:", 1))
-      PY
-    test: |
-      python3 scripts/gate_ntfy_alive.py --selftest
-    expect: nonzero
-    red_needle: "★NG★ T15 24.1h"  # 実測 2026-07-26: 境界の外が緑へ落ちるのを T15 が捕える
-
-  - id: MUT-1381-103
-    origin: cmd_1381
-    suspected_by: ashigaru4
-    desc: |
-      ★時刻表記の読み違え (9時間ずれ)★= naive な時刻を local (JST) でなく UTC として読む。
-      ★state file は二種の表記を現に混ぜておる★ (engine 実測):
-        probe.lastAt/writtenAt = naive JST / lastAttemptAt・lastFailure.at = ISO-UTC。
-      ⇒ ★naive を UTC と読めば齢が 9h 若く出る★ = ★止まっておる自己試験が「新しい」と見え、
-        偽 PASS が出る★。★之は「暦は思い出すな、撃って写せ (規律(7))」の測定側の顔である★。
-      倒せば T15 (24.1h→15.1h と読めて緑へ落ちる) が落ちるべき。
-    paths: [scripts/gate_ntfy_alive.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_ntfy_alive.py"
-      s = open(p, encoding="utf-8").read()
-      old = "        d = d.replace(tzinfo=now.tzinfo)"
-      assert s.count(old) == 1, f"MUT-1381-103: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(
-          s.replace(old, "        d = d.replace(tzinfo=_dt.timezone.utc)", 1))
-      PY
-    test: |
-      python3 scripts/gate_ntfy_alive.py --selftest
-    expect: nonzero
-    red_needle: "★NG★ T15 24.1h"  # 実測 2026-07-26: 9h ずれで境界の外が緑になるのを T15 が捕える
-
-  - id: MUT-1381-104
-    origin: cmd_1381
-    suspected_by: ashigaru4
-    desc: |
-      ★盤面のおかげで緑、を防ぐ guard を殺す★ (軍師一号の F-B 型)。
-      本 gate は naive 時刻を local として読むゆえ ★local が JST でなければ其の読みは成り立たぬ★。
-      cron の TZ が変われば ★齢が 9h 若く出て偽 PASS が出る★ ゆえ、暦が食い違う時は緑と呼ばぬ。
-      殺せば T19 (local が JST でない) が落ちるべき。
-      ★之は「今日は日曜ゆえ鳴らぬ」型の裏返し = 環境が変わった時に黙って緑へ倒れる道を塞ぐ牙★。
-    paths: [scripts/gate_ntfy_alive.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_ntfy_alive.py"
-      s = open(p, encoding="utf-8").read()
-      old = "    if off is None or abs(off - 9.0) > 1e-9:"
-      assert s.count(old) == 1, f"MUT-1381-104: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(s.replace(old, "    if False:", 1))
-      PY
-    test: |
-      python3 scripts/gate_ntfy_alive.py --selftest
-    expect: nonzero
-    red_needle: "★NG★ T19 local が JST でない"  # 実測 2026-07-26: 暦 guard の不在を T19 が捕える
-
-  # ── cmd_1381 段3 差し戻し (軍師一号 A) の処方を守る牙 3本 ────────────────────
-  #   ★此の3本は【番人の番人】である★= 先の 101〜104 は「通知路の生死を誤読せぬか」を守るが、
-  #   本 3本は ★番人自身の落ち度を通知路の罪にせぬか★ と ★run() が射程に入っておるか★ を守る。
-  - id: MUT-1381-105
-    origin: cmd_1381
-    suspected_by: gunshi_a  # ★軍師一号の差し戻し F-2 が起源 (拙者=四号 は見落としておった側)
-    desc: |
-      ★★差し戻し F-2 の処方を殺す★★= 読めぬ byte 列を受ける節を丸ごと除く。
-      ★UnicodeDecodeError は ValueError の子であって OSError の子ではない★ ゆえ、
-      除けば except OSError を素通りし ★番人自身が traceback で落ちる★ =
-      旧版では ★rc=1 = 「殿への通知路は死んでおる」★ と出た (拙者が先頭 byte 0xff で再現済)。
-      ⇒ ★我らの側の落ち度 (書き手の encoding 違い・書込中の断片) を、通知路の罪に着せる形★。
-      除けば T22 (不正 UTF-8) が落ちるべき
-      (受け皿が rc は UNDETERMINED に留めるゆえ、捕えるのは ★札が [NTFY-SHAPE] でない★ の側)。
-    paths: [scripts/gate_ntfy_alive.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_ntfy_alive.py"
-      s = open(p, encoding="utf-8").read()
-      # ★受ける範囲を「狭め過ぎる」形で殺す = 元の欠陥そのものの形である★
-      #   (JSONDecodeError は ValueError の子ゆえ構文は通るが、UnicodeDecodeError は其の子ではない)
-      old = "    except ValueError as e:"
-      # ★規律(8)★ 撃つ前に数える = 一意でなければ狙いは別の場所へ着弾する
-      assert s.count(old) == 1, f"MUT-1381-105: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(
-          s.replace(old, "    except json.JSONDecodeError as e:", 1))
-      PY
-    test: |
-      python3 scripts/gate_ntfy_alive.py --selftest
-    expect: nonzero
-    red_needle: "★NG★ T22 不正 UTF-8"  # 実測 2026-07-26: 節を除くと T22 の札が [NTFY-CRASH] へ化けて落ちる
-
-  - id: MUT-1381-106
-    origin: cmd_1381
-    suspected_by: ashigaru4
-    desc: |
-      ★受け皿の色を「届かなんだ」へ倒す★= 番人自身が例外で落ちた時に FAIL を返す。
-      ★番人の crash は、通知路の生死について何一つ語っておらぬ★ ゆえ之は嘘である =
-      ★F-2 の一般形★ (個々の例外を潰しても、次の未知の例外で同じ嘘が出る形を構造で塞いだ当の箇所)。
-      倒せば T25 (番人自身の crash) が落ちるべき。
-    paths: [scripts/gate_ntfy_alive.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_ntfy_alive.py"
-      s = open(p, encoding="utf-8").read()
-      old = "        rc = UNDET\n        out = [\n            f\"[NTFY-CRASH]"
-      assert s.count(old) == 1, f"MUT-1381-106: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(s.replace(old, old.replace("rc = UNDET", "rc = FAIL"), 1))
-      PY
-    test: |
-      python3 scripts/gate_ntfy_alive.py --selftest
-    expect: nonzero
-    red_needle: "★NG★ T25: 番人が例外で落ちた時"  # 実測 2026-07-26: 己の crash を赤で出す形を T25 が捕える
-
-  - id: MUT-1381-107
-    origin: cmd_1381
-    suspected_by: gunshi_a  # ★軍師一号の変異 GX-A1 そのもの (T21 の真空 PASS を暴いた弾)
-    desc: |
-      ★★差し戻し F-1 = run() の既定 now を固定日時へ差し替える (軍師一号の GX-A1)★★。
-      ★之は旧 selftest 21本を丸ごと素通りしておった★= T21 は「既定の now が実時刻である検」と
-      名乗っておったが ★己で datetime.now() を呼んで盤面の時計を見ておるだけ★ であり、
-      ★selftest は judge() のみを呼び run() を一度も通らなんだ★ = ★真空 PASS (六号の T-502 と同型)★。
-      ★規律(7)「暦は思い出すな、撃って写せ」を守る当の門が、武装しておらなんだ★。
-      倒せば T24 (境界の外 24.02h 前) が落ちるべき = run() を実際に通す検が射程を作った証。
-    paths: [scripts/gate_ntfy_alive.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_ntfy_alive.py"
-      s = open(p, encoding="utf-8").read()
-      old = "    now = _dt.datetime.now().astimezone()"
-      assert s.count(old) == 1, f"MUT-1381-107: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(
-          s.replace(old, '    now = _dt.datetime.fromisoformat("2020-01-01 00:00:00+09:00")', 1))
-      PY
-    test: |
-      python3 scripts/gate_ntfy_alive.py --selftest
-    expect: nonzero
-    red_needle: "★NG★ T24 run() 既定 now"  # 実測 2026-07-26: 固定日時を T24 が捕える (旧版は 0 NG であった)
-
   - id: MUT-1395-001
     origin: cmd_1395
     suspected_by: gunshi1
@@ -1985,192 +1793,6 @@ mutations:
   #   ★錨は全て hit=1 を明示 path で実測済 (2026-07-27 05:35)★= 再帰 grep は使うておらぬ
   #     (白名簿 repo では再帰 grep が追跡下しか見ぬゆえ = 本夜 01:37 の全軍規律)。
   # ═══════════════════════════════════════════════════════════════════════════
-  - id: MUT-1382-CW1
-    origin: karo_0433_census_wiring
-    suspected_by: ashigaru6
-    desc: |
-      ★run_reporter の【道具が居らぬ】枝を殺す★ (if [ ! -f "$script" ] を偽へ倒す)。
-      ⇒ 居らぬ道具は python3 へ落ち、rc は 2 のままだが ★「道具が居らぬ」と名乗る言葉が消える★。
-      ★之が本 entry の芯じゃ★= ★rc だけ見れば区別が付かぬ★=
-      ★「撃てなんだ」を【名指しで】言えておるかを縛る★ (黙って飛ばす形への退行を捕まえる)。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
-    mutate: |
-      sed -i 's@if \[ ! -f "$script" \]; then@if false; then@' scripts/gate_nightly.sh
-    test: |
-      bats --filter "T-CW-002" tests/unit/test_gate_census_wiring.bats
-    expect: nonzero
-    red_needle: "not ok 1 T-CW-002"
-    timeout: 300
-
-  - id: MUT-1382-CW2
-    origin: karo_0433_census_wiring
-    suspected_by: ashigaru6
-    desc: |
-      ★札 (banner) の照合を消す★= 出力に狙うた札が在るかを見ずに rc だけで判ずる形へ退行させる。
-      ⇒ ★rc=0 で何も刷らぬ道具 (落ちた・綴りが変わった) が【緑】として通る★=
-      ★本夜 幾度も出た族そのもの★。T-CW-003 は ★rc=0 で黙る道具★ を的に据えておるゆえ赤くなる。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
-    mutate: |
-      sed -i 's@if ! printf .%s. "$out" | grep -qF "$banner"; then@if false; then@' scripts/gate_nightly.sh
-    test: |
-      bats --filter "T-CW-003" tests/unit/test_gate_census_wiring.bats
-    expect: nonzero
-    red_needle: "not ok 1 T-CW-003"
-    timeout: 300
-
-  - id: MUT-1382-CW3
-    origin: karo_0433_census_wiring
-    suspected_by: ashigaru6
-    desc: |
-      ★srt() を素通しへ倒す★= 三本の rc が ★flag に依らず門へ入る★形。
-      ⇒ ★「報告のみ (既定)」の約束が破れる★= ★配線した其の日の朝に門が落ちる★=
-      家老が 04:33 に最も重く据えられた枷の、機械の側の守りである。
-      ★T-CW-000 も同時に落ちる★ (canary が srt の一行に CENSUS_STRICT を求めるゆえ) = ★隠さず記す★。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
-    mutate: |
-      sed -i 's@srt() { if .*@srt() { echo "$1"; }@' scripts/gate_nightly.sh
-    test: |
-      bats --filter "T-CW-006" tests/unit/test_gate_census_wiring.bats
-    expect: nonzero
-    red_needle: "not ok 1 T-CW-006"
-    timeout: 300
-
-  - id: MUT-1382-CW4
-    origin: karo_0433_census_wiring
-    suspected_by: ashigaru6
-    desc: |
-      ★呼ばぬ朝の 1 行を黙らせる★ (else 枝の申告を `:` へ倒す)。
-      ⇒ ★三本が呼ばれておらぬ事を、朝の門が【一字も名乗らぬ】★=
-      ★★之は cmd_1359 (stall_watchdog が3ヶ月 呼ばれなんだ) が起きた当の形★★=
-      ★眠っておる番人が眠っておると言わぬ★。★本 entry は「配線が消えても音がする」を守る★。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
-    mutate: |
-      sed -i '/★三本 (台帳の点呼/c\    :' scripts/gate_nightly.sh
-    test: |
-      bats --filter "T-CW-007" tests/unit/test_gate_census_wiring.bats
-    expect: nonzero
-    red_needle: "not ok 1 T-CW-007"
-    timeout: 300
-
-  - id: MUT-1382-CW5
-    origin: karo_0433_census_wiring
-    suspected_by: ashigaru6
-    desc: |
-      ★既定を 1 へ倒す★ (GATE_CENSUS_WIRING:-0 → :-1)。
-      ⇒ ★誰も命じておらぬのに三本が呼ばれ始める★= ★fang_domain_census は今 rc=1 を返すゆえ、
-      STRICT と併せて倒れれば初日から毎朝 赤★= ★誰も消せぬ札は、やがて門ごと外される★ (cmd_1388 の族)。
-      ★号令を待つ形★を機械で縛る一本である。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
-    mutate: |
-      sed -i 's@GATE_CENSUS_WIRING:-0@GATE_CENSUS_WIRING:-1@' scripts/gate_nightly.sh
-    test: |
-      bats --filter "T-CW-001" tests/unit/test_gate_census_wiring.bats
-    expect: nonzero
-    red_needle: "not ok 1 T-CW-001"
-    timeout: 300
-
-  - id: MUT-1382-CW6
-    origin: karo_0433_census_wiring
-    suspected_by: ashigaru6
-    desc: |
-      ★健やかな道具の走行でも UNDETERMINED と刷る★形へ倒す (return "$rc" の直前に札を吐かせる)。
-      ⇒ ★常に鳴る門は読まれなくなる★= ★T-CW-004 が「緑の時は UNDETERMINED と言わぬ」を負に縛っておる★。
-      ★本 entry は 6804106 の pre-commit が名指した 3 本のうち T-CW-004 の刃を証すために足した★=
-      ★門が「誰も証しておらぬ」と申した其の 3 本を、1 本も残さず塞ぐ★ (T-CW-000=W3 / T-CW-007=W4 / T-CW-004=W6)。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
-    mutate: |
-      sed -i 's@    return "$rc"@    printf "★UNDETERMINED★ 常に鳴る\\n"; return "$rc"@' scripts/gate_nightly.sh
-    test: |
-      bats --filter "T-CW-004" tests/unit/test_gate_census_wiring.bats
-    expect: nonzero
-    red_needle: "not ok 1 T-CW-004"
-    timeout: 300
-
-  - id: MUT-1382-CW7
-    origin: karo_0433_census_wiring
-    suspected_by: ashigaru6
-    desc: |
-      ★run_reporter を改名する★= ★試験が現物から抜く梯子が【外れる】★形。
-      ⇒ ★抜き出しが空になり、eval は 0 行を食うて全部 緑になりうる★=
-      ★★之が「梯子を書き写した試験」と同じ死に方じゃ★★ (cmd_1404 二束目の族)。
-      ★canary (T-CW-000) が【抜けなんだ事】を己で名乗るかを縛る★=
-      ★本 entry が無ければ、canary そのものは誰にも証されておらぬ★
-      (★W3 も T-CW-000 を落とすが、needle が T-CW-006 を名指すゆえ canary の証にはならぬ★=
-       ★★「別の牙が偶々巻き込む」は【其の検が証された】と同じでない★★)。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_census_wiring.bats]
-    mutate: |
-      sed -i 's@^run_reporter() {@run_reporter_kaimei() {@' scripts/gate_nightly.sh
-    test: |
-      bats --filter "T-CW-000" tests/unit/test_gate_census_wiring.bats
-    expect: nonzero
-    red_needle: "not ok 1 T-CW-000"
-    timeout: 300
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # ★cmd_1408 (2026-07-27 朝)★ — ★本夜 建てた五つの口へ牙を立てる★
-  #   出所 = 07-27 06:30 の門が「台帳に無い変異test 7 件」で FAIL した其の中身。
-  #   ★七件の内訳は六号が己の手で数え直した★ (家老の読みは 5/7 が当たり・2 件は挙がっておらなんだ)。
-  #   ★五本を此処へ登録し、残る二件は【他者の持ち物】ゆえ所有者へ回す★ (報告 YAML に名指しで記した)。
-  #
-  #   ★suspected_by は五本とも ashigaru6★ = ★口を建てたのは他者だが、
-  #     【何処を壊せば此の口が黙るか】を疑い、変異を設計し、赤を実見したのは六号である★。
-  #     (建てた者は desc に併記した = 功を攫わぬため)。
-  #
-  #   ★paths に【兄弟】を併記しておる理由 (五本すべてに効く註)★=
-  #     runner は paths に挙げた物【だけ】を scratch へ写す。★己の selftest が兄弟を読む口は、
-  #     兄弟を写さねば baseline が赤になり、其の牙は永久に UNDETERMINED へ落ちる★。
-  #     ⇒ ★之は本朝の未判定 17 件のうち 10 件が現に嵌っておる穴である★ (報告 3 節)。
-  #     ★ゆえに登録の前に「兄弟を写した scratch で baseline が緑か」を五本とも実測した★。
-  # ═══════════════════════════════════════════════════════════════════════════
-  - id: MUT-1408-C1
-    desc: |
-      ★registry_census.py (建てたのは六号・軍師二号が実測を寄せた) の芯 = 「冊が無い木を NO_BOOK と名乗る」★。
-      ★之を「牙あり」へ倒すと、台帳を一冊も持たぬ木が【守られておる顔】で点呼を通る★=
-      ★点呼が最も静かに形骸化する形★ゆえ牙を立てた。
-      ★実測 (2026-07-27 07:44 六号)★= baseline rc=0 (34/34) → 変異後 rc=1・T1 が名指しで落ちた。
-    suspected_by: ashigaru6
-    paths: [scripts/registry_census.py, scripts/gate_nightly.sh]
-    anchor_sites: 1
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/registry_census.py"
-      s = open(p, encoding="utf-8").read()
-      a = '        elif not books:\n            state = NO_BOOK\n'
-      assert a in s, "MUT-1408-C1: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
-      open(p, "w", encoding="utf-8").write(
-          s.replace(a, '        elif not books:\n            state = "★牙あり★"  # MUT-1408-C1\n', 1))
-      PY
-    test: |
-      python3 scripts/registry_census.py --selftest
-    expect: nonzero
-    red_needle: "T1 冊が無い木を NO_BOOK と名乗る"
-    timeout: 300
-
-  - id: MUT-1408-C2
-    desc: |
-      ★fang_domain_census.py (建てたのは足軽三号) の芯 = 「牙の名札が幾つ【一意】か」を数える所★。
-      ★unique を定数 1 へ固めると、重複を解いても数が動かぬ★=
-      ★「族が痩せておる」を見つける当の計器が、常に同じ数を返す置物になる★。
-      ★実測 (07:44 六号)★= baseline rc=0 (22/22) → 変異後 rc=1・★T1b (偽にして赤の側)★ が落ちた。
-      ★T1 は【変異後も緑のまま】である★= ★正の検だけ見ておれば此の変異は素通りした★ =
-      ★負の主張が刃を持っておったゆえ捕まった一例★ (02:12 全軍規律の実地の証)。
-    suspected_by: ashigaru6
-    paths: [scripts/fang_domain_census.py, scripts/gate_nightly.sh]
-    anchor_sites: 1
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/fang_domain_census.py"
-      s = open(p, encoding="utf-8").read()
-      a = '        "unique": len(c),\n'
-      assert a in s, "MUT-1408-C2: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
-      open(p, "w", encoding="utf-8").write(s.replace(a, '        "unique": 1,  # MUT-1408-C2\n', 1))
-      PY
-    test: |
-      python3 scripts/fang_domain_census.py --selftest
-    expect: nonzero
-    red_needle: "T1b"
-    timeout: 300
-
   - id: MUT-1408-C3
     desc: |
       ★ledger_id_census.py (建てたのは足軽三号) の芯 = ★枝つき id を 1 本へ潰さぬ物差し★。
@@ -2219,31 +1841,6 @@ mutations:
       python3 scripts/gate_anchor_touched.py --selftest
     expect: nonzero
     red_needle: "S2"
-    timeout: 300
-
-  - id: MUT-1408-C5
-    desc: |
-      ★gate_verdict_drift.py (建てたのは家老の下命・足軽五号の材料) の芯 =
-      「同じ id が二度 出たら【先】を採る」= 二つの走行を継ぎ足した log で、古い判定に新しい物を上書きさせぬ規★。
-      ★setdefault を代入へ倒すと後勝ちになり、★退行を【回復】と読み替えうる★★。
-      ★実測 (07:44 六号)★= baseline rc=0 (20/20) → 変異後 rc=1・T6 が名指しで落ちた。
-      ★本 file は五本の中で唯ひとつ【兄弟を要さぬ】★ (己だけで baseline が緑)。
-    suspected_by: ashigaru6
-    paths: [scripts/gate_verdict_drift.py]
-    anchor_sites: 1
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_verdict_drift.py"
-      s = open(p, encoding="utf-8").read()
-      a = "        out.setdefault(eid, verdict)\n"
-      assert a in s, "MUT-1408-C5: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
-      open(p, "w", encoding="utf-8").write(
-          s.replace(a, "        out[eid] = verdict  # MUT-1408-C5\n", 1))
-      PY
-    test: |
-      python3 scripts/gate_verdict_drift.py --selftest
-    expect: nonzero
-    red_needle: "T6 同じ id が二度 出たら先を採る"
     timeout: 300
 
   - id: MUT-1394-001
@@ -2471,7 +2068,7 @@ mutations:
       = ★本朝 六号が手で観測 (wc を二度撃つ) して漸く区間を絞った其の手間が、毎度 要る形へ戻る★。
       ★実測 (08:44 六号)★= baseline 5/5 緑 → 変異後 rc=1・★not ok 1 T-WIN-001★。
     suspected_by: ashigaru6
-    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
+    paths: [scripts/gate_mutation_replay.py, tests/unit/test_gate_run_window.bats]
     anchor_sites: 1
     mutate: |
       python3 - <<'PY'
@@ -2494,7 +2091,7 @@ mutations:
       (作業ツリー = HEAD) だけが黙って偽になる★= ★読む者は【瞬間を見た】と読み続ける★。
       ★実測 (08:44 六号)★= baseline 5/5 緑 → 変異後 rc=1・★not ok 2 T-WIN-002★。
     suspected_by: ashigaru6
-    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
+    paths: [scripts/gate_mutation_replay.py, tests/unit/test_gate_run_window.bats]
     anchor_sites: 1
     mutate: |
       python3 - <<'PY'
@@ -2518,7 +2115,7 @@ mutations:
       ⇒ ★「名乗る門」を建てる時は、【名乗らぬ事】も同じ強さで縛らねばならぬ★。
       ★実測 (08:44 六号)★= baseline 5/5 緑 → 変異後 rc=1・★not ok 3 T-WIN-003★。
     suspected_by: ashigaru6
-    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
+    paths: [scripts/gate_mutation_replay.py, tests/unit/test_gate_run_window.bats]
     anchor_sites: 1
     mutate: |
       python3 - <<'PY'
@@ -2535,46 +2132,6 @@ mutations:
     red_needle: "not ok 1 T-WIN-003"
     timeout: 600
 
-  - id: MUT-1408-W4
-    desc: |
-      ★★出力の【形】の契約を守る牙 — 本群で最も値打ちが在る★★。
-      ★刻を行末から【行頭】へ移す★= ★人の目には何も壊れておらぬ★。
-      ★而して此の出力には読み手が二人 居る★:
-        (1) scripts/gate_verdict_drift.py VERDICT_RE = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…`
-            ⇒ ★退行の見張りが【全ての牙を初見】と読み、退行を一件も名指せなくなる★
-        (2) scripts/gate_nightly.sh:300 の `grep -vE '^\s*ok\s'` (PASS 行を除く口)
-            ⇒ ★毎朝の家老への警報本文へ、全 PASS 行が漏れ出す★
-      ★★どちらも「黙って盲になる」= 門は緑のまま★★ゆえ、機械で縛る他に道が無い。
-      ★実測 (08:44 六号)★= 変異後 ★T-WIN-001 / T-WIN-004 / T-WIN-005 の三つが同時に落ちた★
-      = ★契約の検が現に二人の読み手を守っておる証★。
-    suspected_by: ashigaru6
-    paths: [scripts/gate_mutation_replay.py, scripts/gate_verdict_drift.py, tests/unit/test_gate_run_window.bats]
-    anchor_sites: 1
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/gate_mutation_replay.py"
-      s = open(p, encoding="utf-8").read()
-      a = 'print(f"  {mark} {verdict:12s} {eid}:{tag} {why} [刻 {_clock()}]")'
-      b = 'print(f"  [刻 {_clock()}] {mark} {verdict:12s} {eid}:{tag} {why}")'
-      assert a in s, "MUT-1408-W4: 錨が盤面から消えた (実装が動いた = UNVERIFIABLE)"
-      open(p, "w", encoding="utf-8").write(s.replace(a, b, 1))
-      PY
-    test: |
-      bats tests/unit/test_gate_run_window.bats --filter T-WIN-004
-    expect: nonzero
-    red_needle: "not ok 1 T-WIN-004"
-    timeout: 600
-
-  # ═══════════════════════════════════════════════════════════════════════════
-  # cmd_1408 (借財) — 束で走らせる test が視野計の分母から静かに落ちる形の見張り
-  #   出所 = 六号が 22:26 の下命で己の借財として名乗った穴。
-  #   機序 = 同伴の判別は「test に path がそのまま現れるか」で決めておる ⇒
-  #     `pytest tests/unit/` の形で書けば本体は同伴と読まれ、画面に何も出ずに分母から落ちる。
-  #   実測 = 6冊にこの形は 0 件 (2026-07-27 09:32 / 23:0x 再測とも 0)。
-  #     「今 無い」は「起こらぬ」ではないゆえ機械の側へ移した。verdict は動かしておらぬ。
-  #   paths に兄弟 2 本を併記 = --selftest が gate_bats_negation.py と本台帳を読むゆえ
-  #     (一本きりの scratch では baseline が赤になり、牙が永久に UNDETERMINED になる)。
-  # ═══════════════════════════════════════════════════════════════════════════
   - id: MUT-1408-B1
     desc: |
       束を名乗る口を殺す (常に「0 件」と答えさせる) = 束で書かれた日に門が黙る。
@@ -2766,29 +2323,6 @@ mutations:
   #   ★残す 3 本★= ML6/ML7 = ★ml の【配線そのもの】を縛る (免除の有無に依らず要る)★ /
   #     ML8 = ★canary の牙 (抜き出しの綴りが変われば名指す)★ = ★免除の綴りを狙うておったゆえ
   #     cmd_1409 で ★抜き出しの始端 (ML_ROOT=) へ差し替えた★ (牙の役目は変えておらぬ)。
-  - id: MUT-1408-ML6
-    desc: |
-      ★撃った木を点呼へ記す一行が消えれば赤くなること★。watched を落とすと ml は現に
-      撃たれておるのに ★木の点呼から【見ておらぬ木】として消える★ (宣言でなく実績を記す形の要)。
-    origin: cmd_1408
-    suspected_by: ashigaru6
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh")
-      s = p.read_text(encoding="utf-8")
-      old = '    watched "$ML_ROOT"\n'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, "", 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-008
-    expect: nonzero
-    red_needle: "not ok 1 T-ML-008"
-    timeout: 600
-
   - id: MUT-1408-ML7
     desc: |
       ★ml 台帳の paths から p5 が落ちれば赤くなること★。p7 は p5 を import するゆえ、
@@ -2796,7 +2330,7 @@ mutations:
       (= 本朝 未判定 10 件が嵌った当の穴を、台帳の側で縛る)。
     origin: cmd_1408
     suspected_by: ashigaru6
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
+    paths: [tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
     mutate: |
       python3 - <<'PY'
       import pathlib
@@ -2811,36 +2345,6 @@ mutations:
       bats tests/unit/test_gate_ml_registry.bats --filter T-ML-007
     expect: nonzero
     red_needle: "not ok 1 T-ML-007"
-    timeout: 600
-
-  - id: MUT-1408-ML8
-    desc: |
-      ★canary が現に働くこと★= 抜き出しの綴りが変われば T-ML-000 が名指す。
-      之が無ければ ★0 行を eval して全部緑★ になる (本夜 05:2x に己で踏んだ族)。
-      ★cmd_1409 で狙う綴りを差し替えた★= 元は免除の signature (ML_COV_WAIVER_SIG) を狙うておったが
-      ★免除ごと消えた★ ⇒ ★block の【終端】(ml の if を閉じる fi) へ移した★=
-      終端が崩れれば sed の範囲が次の fi まで伸び、canary の ★越境の検め (hook_rc が混じらぬ事)★ が赤くなる。
-      ★★始端 (ML_ROOT=) を狙う案は【己で撃って退けた】★★= 158 行目に二本目の ML_ROOT= が在るゆえ
-      始端を改名しても範囲は生き、★T-ML-000 は緑のままであった (10:11 実測 rc=0)★ = ★牙にならぬ★。
-    origin: cmd_1408
-    suspected_by: ashigaru6
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_ml_registry.bats, config/mutation_registry.ml.yaml]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh")
-      s = p.read_text(encoding="utf-8")
-      old = '    rc12=2; out12="[gate-2 ml coverage] UNDETERMINED: 同上"\nfi\n'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      # ★空白でなく【意味の在る綴り】を変える★ (gate-3 が 10:17 に鈍り疑いで名指した処方)
-      #   = 字下げだけを変える形では ★着弾を測れなんだ★ と門が申す (size 差 0 の族)。
-      p.write_text(s.replace(old, old.replace("\nfi\n", "\nfi  # ★変異★ 終端を崩す\n"), 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_ml_registry.bats --filter T-ML-000
-    expect: nonzero
-    red_needle: "not ok 1 T-ML-000"
     timeout: 600
 
   - id: MUT-1409-G1
@@ -2958,226 +2462,6 @@ mutations:
   #     ★exit 1 の条件を append_gate → append_rc へ差し替えても緑のままであった★ ⇒
   #     ★検の側を【終いの二行を現物から抜いて現に走らせる】形へ改めてから登録した★
   #     = ★牙が当たらぬ時、直すのは牙でなく検である事も在る★。
-  - id: MUT-1409-NA1
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★既定が【報告のみ】である事★。GATE_APPEND_STRICT の既定を 1 へ倒すと、配線した其の朝から
-      門が落ちうる = ★家老の枷 (WIRING/STRICT の既定を動かすな) を破る★。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      old = 'APPEND_STRICT="${GATE_APPEND_STRICT:-0}"'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, 'APPEND_STRICT="${GATE_APPEND_STRICT:-1}"', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-001
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-001"
-    timeout: 300
-
-  - id: MUT-1409-NA2
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★昇格の口が現に効く事★。strict の枝を殺すと ★GATE_APPEND_STRICT=1 と唱えても門へ入らぬ★
-      = ★「いつでも上げられる」という申告が嘘になる★ (家老/殿の号令が空を撃つ)。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      old = 'if [ "$APPEND_STRICT" = "1" ]; then\n    append_gate="$append_rc"'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, 'if false; then\n    append_gate="$append_rc"', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-002
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-002"
-    timeout: 300
-
-  - id: MUT-1409-NA3
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★【呑まれ】と【測れなんだ】を混ぜぬ事★。名乗りの条件を -eq 1 から -ge 1 へ広げると、
-      submodule 未 init 等の ★環境の揺れまで「呑まれ在り」と名乗る★ ⇒ 毎朝鳴って誰も消せぬ札になる。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      old = '[ "$append_rc" -eq 1 ] && echo "[gate_nightly] ★台帳に【呑まれ】在り'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, old.replace('-eq 1', '-ge 1'), 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-003
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-003"
-    timeout: 300
-
-  - id: MUT-1409-NA4
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★道具の側へ STRICT が現に届く事★。呼びの前置き (REGISTRY_APPEND_STRICT=1) を落とすと
-      ★道具は呑まれを rc=2 (測れなんだ) で返す★ ⇒ 上の -eq 1 の網から外れ ★警報から黙って落ちる★。
-      = ★門も警報も動かぬまま、呑まれだけが見えなくなる★ (最も気付けぬ壊れ方)。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      old = 'append_out="$(REGISTRY_APPEND_STRICT=1 run_reporter'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, 'append_out="$(run_reporter', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-005
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-005"
-    timeout: 300
-
-  - id: MUT-1409-NA5
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★門の判定が append_gate (処分) を見ており、生の rc (分類) を見ておらぬ事★。
-      exit 1 の条件を append_rc へ差し替えると ★「報告のみ」と申しながら門が落ちる★ =
-      ★申告と実際が割れる★ (本朝ずっと狩ってきた形の、門における顔)。
-      ★此の牙は一度 空振りした★= 検が grep で数えるだけであったゆえ ⇒ ★検を撃つ形へ改めた★。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      # ★錨を【最小の一意な綴り】へ絞った (2026-07-27 12:56・六号)★=
-      #   ★旧錨は行末まで含んでおったゆえ、同じ行の後ろへ別の条件 (fab_gate) が足された
-      #   其の瞬間に hit=0 へ落ちた★ = ★己の牙を己の手で鈍らせた★ (gate-3 が即座に名指した)。
-      old = '[ "$append_gate" -eq 1 ]'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '[ "$append_rc" -eq 1 ]', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-006
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-006"
-    timeout: 300
-
-  - id: MUT-1409-NA6
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★呑まれの朝が【人へ届く】事★。警報の条件から生の rc=1 を外すと、報告のみの間は
-      ★他に非PASS が無い朝の呑まれが log に沈む★ = ★誰も読まぬ守りは守りではない★。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      # ★錨を絞った (2026-07-27 12:56・六号)★= 旧錨は 'then\n' まで含んでおったゆえ
-      #   同行の後ろへ fab の条件が足された瞬間に hit=0 (gate-3 の名指しで気付いた)。
-      old = '[ "$append_rc" -eq 1 ] || [ "$append_gate" -ne 0 ]'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '[ "$append_gate" -ne 0 ]', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-007
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-007"
-    timeout: 300
-
-  - id: MUT-1409-NA7
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★母数を先に刷る事★ (五号 09:54 の急報 = 「0 件 該当」より先に「N 件 走査」を出せ)。
-      母数の行を消すと ★0/0 と 0/6 が同じ顔になる★ = ★何も検めておらぬ朝を緑と読む★。
-    paths: [scripts/gate_registry_append.py, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_registry_append.py"); s = p.read_text(encoding="utf-8")
-      old = '    print(f"[gate-4] ★母数★ {what}")'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '    pass', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-008
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-008"
-    timeout: 300
-
-  - id: MUT-1409-NA8
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★canary が現に働く事★= 抜き出しの始端が変われば T-NA-000 が名指す。
-      之が無ければ ★空を eval して T-NA-001〜006 が悉く緑★ になる (本夜 05:2x に己で踏んだ族)。
-    paths: [scripts/gate_nightly.sh, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh"); s = p.read_text(encoding="utf-8")
-      old = '\nAPPEND_STRICT="${GATE_APPEND_STRICT'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '\nAPPEND_MODE_STRICT="${GATE_APPEND_STRICT', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-000
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-000"
-    timeout: 300
-
-  - id: MUT-1409-NA9
-    origin: cmd_1409
-    suspected_by: ashigaru6
-    desc: |
-      ★母数が同じ冊を二度 数えぬ事★。冊の一覧の一意化 (実体 path での照合) を殺すと、
-      ★綴り違いの同じ冊が二つの顔で並び、母数が水増しされる★
-      = ★★母数を刷る道具が母数を誤る = 五号 09:54 の急報 (母数を先に出せ) を骨抜きにする★★。
-      ★出所は己の実測 (10:31)★= 註 (コメント) の --registry まで拾うて ★7 冊 265 件★ と刷っておった
-      (実体は 6 冊 264 件) ⇒ ★数を刷る口ほど、己の数を疑う口を持たねばならぬ★。
-    paths: [scripts/gate_registry_append.py, tests/unit/test_gate_nightly_append_wiring.bats]
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_registry_append.py"); s = p.read_text(encoding="utf-8")
-      old = '            if key in seen:\n                continue\n'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '            if False:\n                continue\n', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_nightly_append_wiring.bats --filter T-NA-009
-    expect: nonzero
-    red_needle: "not ok 1 T-NA-009"
-    timeout: 300
-
-  # ── cmd_1392「二族の刻」の牙 6 本 (MUT-1392-007〜012) ───────────────────────
-  # ★案の出所 = 足軽五号★ / ★台帳への代筆 = 足軽六号★ (本任の間、台帳の単独書き手)。
-  # ★受け渡し = plans/registry_entries_cmd1392_ash5.yaml (md5 e14c91a1acb36b782b489e59e0533b35)★
-  #   = ★前の受け渡しは queue/reports/ashigaru5_report.yaml に置かれ、次の任の報告で黙って消えた★
-  #     ⇒ 家老 11:58 の規「登録案の受け渡しは plans/ の file で行う」の第一号である。
-  # ★6/6 PASS を機械が申した刻 = 2026-07-27 11:18:29★
-  #   (008/009 は初版では「同一綴りが 2 箇所で発火・申告 1」= UNDETERMINED であり、
-  #    錨を一意へ絞った fix2 で赤を見た ⇒ ★「見てから出した」の刻は後ろへずれる★)。
-  # ★六号自身の replay (別走・12:08:19 完走) でも 6/6 PASS = 赤の名指しまで一致★。
-  # ★註★= MUT-1392-001〜006 は【別の 6 本】(的 = T-AGE-001〜006) であり台帳に載っておらぬ。
-  #   ★本登録では畳まれぬ = 幽霊 6 件は別の借財として残る★ (家老の裁を仰いでおる)。
   - id: MUT-1392-007
     desc: 齢の口を【mtime 一族】から【ps 一族】へ戻す変異 = ★二族の刻を較べる形が帰ってくる★。cmd_1392 の是正そのものを反転させる牙
     origin: cmd_1392
@@ -3410,52 +2694,6 @@ mutations:
   # ★守る対象 = gate_nightly.sh の捏造の門 block (b23ec47)★。
   # ★FB1 は gate-2 段2 の名指し (12:55) への返答★= T-FB-000 の負の主張 (if-then-return) の刃を台帳が証す。
   # ★赤は二度 見た★= 手で当てた変異 2/2 (12:56) + runner の replay 2/2 PASS (12:56:44)。
-  - id: MUT-1413-FB1
-    desc: ★捏造の門の配線 block の頭 (FAB_STRICT=) を改名する変異★ = ★試験が現物から抜く其の口を塞ぐ★。之で T-FB-000 (canary) が赤くならねば、★抜き出しが空でも【全部緑】に見える★= cmd_1404『梯子を書き写しておった二本』と同族の穴。★T-FB-000 は負の主張 (if-then-return) を持つ試験ゆえ、其の刃を台帳が証す★ (gate-2 段2 の名指し 12:55 への返答)
-    origin: cmd_1413
-    suspected_by: ashigaru6
-    paths:
-    - scripts/gate_nightly.sh
-    - tests/unit/test_gate_fabrication_wiring.bats
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh")
-      s = p.read_text(encoding="utf-8")
-      old = 'FAB_STRICT="${GATE_FAB_STRICT:-0}"'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, 'FAB_STRICT_RENAMED="${GATE_FAB_STRICT:-0}"', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_fabrication_wiring.bats --filter T-FB-000
-    expect: nonzero
-    red_needle: not ok 1 T-FB-000
-    timeout: 300
-  - id: MUT-1413-FB2
-    desc: ★『既定は名乗るのみ』を破る変異 (fab_gate へ生の rc を入れる)★ = ★配線した其の日から門が落ちうる形★。★毎朝 N 件鳴る門は外される (cmd_1388 の族)★ゆえ、既定が報告のみである事を機械で縛る
-    origin: cmd_1413
-    suspected_by: karo
-    paths:
-    - scripts/gate_nightly.sh
-    - tests/unit/test_gate_fabrication_wiring.bats
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/gate_nightly.sh")
-      s = p.read_text(encoding="utf-8")
-      old = '    fab_gate=0\n    [ "$fab_rc" -eq 1 ]'
-      new = '    fab_gate="$fab_rc"\n    [ "$fab_rc" -eq 1 ]'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, new, 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_gate_fabrication_wiring.bats --filter T-FB-003
-    expect: nonzero
-    red_needle: not ok 1 T-FB-003
-    timeout: 300
-
   - id: MUT-1387-SW1
     desc: ★添え札を【判定】へ漏らす変異★ = 切替で説明が付く体を抑止せず素通りさせる ⇒ ★★「切替を装えば抑止を逃れる」口が開く★★ (家老 14:21 が明示に退けた道)。★本層が触れてよいのは文字列だけである★を縛る牙
     origin: cmd_1387

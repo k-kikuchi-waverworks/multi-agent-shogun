@@ -4,7 +4,6 @@ scripts/gate_artifact_capture.sh
 scripts/gate_mutation_replay.py
 scripts/gate_precommit.sh
 scripts/install_gate_hooks.sh
-scripts/gate_nightly.sh
 config/mutation_registry.yaml
 config/artifact_manifests/ min=1
 docs/content/ops/cmd_1352_silent_pitfall_gates.md

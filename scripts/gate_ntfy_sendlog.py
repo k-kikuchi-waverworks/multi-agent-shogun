@@ -4,8 +4,12 @@
 
 ★兄弟との違いを先に述べる (二つは別の物を見ておる)★
   ・gate_ntfy_alive.py  = ★engine 側★の自己試験 (logs/ntfy-state.json) を読む = 「engine の通知路」
+    ★2026-07-30 cmd_1479 (88aa167) で撤去済★ = ★engine 側を見る口は今 無い★。
+    ⇒ 之は「engine が緑になった」ではない。★engine の通知路は今 誰も見ていない★。
   ・本 script           = ★shogun 側★の実送信 (logs/ntfy_send.log) を読む   = 「我らが現に撃った矢」
-  ⇒ ★engine が緑でも、我らの scripts/ntfy.sh が死んでおれば殿へは届かぬ★。之が第二の口の在る理由じゃ。
+    ★残っているのは此方だけである★。
+  ⇒ ★engine が緑でも、我らの scripts/ntfy.sh が死んでおれば殿へは届かぬ★。之が第二の口の在った理由じゃ。
+    ★今は逆も言える★= 本 script が緑でも、engine 側の通知路については何も言えぬ。
 
 ★北極星 (cmd_1381 の起源)★= 通知は3ヶ月近く届かず、気づいたのは【偶然 log を掘ったから】である。
   ⇒ ★log は在ったが、読む者が居らなんだ★。本 script は其の【読む者】である。
@@ -186,7 +190,13 @@ def parse_lines(text: str, local_tz: _dt.tzinfo | None) -> tuple[list[Event], in
 
 def judge(log_path: Path, now: _dt.datetime, window_min: float = WINDOW_MIN,
           max_fail: int = MAX_FAIL) -> tuple[int, list[str]]:
-    """★三値を返す★。out 行は角括弧札つき (gate_nightly / 番人 が所見へ畳む口)。"""
+    """★三値を返す★。out 行は角括弧札つき (畳む側が機械で拾えるようにした形)。
+
+    ★畳んでいた gate_nightly は cmd_1479 (88aa167) で撤去済★ =
+    ★実運用で此の out 行を拾う者は今 0 である★ (残る呼びは試験と手撃ちのみ。
+     tests/test_cmd1381_ntfy_logline.bats / tests/mutation_cmd1381_stage5.sh で実測)。
+    札の形は残す (次に畳む者が現れた時、形が変わっていれば同じ盲が生えるゆえ)。
+    """
     out: list[str] = []
 
     if not log_path.exists():

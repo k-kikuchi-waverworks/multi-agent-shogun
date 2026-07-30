@@ -103,7 +103,8 @@ ashigaru6 pane (%3) scrollback より 2026-07-26 04:4x 採取。正本 =
   MUT-1355-002 (R2 fallback 折り→U4d 名指し赤) / ★cmd_1356 追加★ = MUT-1355-004
   (blackout 台帳記録 削除→T-QRM-015 赤 = 軍師二号 G-M3 SURVIVED の是正) / MUT-1355-005
   (expire 殺し→U7a 赤 = G-M5 SURVIVED の是正) / MUT-1355-006 (妥当域の蓋 殺し→U6a 赤 =
-  23.8h 窓の再開を毎朝見張る)。毎朝 06:30 gate_nightly が再走。
+  23.8h 窓の再開を毎朝見張る)。かつては毎朝 06:30 に gate_nightly が再走していた
+  (★その門は cmd_1479 / 88aa167 で撤去済 = 今 自動で再走する者は居ない★)。
 - `tests/unit/test_idle_revive_quorum.bats` T-QRM-010〜015 — 実文言で clear 0本+警報1通、
   家老 guard 両側、resume 1通+全員回復 close、pattern 外しで**今夜の誤 clear が再現**する
   scan 級両側実測、★T-QRM-015 (cmd_1356) = blackout (全軍同時枠切れ=殿の典型形) 経路の
@@ -133,7 +134,8 @@ ashigaru6 pane (%3) scrollback より 2026-07-26 04:4x 採取。正本 =
   `eligible=N` を印字した。assigned 存在下で eligible=0 が常態なら盲目である。
 - **変異登録**: MUT-1154-001 (正規化折り→T-STA-001 名指し赤) / MUT-1154-002 (分母印字折り→
   T-STA-003 名指し赤)。試験本体 = `tests/unit/test_idle_revive_status_normalize.bats`
-  (T-STA-001〜004: 見える/偽 active を作らぬ/分母印字/report 注記の両側)。毎朝 gate_nightly 再走。
+  (T-STA-001〜004: 見える/偽 active を作らぬ/分母印字/report 注記の両側)。
+  ★毎朝の gate_nightly 再走は cmd_1479 / 88aa167 で撤去済 = 手で撃つ以外に走らぬ★。
 - **同型穴の水平展開 (同日 09:1x・家老 routing)**: 同じ生 exact match が
   `stall_watchdog_scan.py` (cmd_552 帳簿漏れ watchdog) の task 側 (`!= "assigned"`) と
   report 側 (`.lower()` のみ) にも在った — 帳簿漏れ alert が注記1つで**永久に沈黙**する

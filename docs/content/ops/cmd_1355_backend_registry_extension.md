@@ -31,8 +31,10 @@
      陽性対照が立つ (backend では `tests/unit/test_cmd_1350_module_order.py`)。
    - baseline 赤の UNDETERMINED 理由に**失敗出力の尻尾を添付** (repo 跨ぎでは
      「venv 不在」「rubric 不在」等の空振り理由が exit code だけでは家老に辿れぬ)。
-3. **配線** (`scripts/gate_nightly.sh` — 毎朝 06:30 の既存 cron に相乗り・crontab 非接触):
+3. **配線** (~~`scripts/gate_nightly.sh`~~ — 毎朝 06:30 の既存 cron に相乗り・crontab 非接触):
    backend 台帳の全件再走 + `--coverage`。非 PASS は既存の家老 inbox 警告経路へ相乗り。
+   ★★2026-07-30 追記 = この配線は cmd_1479 / 88aa167 で撤去した★★ =
+   **backend 台帳を自動で見る者は今 居ない**。手で撃つ口は下の「走らせ方」に在る。
 4. **環境解決の単一口** `backend/tests/harness/gate2_env.sh`: venv への道はここ 1 file
    (設定の出所を1つに)。**見つからねば大声で非0 = UNDETERMINED へ倒す。黙る fallback は無い**。
 
@@ -61,7 +63,7 @@ path だけ載せた飾り entry でも REGISTERED になりうる (cmd_1352b ca
 
 | 空振りの型 | 挙動 |
 |-----------|------|
-| backend 台帳が見えぬ (submodule 未init / path 違い / disk 喪失) | gate_nightly が rc=2 UNDETERMINED + 家老警告 |
+| backend 台帳が見えぬ (submodule 未init / path 違い / disk 喪失) | ~~gate_nightly が rc=2 UNDETERMINED + 家老警告~~ ★門を撤去したので、手で撃った者の画面に出るだけ (cmd_1479)★ |
 | backend .venv 不在 (fresh clone 相当) | gate2_env.sh が exit 3 + 大声 → baseline 赤 → UNDETERMINED (理由の尻尾に「venv が居らぬ」) |
 | rubric 正本不在 (app repo 側 `eval/rubric/conv_v2.yaml`) | MUT-1350-X の test が exit 3 + 大声 → UNDETERMINED |
 | cron 素 PATH | python3 は /usr/bin・venv は絶対 path ゆえ影響なし (E2E 実測済) |

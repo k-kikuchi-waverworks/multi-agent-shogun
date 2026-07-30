@@ -70,6 +70,9 @@ exit: 0 PASS / 1 FAIL あり / 2 UNDETERMINED あり (FAIL 優先)
   python3 scripts/gate_mutation_replay.py --tree-census --watched-file F
                                                         # ★木の点呼 (cmd_1374)★: 牙を持つのに
                                                         #   どの gate も見ておらぬ repo を名指す
+                                                        # ★F を書く者は今 居ない★ (書いていた
+                                                        #   gate_nightly.sh は cmd_1479 で撤去)
+                                                        #   ⇒ 空/不在なら UNDETERMINED を返す
 """
 from __future__ import annotations
 
@@ -1225,9 +1228,13 @@ def run_all(registry: Path, repo: Path) -> int:
         mark = {PASS: "ok  ", FAIL: "★NG★", UNDET: "未定 "}[verdict]
         who = e.get("suspected_by") if isinstance(e, dict) else None
         tag = f" [疑い:{who}]" if who else ""
-        # ★刻は【行末】へ置く★= ★行頭へ置けば、此の出力を読む二人が黙って盲になる★:
-        #   gate_verdict_drift.py の `VERDICT_RE` = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…` /
-        #   gate_nightly.sh の `grep -vE '^\s*ok\s'` (PASS 行を除く口。detail を組む所に在る)
+        # ★刻は【行末】へ置く★= ★行頭へ置けば、此の出力を機械で読む者が黙って盲になる★。
+        #   ★2026-07-30 cmd_1479 (88aa167) 現在、機械で読む者は 1 人も居らぬ★ =
+        #   下に挙げた二人は どちらも撤去した:
+        #     gate_verdict_drift.py の `VERDICT_RE` = `^\s+(?:ok\s+|★NG★\s*|未定\s+)…` (撤去)
+        #     gate_nightly.sh の `grep -vE '^\s*ok\s'` (PASS 行を除く口・撤去)
+        #   ⇒ ★形の枷が緩んだ、と読むな★= 読む者が居らぬのは今の盤面の性質でしかなく、
+        #     次に誰かが機械で読み始めた時、行頭へ刻を移してあれば同じ盲が生える。
         #   ★行番号で指さぬ★ = 行が動いた瞬間に別の物を指すゆえ (CLAUDE.md 条F)。
         #   ⇒ ★形を変える時は【読む者】を先に数える★ (2026-07-27 六号が実測して確かめた)
         print(f"  {mark} {verdict:12s} {eid}:{tag} {why} [刻 {_clock()}]")
@@ -1381,7 +1388,14 @@ def scan_registry_id_refs(repo: Path):
 def peer_registry_paths(own: Path) -> list[tuple[str, Path]]:
     """★幽霊 ID の出所照合先★ = 他木の台帳 (cmd_1408)。
 
-    既定は gate_nightly.sh と ★同じ path・同じ env★ で解く (二つ持てば必ずずれるゆえ)。
+    既定は gate_nightly.sh と ★同じ path・同じ env★ で解いていた (二つ持てば必ずずれるゆえ)。
+    ★2026-07-30 cmd_1479 (88aa167) で gate_nightly.sh を撤去したので、揃える相手は消えた★
+    = 下の cands が この path 群の唯一の持ち主になった。
+    ★併せて名乗る★= 冊の一覧を持つ所は、今 repo 内に ★2 つ在って食い違っている★:
+      ・此処 (5 冊 = shogun / backend / app / web / engine)
+      ・gate_registry_append.py の _fallback_books (3 冊 = shogun / web / ml)
+    ★どちらを正本にするかは決まっていない★ (決めるのは殿。起票して裁を待つ)。
+    ⇒ ★片方だけ見て「冊は N 冊」と名乗るな。★
     ★己の台帳は除く★ (解決後の path で照合) — 己を「別台帳」と呼ばぬ。
     """
     home = Path.home()
@@ -1438,8 +1452,12 @@ def coverage(registry: Path, repo: Path, peers: list[Path] | None = None) -> int
 
     peers = 幽霊 ID の出所照合先 (別台帳)。None なら既定 (peer_registry_paths) を解く。
 
-    FAIL は「block」でなく「家老へ警告」を意味する (gate_nightly が既存の家老 inbox
-    警告経路へ相乗りする)。免除は coverage_waivers (同じ台帳 file 内・理由必須) のみ =
+    FAIL は「block」でなく「家老へ警告」を意味していた (gate_nightly が既存の家老 inbox
+    警告経路へ相乗りしていた)。
+    ★2026-07-30 cmd_1479 (88aa167) で gate_nightly.sh を撤去したので、此の FAIL を
+    家老へ運ぶ者は今 居ない★ = ★撃った本人の画面に出るだけである★。
+    ⇒ 手で撃った時は、FAIL を自分で読んで自分で運べ (誰も後から拾わぬ)。
+    免除は coverage_waivers (同じ台帳 file 内・理由必須) のみ =
     免除は可視 (WAIVED 表示)・黙って外す道は無い。
     """
     import yaml  # noqa: F401  (免除簿の日付検分は datetime 側・yaml は下流の互換用)
@@ -1979,9 +1997,19 @@ def negative_assertion_audit(registry: Path, repo: Path, verbose: bool = False,
 #
 #   ■ 見ておる木をどう知るか = ★宣言でなく【実際に走った物】を数える★
 #     gate_nightly が各 gate を撃つ度に repo-root を --watched-file へ書き足し、
-#     その file を本層が読む。★gate の呼び出し行を消せば、その木は記録されぬ★ゆえ
+#     その file を本層が読む形であった。★gate の呼び出し行を消せば、その木は記録されぬ★ゆえ
 #     「配線を消したのに watched のまま」という食い違いが ★構造的に起こり得ぬ★。
 #     (cmd_1359 の「番人は書いただけでは番をせぬ」を、点呼自身へ当てたもの)
+#
+#   ■ ★★2026-07-30 cmd_1479 (88aa167) 以後 = 本層を撃つ者も、養う者も 居ない★★
+#     --watched-file へ書いていたのは gate_nightly.sh だけで、それを撤去した。
+#     ★--tree-census を実運用で撃つ呼び手も repo 内に 0 本★ =
+#       残っている呼びは ①本 file の --selftest の中 (T-CEN-* が擬似盤面で撃つ) ②手で撃つ口 のみ。
+#       ⇒ ★selftest が緑でも「点呼が現に走っている」ではない★ (擬似盤面での緑である)。
+#     ⇒ 今 手で撃てば、watched が空ゆえ ★「どの gate も見ておらぬ木」が全数に近く出る★。
+#       ★之を「盤面が壊れた」と読むな★= 養う者が消えただけである。
+#     ⇒ 直す形 (毎朝の門を建て直すか、点呼ごと退役させるか) は決まっていない。
+#       ★門を建てるのは起票して殿の裁を待つ仕事である★ (CLAUDE.md 自己修正の禁)。
 #
 #   ■ 木の全数をどう知るか = ★system 自身が持つ独立の登録 (config/projects.yaml)★
 #     + 見ておる木 + それらの submodule。★己の記憶を分母にせぬ★ (cmd_1370 の流儀)。
@@ -2042,7 +2070,7 @@ def tree_census(registry: Path, watched_file: Path | None, projects: Path,
         return 2
 
     # ── ★撃とうとした木 (cmd_1374b ③・軍師一号の差し戻し)★ ──────────────────
-    # ★穴★: watched は各 gate の【成功の枝の中】でしか記録されぬ (gate_nightly の
+    # ★穴★: watched は各 gate の【成功の枝の中】でしか記録されぬ (gate_nightly ★88aa167 で撤去済★ の
     #   `if [ -f "$REG" ]; then … watched "$ROOT"; else rc=2; fi`)。
     #   ⇒ ★gate が黙って撃てなんだ木は「未監視」ではなく【存在せぬ】として点呼から消える★。
     #   軍師一号の実測 (fresh clone の素の姿 = projects.yaml が first_setup 既定・backend 台帳不在):
@@ -2200,7 +2228,8 @@ def tree_census(registry: Path, watched_file: Path | None, projects: Path,
     if unwatched_fanged or expired:
         print(f"[木の点呼] FAIL: ★どの gate も見ておらぬ牙持ちの木 {len(unwatched_fanged)} 本★"
               f" / ★免除期限切れ {len(expired)} 本★")
-        print("  処方: その木を gate_nightly の監視下へ入れる (台帳を置き coverage を撃つ) か、")
+        print("  処方: その木へ台帳を置き coverage を撃つ (毎朝の門 gate_nightly.sh は cmd_1479 で")
+        print("        撤去したので、★今 その木を自動で見る者は居ない★ = 手で撃つか、監視を建て直すか) か、")
         print("        tree_census_waivers へ ★理由と until (いつ返すか) をつけて★ 免除せよ。")
         return 1
     if unfired:
@@ -3421,7 +3450,8 @@ def main() -> int:
                     help="cmd_1352b: 変異testらしき file が台帳に登録されておるかの検知層")
     ap.add_argument("--peer-registry", type=Path, action="append", default=None,
                     help="cmd_1408: 幽霊 ID の出所照合先 (別台帳) を明示する。★与えねば"
-                         " gate_nightly と同じ既定を解く★。読めぬ台帳が在れば幽霊は"
+                         " peer_registry_paths の既定 5 冊を解く★ (揃える相手だった"
+                         " gate_nightly.sh は cmd_1479 で撤去済)。読めぬ台帳が在れば幽霊は"
                          " 【真に未登録】でなく【判別不能】と名乗る (fail-closed)")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--tree-census", action="store_true",

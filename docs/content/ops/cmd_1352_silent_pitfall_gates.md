@@ -1,5 +1,22 @@
 # 沈黙する落とし穴 gate (cmd_1352)
 
+> ## ★2026-07-30 追記 — この文書のうち【撤去された部分】(cmd_1479 / 88aa167)★
+>
+> **殿が承認された掃除 (cmd_1479) で、毎朝の門とその周りを撤去した。**
+> 以下は**この文書が「在る」と書いていて、現に無い物**である。読み替えて読め。
+>
+> | 撤去した物 | この文書での書かれ方 | 今 現に何が起きるか |
+> |---|---|---|
+> | `scripts/gate_nightly.sh` | 「毎朝 06:30 の cron backstop」 | **無い**。cron は cmd_1476 で停止、file は 88aa167 で削除。フル再走を撃つ者は居ない (手で `python3 scripts/gate_mutation_replay.py` を撃つのみ) |
+> | `scripts/gate_verdict_drift.py` | 判定の遷移を見る門 | **無い** |
+> | `scripts/registry_census.py` | 台帳の件数を数え直す道具 | **無い**。ゆえに gate-4 は冊の一覧を取れず、**毎回 UNDETERMINED で「3 冊しか見ておらぬ」と名乗る** (6 冊ではない) |
+> | `scripts/gate_undistributed_tooling.sh` ほか計 8 本 | 毎朝の門から呼ばれていた道具 | **無い** ([cmd_1367](cmd_1367_undistributed_tooling.md) も同じく退役) |
+>
+> **★今も生きているのは pre-commit の 5 門だけである★** (gate-1 manifest 捕捉 / gate-2 台帳 sanity /
+> gate-3 牙の着弾 / gate-4 台帳の呑まれ / gate-5 正本と生成物のずれ)。
+> ⇒ **UNDETERMINED (rc=2) を後から拾う者は居ない。** commit 時に読み流せば誰も気付かぬ。
+> ⇒ **「毎朝の門」と書いてある節は、すべて過去形として読め。** 建て直すかどうかは殿の裁である。
+
 **消す前に読め (Chesterton's Fence)**: この gate 群は 2026-07-25 夜に【独立に3件】起きた
 「赤くならない事故」を機械で塞ぐために在る。gate が邪魔に見えるなら、それはこの3件を
 知らぬからである。消す判断は必ずこの3実例を読んでから行え。
@@ -83,7 +100,7 @@
 | `gate_mutation_replay.py --tree-census` | **木の点呼 (cmd_1374)**: 上の層が「見ておる木の中」を検分するのに対し、**そもそも どの gate も見ておらぬ repo** を名指す (下記専用節) |
 | `gate_mutation_replay.py` の `evaluate_entry` ③b | **着弾の一意性 (cmd_1382)**: 変異の anchor が非一意なら**狙いは黙って別の場所へ着弾する**。これは空振りではない (赤も byte 変化も出るゆえ既存層では**原理的に**捕えられぬ)。台帳へ `anchor_sites: N` と申告すれば意図的な全置換は通る。**正本 = [cmd_1382_anchor_uniqueness.md](cmd_1382_anchor_uniqueness.md)** |
 | `config/mutation_registry.yaml` の `tree_census_waivers` | 木の点呼の免除簿 (path/reason 必須・`until` で期限) |
-| `scripts/gate_nightly.sh` | cron backstop (毎朝 06:30 フル再走・非 PASS を家老 inbox へ警告) |
+| ~~`scripts/gate_nightly.sh`~~ | **撤去済 (cmd_1479 / 88aa167 / 2026-07-30)**。かつては cron backstop (毎朝 06:30 フル再走・非 PASS を家老 inbox へ警告)。**今この役を担う者は居ない** — 冒頭の「撤去された部分」を読め |
 
 ## どこで回るか (人が思い出して回す形にはしていない)
 
@@ -363,6 +380,8 @@ shogun 7 件 (増減なし) / backend 12 件 (+3・いずれも実物の変異�
 (0件検出もここへ畳む = 真空 PASS 禁)。理由なし waiver も UNDETERMINED (曖昧な免除は免除でない)。
 
 **どこで回るか**: gate_nightly (cron 毎朝 06:30) のみ。pre-commit には載せぬ — 理由:
+★★2026-07-30 追記 = その門を撤去したので、この層は今 どこでも回っていない★★ (cmd_1479 / 88aa167)。
+手で撃つ口だけが残る: `python3 scripts/gate_mutation_replay.py --coverage`。理由の説明は下のまま生きている —
 (a) これは**警告層**であり block 層でない (他 agent の未登録 test で全軍の commit を塞ぐのは
 検知層の越権)、(b) 警告は既存の gate_nightly → 家老 inbox 経路へ**相乗り** (新経路を作らぬ・
 家老裁定)。FAIL の意味は「家老へ警告」= 登録するか免除するかの判断は人 (家老/所有者) に残る。
@@ -400,6 +419,9 @@ shogun 7 件 (増減なし) / backend 12 件 (+3・いずれも実物の変異�
 
 1. `config/projects.yaml` … system 自身が持つ木の登録簿
 2. **実際に撃った木** … gate_nightly が各 gate を撃つ度に repo-root を記録した一覧
+   ★★2026-07-30 = その記録を書く者が消えた (cmd_1479 / 88aa167)★★ ⇒ 一覧は空のままゆえ、
+   今 点呼を手で撃つと「見ておる木 0 本 = 分母が立たぬ」で **UNDETERMINED** を返す。
+   ★之は盤面が壊れたのではなく、養う者が消えたのである。★
 3. 上記の **submodule** と **親 repo**
 
 **「見ておる」の判定は宣言でなく実績**: gate_nightly は `watched()` で
@@ -451,7 +473,7 @@ TS/JS の網は **cmd_1376** が受け持つ。
 **app 本体は登録検知のみ撃つ (replay は台帳に entry が入るまで撃たぬ)**: app 台帳の
 `mutations:` が空の間 replay を撃つと「台帳 0 件 = **永久 UNDETERMINED**」= 免除より悪い形に
 なる (実測)。⇒ **entry が 1 件でも入った瞬間から gate_nightly が自動で replay も撃つ**
-(cmd_1374b ⑤)。**★これが無いと「何もせぬ entry を1枚置くだけで登録検知が ok REGISTERED と読み、
+(cmd_1374b ⑤)。★2026-07-30 = その門は撤去済ゆえ、この自動の切り替わりは起きない★ (cmd_1479)。**★これが無いと「何もせぬ entry を1枚置くだけで登録検知が ok REGISTERED と読み、
 その紙で免除の返済が作れてしまう」★** (軍師一号の指摘)。紙であれば replay の baseline/mutate が
 UNDETERMINED か FAIL で名指す。
 
@@ -560,6 +582,9 @@ docstring に書いてあった — M6 で同じ抜けを一度やっており**
 
 `--coverage` の締めの行が `幽霊 N 件 (A 別台帳に実在 a / C 真に未登録 c / C? 判別不能 u)` と
 名乗る。照合先は既定で gate_nightly と同じ 4 台帳 (`--peer-registry` で明示も可)。
+★2026-07-30 = 揃える相手 (gate_nightly) は撤去済ゆえ、既定は `peer_registry_paths` が
+唯一の持ち主になった (現に 5 冊を挙げる)。★冊の一覧を持つ所が repo 内に 2 つ在って
+食い違っている★ = `gate_registry_append.py` の `_fallback_books` は 3 冊。正本は未決。
 **verdict は動かしておらぬ** — A も従来どおり FAIL の中に数える。
 **門を静かにする為に数を消す形は禁**ゆえ、割るのは「誰の手番か」を読ませる為だけである。
 

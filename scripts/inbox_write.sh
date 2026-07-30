@@ -308,7 +308,7 @@ export IW_GUARD
 export IW_SAFETY
 
 # cmd_1355 (軍師束ねQC具申R2): fresh clone には .venv が無い — ★警報を「鳴らす経路」自体が
-# 復旧シナリオで落ちると、番人 (idle_revive_scan / gate_nightly) の警報が3回retry後に
+# 復旧シナリオで落ちると、番人 (idle_revive_scan / gate_nightly ★後者は cmd_1479 で撤去済★) の警報が3回retry後に
 # LOST する★。venv 優先・system python3 fallback。限界の正直明示: system python3 に
 # PyYAML が無い環境では依然失敗する (その場合も下の FATAL が大声で落ちる=無言 LOST はせぬ)。
 IW_PYTHON="$SCRIPT_DIR/.venv/bin/python3"

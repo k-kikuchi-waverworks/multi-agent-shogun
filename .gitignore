@@ -138,6 +138,10 @@ plans/**/README.md
 #   = 使い捨ての clone で両側を撃って実測 (台帳を配らぬ木でも [PASS] rc=0・参照抽出の hit 0 件)
 #   = ★台帳 yaml は其の門の網の外に在る (web の台帳も同じく外)★ ⇒ 捕えるのは gate_nightly の
 #     `-f "$ML_REG"` の枝のみ (見えねば UNDETERMINED) ⇒ ★ゆえに此の 1 行を落とすな★。
+#   ★★2026-07-30 cmd_1479 (88aa167) 追記 = 上に挙げた門も枝も、どちらも撤去した★★
+#     (gate_undistributed_tooling.sh / gate_nightly.sh)。
+#     ⇒ ★此の 1 行を落としても、今は誰も名指さぬ★ = 落とすなの理由が「門が捕える」から
+#       「捕える者が居ないゆえ、なお落とすな」へ変わっただけである。★落とすな★。
 !config/mutation_registry.ml.yaml
 !config/artifact_manifests/
 !config/artifact_manifests/*.manifest

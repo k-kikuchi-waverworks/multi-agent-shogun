@@ -718,7 +718,8 @@ _CASES: list[tuple[str, str, str]] = [
     (
         'bash "$SCRIPT_DIR/scripts/inbox_write.sh" karo "$msg" error gate_nightly',
         "ALLOW",
-        "scripts/gate_nightly.sh:72 の実物 — 展開のみで散文なし",
+        "scripts/gate_nightly.sh:72 の実物 (★file は cmd_1479 88aa167 で撤去済・"
+        "呼びの形だけ標本として残す★) — 展開のみで散文なし",
     ),
     (
         'bash "$ROOT_DIR/scripts/inbox_write.sh" "$a" "$msg" task_assigned night_blackout_guard',

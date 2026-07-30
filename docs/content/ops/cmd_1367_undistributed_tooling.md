@@ -5,7 +5,15 @@ description: "whitelist 型 .gitignore で「呼ぶ者は配られるが呼ば�
 
 # cmd_1367 — 配られておらぬ道具の関所と、その網の狭さ
 
-- **道具**: `scripts/gate_undistributed_tooling.sh` (単体実行 / `--selftest` / `gate_nightly.sh` から毎朝)
+> ## ★★退役 (2026-07-30 / cmd_1479 / 88aa167)★★
+>
+> **この文書が説く道具 `scripts/gate_undistributed_tooling.sh` は撤去した。**
+> 呼び手であった `scripts/gate_nightly.sh` も同じ commit で撤去した (cron は cmd_1476 で停止済)。
+> ⇒ **「配られておらぬ道具」を今 自動で見る者は居ない。** 下の実行例は撃てない。
+> ⇒ **文書は残す** — 何を見ていて、何を見ていなかったか (網の狭さ) は、次に建てる者が要る記録ゆえ。
+> ⇒ 建て直すかどうかは殿の裁である (計器を建てるのは起票して裁を待つ仕事・CLAUDE.md)。
+
+- **道具**: ~~`scripts/gate_undistributed_tooling.sh`~~ **(撤去済)** — かつては単体実行 / `--selftest` / `gate_nightly.sh` から毎朝
 - **三値**: PASS=0 / FAIL=1 / UNDETERMINED=2 (観測できなんだ状態を緑に混ぜぬ)
 - **起源**: 足軽五号が「恋の本番を守る唯一の道具が git 追跡外」を発見 (2026-07-26)
 
@@ -170,11 +178,14 @@ runbook 2 / skills 4 / `setup_user_env.sh` / docs 2 — いずれも既定どお
 
 ---
 
-## 7. 走らせ方
+## 7. 走らせ方 — ★撃てない (2026-07-30 / cmd_1479 で撤去済)★
 
 ```bash
+# ★★下の 2 行は今 撃てない (file が無い)★★ — 当時の形の記録として残す
 bash scripts/gate_undistributed_tooling.sh            # 本 repo を検分 (PASS/FAIL/UNDETERMINED)
 bash scripts/gate_undistributed_tooling.sh --selftest # 物差し自身の検分 (16 項目)
 ```
 
-`gate_nightly.sh` が毎朝 06:30 に相乗りで撃ち、非 PASS は家老 inbox へ名指しで警告する。
+かつては `gate_nightly.sh` が毎朝 06:30 に相乗りで撃ち、非 PASS は家老 inbox へ名指しで警告していた。
+★その門も同じ commit (88aa167) で撤去した★ ⇒ **今 撃つ者も、警告を運ぶ者も居ない。**
+戻すなら `git show 88aa167^:scripts/gate_undistributed_tooling.sh` に現物が在る。

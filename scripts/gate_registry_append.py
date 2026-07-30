@@ -51,7 +51,8 @@
 
 使い方:
   python3 scripts/gate_registry_append.py                 # staged の台帳のみ検分 (pre-commit)
-  python3 scripts/gate_registry_append.py --all           # 6 冊すべてを検分 (層A のみ・git 不要)
+  python3 scripts/gate_registry_append.py --all           # 見えている冊すべてを検分 (層A のみ・git 不要)
+                                                          #   ★今は 3 冊★ (6 冊ではない。理由は known_books の註)
   python3 scripts/gate_registry_append.py --count [FILE…] # ★挿した直後に撃つ口 (処方(1))★ 総数と増分を機械に言わせる
   python3 scripts/gate_registry_append.py --registry F    # 冊を明示 (層A)
   python3 scripts/gate_registry_append.py --selftest      # ★負の主張を一度 偽にして赤を見る★
@@ -84,14 +85,30 @@ INSERT_RULE = "★entry は【mutations: list の末尾 = coverage_waivers: の�
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 冊の在処 (出所を1つに = gate_nightly.sh を正本として読む)
+# 冊の在処 (出所を1つに = gate_nightly.sh を正本として読む【つもりだった】)
+#
+# ★★2026-07-30 cmd_1479 (88aa167) 以後、この経路は必ず落ちる★★
+#   正本とした gate_nightly.sh と、それを読む registry_census.py を どちらも撤去した。
+#   ⇒ 下の try は毎回 ImportError で抜け、★常に _fallback_books() の 3 冊だけを見る★。
+#   ⇒ 現に出る名乗り = 「registry_census を借りられなんだ: No module named 'registry_census'」
+#     + UNDETERMINED (rc=2)。★数は 6 冊ではなく 3 冊である★。
+#   ★見えなくなった 3 冊 = 他 repo の中に在る台帳★ (88aa167^ の gate_nightly.sh:103/126/178 が出所):
+#     backend = $HOME/aituber-project/backend/config/mutation_registry.yaml
+#     app     = $HOME/aituber-project/config/mutation_registry.yaml
+#     engine  = ai-automate-engine 側の台帳
+#   ★今も見えている 3 冊 = この repo が抱えている物★ (shogun 本体 / 跨ぎ台帳 web / 跨ぎ台帳 ml)。
+#   ★この形をそのまま残す★= 名乗りを消して 3 冊で緑を出すと、
+#   「6 冊 見た」と読める顔で 3 冊しか見ておらぬ状態になる (= 本 gate が狩ってきた族そのもの)。
+#   ★6 冊へ戻すのは別の仕事★= 冊の一覧を持つ正本を どこへ置くかの決めが要るゆえ、
+#   起票して殿の裁を待つ (自己修正の禁・CLAUDE.md)。
 # ─────────────────────────────────────────────────────────────────────────────
 def known_books() -> tuple[list[Path], str | None]:
-    """gate_nightly.sh が現に撃っておる冊の一覧を返す。★人の記憶で並べぬ★。
+    """冊の一覧を返す。★人の記憶で並べぬ★。
 
-    registry_census.py の read_gate_pairs を借りる (測る術の出所は 1 つ)。
+    ★今は必ず第二項 (借りられなんだ の名乗り) つきで 3 冊が返る★ — 上の註のとおり
+    正本 (gate_nightly.sh) と読み手 (registry_census.py) が撤去済ゆえ。
     借りられなんだ時は ★「借りられなんだ」と名乗って★ 自 repo の 3 冊のみへ落とす
-    (★黙って少ない数で緑を出さぬ★ = 本夜ずっと狩ってきた族)。
+    (★黙って少ない数で緑を出さぬ★ = 2026-07-27 の夜ずっと狩ってきた族)。
     """
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -567,7 +584,9 @@ def selftest() -> int:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="台帳へ追記した entry が黙って呑まれておらぬかを検める (cmd_1409)")
-    ap.add_argument("--all", action="store_true", help="6 冊すべてを層A で検分 (git 不要)")
+    ap.add_argument("--all", action="store_true",
+                    help="見えている冊すべてを層A で検分 (git 不要)。★今は 3 冊 = 6 冊ではない★"
+                         " (正本 gate_nightly.sh 撤去済・known_books の註を読め)")
     ap.add_argument("--registry", action="append", default=[], help="冊を明示 (複数可)")
     ap.add_argument("--count", nargs="*", default=None, help="★挿した直後に撃つ口★ 総数と増分を機械に言わせる")
     ap.add_argument("--selftest", action="store_true")

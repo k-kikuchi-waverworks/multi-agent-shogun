@@ -7,11 +7,14 @@
 #
 # 方針:
 #   gate-1 (--all)    … 登録済み manifest 全件の git 捕捉検分 (数百ms・毎commitで回す)
-#   gate-2 (--sanity) … 変異台帳の形だけ検分 (実行なし・数百ms)。フル再走は cron 側 (gate_nightly.sh)
+#   gate-2 (--sanity) … 変異台帳の形だけ検分 (実行なし・数百ms)。
+#                     ★フル再走を撃つ者は今 居ない★ — 毎朝の gate_nightly.sh は cmd_1479 で撤去した
+#                     (cron 停止 = cmd_1476 / file 削除 = 88aa167)。手で撃つ口だけが残っている:
+#                       python3 scripts/gate_mutation_replay.py   (引数なし = フル再走。--replay は無い)
 #   FAIL(1)         → ★commit を止める★
 #   UNDETERMINED(2) → ★大声で警告するが通す★ (緑ではない。全agent が commit する repo ゆえ
 #                     一過性の未判定で全軍の commit を塞がぬ — cmd_1342 zip 関所の WARN-through と同じ流儀。
-#                     取り零しは gate_nightly.sh が家老へ警告する)
+#                     ★取り零しを後から拾う者も今 居ない★ = 此処で読み流せば誰も気付かぬ)
 #
 # 逃がし口 (隠すな・使ったら理由を commit message へ):
 #   SHOGUN_GATE_SKIP=1 git commit ...
@@ -80,8 +83,9 @@ if [ "$worst" -eq 2 ]; then
     [ "$rc3" -ne 0 ] && printf '%s\n' "$out3"
     [ "$rc4" -ne 0 ] && printf '%s\n' "$out4"
     [ "$rc5" -ne 0 ] && printf '%s\n' "$out5"
-    echo "  gate_nightly.sh (cron) が家老へ警告する。今直せるなら今直せ。"
-    echo "  ★但し gate-4 (台帳の呑まれ) だけは翌朝の門にも見えぬ★ = 此処で直さねば誰も気付かぬ。"
+    echo "  ★この警告を後から拾う者は居ない★ = 毎朝の門 (gate_nightly.sh) は cmd_1479 で撤去した。"
+    echo "  ⇒ 今 読み流せば誰も気付かぬ。今直せるなら今直せ。直せぬなら commit message へ理由を残せ。"
+    echo "  ★gate-4 (台帳の呑まれ) は、手でフル再走を撃っても見えぬ★ = 台帳に載らぬ牙は撃たれもせぬゆえ。"
     echo "════════════════════════════════════════════════════════════════"
     exit 0
 fi

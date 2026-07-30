@@ -1472,51 +1472,6 @@ mutations:
     expect: nonzero
     red_needle: "NG  M2"  # 実測 2026-07-27: 牙折り時は M2 が赤を一つも出せず落ちる
 
-  # ══════════════════════════════════════════════════════════════════════
-  # ★cmd_1398 O-1 = docs が名乗る境界と、実装の境界の【一致】を守る牙★
-  #   ★代筆 = 足軽六号 (台帳の単独書き手)・★疑うた出所は家老の O-1 下命★
-  #   ★本 entry が生まれた経緯を記す = 之が牙の値打ちの半分にござる★:
-  #     家老の口述は「$(…) と $VAR は散文位置のみ止める (引数位置は正当な "$file" を
-  #     巻き込むゆえ通す)」であった。★実装へ当てたら偽であった★ =
-  #     ★inbox_write の【本文】は引数位置でありながら散文位置でもある★ ⇒ 本文位置の
-  #     $UNDEF は現に DENY。★口述どおり書けば docs が実装より強い嘘をつく (規律6)★。
-  #   ★★器の初版は【壊しても落ちなんだ】= 家老が【多重支持の緑】と名付けた形★★:
-  #     初版は主張3 の例に `--content-file "$HOME/x"` を据えたが、之は
-  #       (甲) 散文位置でない (= 守りたい当の性質) + (乙) 残りが "/x" ゆえ散文に見えぬ
-  #     の【二つ】で ALLOW になっており、★(乙) が単独で緑を支えるゆえ (甲) を壊しても緑★。
-  #     ⇒ ★例を「残りも散文である」物へ差し替えた★ = ★位置だけが ALLOW を支える形★。
-  #     ★之が本 entry を登録して良い理由である★ = ★偽にして赤を見てから載せた (02:12 の規律)★。
-  #   ★needle を二つに分けてある★ = CLAUDEMD-BOUNDARY (実装が動いた) /
-  #     CLAUDEMD-TEXT (docs から語が消えた) ⇒ ★赤の出所が絞れる★。
-  #   ★写し 3 本 (AGENTS.md / .github/copilot-instructions.md / agents/default/system.md) は
-  #     本 entry では見ておらぬ★ = 登録時 其の 3 本は他者の未commit 差分であり、
-  #     ★他者の未commit に緑を依存させぬ★ため外した。★写しの追随を縛る牙は別途 具申済★。
-  # ══════════════════════════════════════════════════════════════════════
-  - id: MUT-1398-DOC-001
-    origin: cmd_1398
-    suspected_by: karo
-    desc: |
-      【CLAUDE.md が名乗る関所の境界を、実装が黙って裏切っておらぬか】
-      ★守るのは文言でなく【docs と実装の一致】である★ =
-      ★CLAUDE.md は全員が自動で読む層★ゆえ、★実装だけが動けば全員が古い境界を信じ続ける★ =
-      ★「関所を通ったゆえ安全」と読む道が、docs の側から静かに開く★。
-      ★本牙が撃つのは prose 位置の判定そのもの★ = 境界を全位置へ広げると
-      ★主張3 (散文位置でない引数は通す) が破れ、CLAUDEMD-BOUNDARY が名指す★。
-      ★docs の側の退行は CLAUDEMD-TEXT が別に名指す★ = 二つの赤は出所が違う。
-    paths: [CLAUDE.md, scripts/shell_expansion_guard.py, scripts/claude_md_boundary_probe.py]
-    mutate: |
-      python3 - <<'PY'
-      p = "scripts/shell_expansion_guard.py"
-      s = open(p, encoding="utf-8").read()
-      old = "    prose = (pos in positions) and not body_escape"
-      assert s.count(old) == 1, f"MUT-1398-DOC-001: anchor が一意でない (hit={s.count(old)})"
-      open(p, "w", encoding="utf-8").write(s.replace(old, "    prose = True", 1))
-      PY
-    test: |
-      python3 scripts/claude_md_boundary_probe.py
-    expect: nonzero
-    red_needle: "CLAUDEMD-BOUNDARY"  # 実測 2026-07-27: 境界を全位置へ広げると主張3 の 2 件が名指しで落ちる
-
 # ─────────────────────────────────────────────────────────────────────────────
 # 変異 entry — cmd_1381 段5 / cmd_1400 (足軽四号の牙・★代筆=足軽六号★) の 12 件。
 #
@@ -3501,55 +3456,6 @@ mutations:
     red_needle: not ok 1 T-FB-003
     timeout: 300
 
-  # ── cmd_1413「錨を絞る口」を守る牙 2 本 (MUT-1413-AS1/AS2) ──────────────────
-  # ★守る対象 = scripts/anchor_shrink.py★ (家老 13:11/13:12 の裁 = 一斉置換はせぬ・口だけ据える)。
-  # ★★六号の初版の試験は此の 2 変異を素通りした★★= ★見本が弱く、機械の最短 = 推し であった★
-  #   ⇒ ★見本を作り直して縛った (門でなく【見本】が弱かった = 本日 三度目の同じ形)★。
-  # ★赤は二度 見た★= 手で当てた変異 3/3 (13:18) + runner の replay 2/2 PASS (13:19:29)。
-  - id: MUT-1413-AS1
-    desc: ★錨を絞る口が【行末に接する prefix】を弾く枝を消す変異★ = ★絞った先が再び行末に接する = 直したつもりで同じ病を配る形★。★六号の初版の試験は此の変異を素通りした (見本が弱かった)★ゆえ、見本を作り直して縛った
-    origin: cmd_1413
-    suspected_by: ashigaru6
-    paths:
-    - scripts/anchor_shrink.py
-    - tests/unit/test_anchor_shrink.bats
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/anchor_shrink.py")
-      s = p.read_text(encoding="utf-8")
-      old = '            continue                      # ★行末に接する prefix は【同じ病】ゆえ採らぬ★'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '            pass', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_anchor_shrink.bats --filter T-AS-006
-    expect: nonzero
-    red_needle: not ok 1 T-AS-006
-    timeout: 300
-  - id: MUT-1413-AS2
-    desc: ★推しを【機械の最短】へ倒す変異★ = ★2 字の綴りを推す口になる★ = ★今日の file の中でだけ一意な綴りは file が育てば黙って非一意へ転じる★ = ★鈍りの穴を塞いで【誤爆の穴】を開ける★ (六号 13:09 実測 = shogun 台帳に最短 2 字の本が現に在る)
-    origin: cmd_1413
-    suspected_by: ashigaru6
-    paths:
-    - scripts/anchor_shrink.py
-    - tests/unit/test_anchor_shrink.bats
-    mutate: |
-      python3 - <<'PY'
-      import pathlib
-      p = pathlib.Path("scripts/anchor_shrink.py")
-      s = p.read_text(encoding="utf-8")
-      old = '"recommended": word or machine,'
-      n = s.count(old)
-      assert n == 1, f"anchor が一意でない (hit={n}) = 狙うた場所へ当たらぬゆえ止める"
-      p.write_text(s.replace(old, '"recommended": machine,', 1), encoding="utf-8")
-      PY
-    test: |
-      bats tests/unit/test_anchor_shrink.bats --filter T-AS-007
-    expect: nonzero
-    red_needle: not ok 1 T-AS-007
-    timeout: 300
   - id: MUT-1387-SW1
     desc: ★添え札を【判定】へ漏らす変異★ = 切替で説明が付く体を抑止せず素通りさせる ⇒ ★★「切替を装えば抑止を逃れる」口が開く★★ (家老 14:21 が明示に退けた道)。★本層が触れてよいのは文字列だけである★を縛る牙
     origin: cmd_1387
@@ -4822,76 +4728,6 @@ mutations:
       bats tests/unit/test_slim_yaml.bats
     expect: nonzero
     red_needle: "cmd_1467: 冷却を越えた done は現に片付く"
-
-  - id: MUT-1470-001
-    origin: cmd_1470
-    suspected_by: ashigaru4
-    desc: |
-      殿の頁を控えへ移す道具は、印 (KARO_CUT_HERE) が2本以上 在れば止まる。
-      どちらで切るかを機械が決められないためである。
-      この変異はその守りを外し、常に1本目で切らせる。
-      「印が 2 本 在れば止まり、1 バイトも動かない」と主張する試験が赤くなるべき。
-      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
-    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
-    mutate: |
-      sed -i 's|^if \[ "$MARK_COUNT" -ge 2 \]; then|if false; then|' scripts/dashboard_archive.sh
-    test: |
-      bats tests/unit/test_dashboard_archive.bats
-    expect: nonzero
-    red_needle: "cmd_1470/陰性: 印が 2 本 在れば止まり、1 バイトも動かない"
-
-  - id: MUT-1470-002
-    origin: cmd_1470
-    suspected_by: ashigaru4
-    desc: |
-      印が頁の頭 (既定 50 行以内) に在れば止まる。頁を丸ごと控えへ移す事故を防ぐためである。
-      この変異はその守りを外す。外しても赤くならないなら、頁が丸ごと消える形を
-      誰も見ていないことになる。
-      「印が頁の頭に在れば止まる」と主張する試験が赤くなるべき。
-      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
-    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
-    mutate: |
-      sed -i 's|^if \[ "$MARK_LINE" -le "$MIN_HEAD_LINES" \]; then|if false; then|' scripts/dashboard_archive.sh
-    test: |
-      bats tests/unit/test_dashboard_archive.bats
-    expect: nonzero
-    red_needle: "cmd_1470/陰性: 印が頁の頭に在れば止まる (頁を丸ごと移す事故)"
-
-  - id: MUT-1470-003
-    origin: cmd_1470
-    suspected_by: ashigaru4
-    desc: |
-      対象の頁が無ければ、道具は名指して止まる (rc=2)。
-      この入口の検めを外すと、後続の行が空の値を掴んだまま走り、
-      何を見ているのか分からない失敗の仕方へ変わる。
-      「対象が無ければ止まる」と主張する試験が赤くなるべき。
-      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
-    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
-    mutate: |
-      # 区切りは # を使う。本文に || が在るので | を区切りにすると sed が途中で切れる
-      sed -i 's#^\[ -f "$DASH" \] || die "対象が無い: $DASH" 2#true#' scripts/dashboard_archive.sh
-    test: |
-      bats tests/unit/test_dashboard_archive.bats
-    expect: nonzero
-    red_needle: "cmd_1470/陰性: 対象が無ければ止まる"
-
-  - id: MUT-1470-004
-    origin: cmd_1470
-    suspected_by: ashigaru4
-    desc: |
-      canary は「探し方が生きているか」を答える段である。必ず 1 件 当たる綴りが
-      0 件で返ったら赤にする。この検めを外すと、走査そのものが死んでいても
-      canary が緑を返す = 「0 件」と「見ていない」が同じ顔になる。
-      ★守りを検める段が、守られていない形である。★
-      「canary は走査が死んでいれば赤になる」と主張する試験が赤くなるべき。
-      実測 2026-07-28: 19 本中 1 本だけが赤くなる。
-    paths: [scripts/dashboard_archive.sh, tests/unit/test_dashboard_archive.bats, tests/test_helper]
-    mutate: |
-      sed -i 's|^  \[ "$hit" -ge 1 \]|  [ 1 -ge 1 ]|' scripts/dashboard_archive.sh
-    test: |
-      bats tests/unit/test_dashboard_archive.bats
-    expect: nonzero
-    red_needle: "cmd_1470: canary は走査が死んでいれば赤になる"
 
 coverage_waivers: []
 

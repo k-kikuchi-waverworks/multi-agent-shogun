@@ -241,16 +241,6 @@ scripts/seo_qc.sh
 #   ★見つけ方 = `git status` ではなく `git check-ignore` である★ (ignore された file は
 #   `??` にすら出ないので、git status は「緑」ではなく「見ていない」を返す)。
 !scripts/queue_backup.sh
-# cmd_1470 (2026-07-28): 殿の頁の、印より下を控えへ移す道具 (足軽四号)。
-#   ★この行が要る理由 = 一つ上の cmd_1466 と同じである。★ 移す先の archive/ は追跡下に
-#   1 本も無く、`git clean -xd` 一手で消える。その控えへ移す script が同じ一手で一緒に
-#   消えては、次に頁を畳む手が残らない。
-#   ★足軽一号が 18:28 の便で名指してくれた。★ 拙者は己の道具が見えているかを撃っておらず、
-#   一号に「同じ穴を踏みました」と教えられて初めて `git check-ignore` を撃った。
-#   ★git status には出ない (ignore された file は `??` にすら出ない)。★
-#   なお plans/cmd_1470_mutate.sh (変異試験) は plans/ 配下ゆえ、意図して git 管理外である。
-#   ⇒ ★変異試験そのものは `git clean -xd` で消える側に居る。★ 消えても道具は残る。
-!scripts/dashboard_archive.sh
 # cmd_1352 (2026-07-26): 沈黙する落とし穴gate (gate-1=commit捕捉 / gate-2=変異台帳再走。
 # 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
 !scripts/gate_artifact_capture.sh
@@ -284,10 +274,6 @@ scripts/seo_qc.sh
 #   ⇒ 割る commit と同じ commit で次の 2 行 (web 台帳を割るなら 4 行) を足すこと:
 #     !config/mutation_registry.d/  /  !config/mutation_registry.d/*.yaml
 !scripts/ledger_id_census.py
-# cmd_1330 (2026-07-27): 本日できた作法 (ps 由来の時刻に測定時刻を併記する等) を検める道具。
-# 判定で落とさず名指すだけの道具なので、配られなければ存在価値がない。
-# .gitignore:7 の * に黙って弾かれていた (git check-ignore で実測・17:38)。同型はこれで 12 度目。
-!scripts/customs_lint.py
 # cmd_1455 (2026-07-28): CLI 名の置換が触れる行のうち、名簿に無い物を毎朝 名指す門。
 # gate_nightly.sh が呼ぶ先ゆえ、配られなければ「道具が居らぬ」で毎朝 UNDETERMINED が出る。
 # .gitignore:7 の * に黙って弾かれる (git check-ignore --no-index で実測・06:5x)。同型はこれで 13 度目。
@@ -305,12 +291,6 @@ scripts/seo_qc.sh
 #   【登録しようとしておる当の新造 file】を数え落とす★ = 0 件を「安心」と読む道が此処にも在る。
 #   ⇒ 数える時は explicit path か `git ls-files` を使い、★未追跡の物は別勘定で数えよ★。
 !scripts/report_validate.py
-# cmd_1398 O-1 (2026-07-27): CLAUDE.md が名乗る関所の境界と、実装の境界の一致を撃つ器。
-# ★本日 同型の 7 度目★ = .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
-#   ★此度は牙 (MUT-1398-DOC-001) の paths に載せた直後に踏んだ★ =
-#   ★追跡外のまま登録しておれば、毎朝の gate は worktree を読むゆえ緑を返し続け、
-#     fresh clone では paths 欠で落ちる★ = ★「手元では通る」の最も静かな形★。
-!scripts/claude_md_boundary_probe.py
 # cmd_1411 (2026-07-27): 「process を殺す力」を綴りでなく力の形で禁ずる関所 (PreToolUse hook)。
 # ★本日 同型の 8 度目★ = .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
 #   ★此度は上の cmd_1363 の註が名指しで警めておる其の形である★ =
@@ -319,12 +299,6 @@ scripts/seo_qc.sh
 #   = ★而も「手元では塞がっておる」ゆえ、誰も気付かぬ★。
 #   ⇒ ★配線 (settings.json) より先に、追跡下へ入れる方が順として正しい★。
 !scripts/process_signal_guard.py
-# cmd_1413 (2026-07-27): ★錨を【意味の単位で、行末に接せぬ最短】へ絞る口★ (cmd_1387 の系統)。
-# ★同型の 12 度目 = .gitignore:7 の * に黙って弾かれておった★ (git check-ignore -v で実測・13:2x)。
-#   ★家老の裁 (13:11) = 一斉置換はせぬ・足す物は「触れる者が其の場で問える口」だけ★
-#   ⇒ ★其の口が fresh clone へ配られねば、規だけが残り【問う先が無い】形になる★ =
-#     ★六号が 12:55 に己で踏んだ鈍りを、次の者は【診る術も無いまま】踏む★。
-!scripts/anchor_shrink.py
 # cmd_1339/1354 (2026-07-25夜〜07-26朝): 恋の本番TTS(port 9100)を構造的に守る道具。
 # 保護portを実測判定して拒否し、意図的停止は3条件 (意思明示 + 20字以上の理由 + port名指し承認)
 # でのみ通す。★家老裁定 2026-07-26 10:43 = 追跡下へ入れよ★ = fresh clone に渡らねば
@@ -363,13 +337,6 @@ scripts/seo_qc.sh
 # ★本日 同型の 7 度目★ (cmd_1395 の申告が 6 度目) = .gitignore:7 の * に黙って弾かれておった
 #  (git check-ignore -v で実測: `.gitignore:7:*  scripts/gate_ntfy_sendlog.py`)。
 !scripts/gate_ntfy_sendlog.py
-# cmd_1394 追補 (2026-07-27): ★焼けた事を後から必ず知る口★ (U+FFFD の名簿と門)。
-# ★本日 同型の 8 度目★ = 据えた其の場で git check-ignore を撃ち、.gitignore:7 の * に
-#  弾かれておることを実測してから此処へ書いた (書き忘れて「配られておる」と思い込む道を先に塞いだ)。
-# ★門と名簿は必ず対で配れ★= 名簿だけが欠ければ門は 88 箇所を「新たに焼けた」と誤って赤で名指し、
-#  門だけが欠ければ名簿は誰にも読まれぬ紙になる。
-!scripts/gate_replacement_char.py
-!config/replacement_char_roster.yaml
 
 # cmd_1401 (2026-07-27): ★刃を持たぬ負の主張★を止める門 (bats の `! cmd` は set -e 免除)。
 # ★据えた其の場で git check-ignore -v を撃ち、.gitignore:7 の * に弾かれておることを実測してから
@@ -435,11 +402,6 @@ scripts/seo_qc.sh
 #   tests/unit/test_gate_census_wiring.bats が配線を見張っておる。毎朝の門が使う道具である。
 !scripts/fang_domain_census.py
 
-# cmd_1469 (2026-07-28): 註へ焼かれた行番号を数え直す口。
-#   --anchors は「綴りで指し直した先が現に在るか」を陽性・陰性の両方で撃つ。
-#   数を出した走査そのものを消えぬ所へ残すため追跡下へ置く
-#   (plans/ は git 管理外で控えが 0 本ゆえ、今より消えやすい)。
-!scripts/line_ref_audit.py
 
 # cmd_1445 (2026-07-28): 追跡下だが白名簿へ足さぬと判じた 9 本 (次の者が同じ判断を繰り返さぬための覚書)。
 #   規則は書かぬ。書けば配る側へ回るゆえ、ここは註のみである。

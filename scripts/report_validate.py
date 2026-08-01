@@ -81,7 +81,13 @@ Usage:
     report_validate.py <report.yaml> [...]   # 手検め (exit 0=PASS / 1=FAIL)
     report_validate.py --selftest            # 変異試験 (己の牙が立っておるかを己で検める)
     report_validate.py --liveness            # ★門が現に走っておる pane を数える★
+    report_validate.py --stats               # 門が止めた回数・機械が刻を入れた回数 (cmd_1567)
     (引数なし + stdin JSON)                  # PostToolUse hook 経路
+
+★刻は機械が入れる (cmd_1567)★
+    報告の timestamp は書き手が書く欄ではない。hook 経路で、検める前に機械が入れる。
+    timestamp の行が無い / timestamp: AUTO → 入れる  ・  数字が既に在る → 触らない。
+    入れた事は必ず書き手の画面へ出す (黙って書き換えない)。詳しくは stamp_text の註。
 """
 
 from __future__ import annotations
@@ -689,6 +695,288 @@ def render_warn(path: pathlib.Path, warnings: list[str]) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════
+# 刻を機械が入れる (cmd_1567) — 報告の timestamp を、書き手の手から外す
+#
+# なぜ要るか (2026-08-01 の実測)
+#   足軽三号が報告の刻に 16:05 と書いた。撃つと 15:55 だった (10分 先)。
+#   足軽五号も数分後に同じ 16:05 を書いた (三号の報告を読む前)。軍師二号も同日、
+#   分単位に丸めて 2分16秒 先へ倒れた。3人とも下の R5e に名指されて直った。
+#   人は3人とも素通りしている。
+#   ⇒ 殿の裁 = 「時刻を人に書かせず、機械が入れる。人に注意を促す形にしない」。
+#     ゆえに門を増やさず、警告も足さない。人が書く欄そのものを無くす。
+#
+# 何をするか
+#   timestamp の行が無い / timestamp: AUTO (値が空も同じ) → その場の時計を入れる
+#   数字が既に書いてある                                   → 触らない
+#
+#   3つめが要る理由は2つ。
+#     ① 家老 12:02 の裁「門は上書きしない」を壊さないため。書き手が現に書いた値を
+#        消すと、間違いも一緒に消える (R5e の註と同じ理屈)。
+#     ② 移行がこれ1つで済むため。hook は session 開始時の snapshot ゆえ、配線を
+#        替えても既に開いている session には効かない (cmd_1395 の実測)。
+#        数字が在れば触らない形なら、古い session が手で書き続けても壊れない。
+#
+# 黙って書き換えない (家老 19:52 の条件)
+#   入れた事と、入れた先の document を必ず書き手の画面へ出す。理由は 2026-08-01 に
+#   我らが1日 潰し続けたのが「道具が黙って何かをする」形だったため。黙って0を返す・
+#   黙って古い姿を返す・黙って34%を落とす。刻を黙って入れる道具はその仲間になる。
+#
+# YAML を parse して dump し直さない
+#   行単位の置換だけにする。yaml.dump の全書き換えは block scalar (|) を現に壊した
+#   実績がある (台帳 shogun_to_karo.yaml)。報告本文は block scalar だらけである。
+#
+# この口が見ないもの (射程)
+#   ・block scalar の中身は鍵として読まない = 本文に書かれた "timestamp:" は触らない
+#   ・"timestamp: AUTO  # 註" のように註が付いた形は置き換えない (値が AUTO 単体でない)
+#   ・複数行にまたがる引用符つき文字列の中は見分けていない
+# ══════════════════════════════════════════════════════════════════════════
+STAMP_KEYS = ("task_id", "primary_task")  # 挿す時の目印 = 読み手が探す鍵と同じ物
+
+# 鍵の行。`- ` 始まりの list 要素の中の鍵も拾う。
+_KEY_LINE_RE = re.compile(r"^(\s*)(?:-\s+)?([A-Za-z_][A-Za-z0-9_.-]*)\s*:(?:\s+(.*))?\s*$")
+# block scalar を開く行 (`key: |` `key: >-` `key: |2` など)
+_BLOCK_OPEN_RE = re.compile(r"^[|>][+-]?\d*\s*(?:#.*)?$")
+
+
+def _iter_marks(lines: list[str]):
+    """行を上から見て (行番号, 種, 字下げ, 鍵, 値) を返す。
+
+    種 = "key" (鍵の行) / "block" (block scalar を開く行) / "docsep" (--- の行)。
+    block scalar の中身は飛ばす = 本文に書かれた "timestamp:" を鍵と読み違えないため。
+    """
+    i, n = 0, len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.strip()
+        if stripped == "---" or stripped.startswith("--- "):
+            yield (i, "docsep", 0, None, None)
+            i += 1
+            continue
+        m = _KEY_LINE_RE.match(line)
+        if not m:
+            i += 1
+            continue
+        indent, key, raw = len(m.group(1)), m.group(2), (m.group(3) or "").strip()
+        if _BLOCK_OPEN_RE.match(raw):
+            yield (i, "block", indent, key, raw)
+            j = i + 1
+            # 中身 = 空行、または開いた鍵より深い字下げの行
+            while j < n and (not lines[j].strip()
+                             or len(lines[j]) - len(lines[j].lstrip()) > indent):
+                j += 1
+            i = j
+            continue
+        yield (i, "key", indent, key, raw)
+        i += 1
+
+
+def _is_placeholder(value: str) -> bool:
+    """書き手が「機械が入れてください」と書いた形か。空欄も同じ扱い。"""
+    v = value.strip()
+    if v[:1] in ("'", '"') and v[-1:] == v[:1] and len(v) >= 2:
+        v = v[1:-1].strip()
+    return v.lower() in ("", "auto")
+
+
+def stamp_text(text: str, now_str: str) -> tuple[str, list[dict]]:
+    """本文へ刻を入れる。返り = (直した本文, 入れた先の記録)。
+
+    記録が空 = 何も触っていない。行単位の置換と挿入だけで、他の行は1 byte も動かさない。
+    """
+    lines = text.split("\n")
+    marks = list(_iter_marks(lines))
+
+    bounds, start = [], 0
+    for i, kind, *_ in marks:
+        if kind == "docsep":
+            bounds.append((start, i))
+            start = i + 1
+    bounds.append((start, len(lines)))
+
+    records: list[dict] = []
+    inserts: list[tuple[int, str]] = []
+    for doc_no, (lo, hi) in enumerate(bounds):
+        keys = [m for m in marks if lo <= m[0] < hi and m[1] == "key"]
+        if not keys:
+            continue
+        tid = next((v for _i, _k, _ind, k, v in keys if k in STAMP_KEYS), None)
+        ts_lines = [m for m in keys if m[3] == "timestamp"]
+        if ts_lines:
+            for (i, _kind, indent, _k, v) in ts_lines:
+                if not _is_placeholder(v):
+                    continue  # 数字が在る = 触らない (家老 12:02 の裁)
+                lines[i] = f"{' ' * indent}timestamp: '{now_str}'"
+                records.append({"doc": doc_no, "task_id": tid,
+                                "action": "replaced", "line": i + 1})
+        else:
+            anchor = next((m for m in keys if m[3] in STAMP_KEYS), None)
+            if anchor is None:
+                continue  # 目印が無い = 読み手からも見えぬ document ゆえ触らない
+            inserts.append((anchor[0] + 1, f"{' ' * anchor[2]}timestamp: '{now_str}'"))
+            records.append({"doc": doc_no, "task_id": tid,
+                            "action": "inserted", "line": anchor[0] + 2})
+    for pos, s in sorted(inserts, reverse=True):
+        lines.insert(pos, s)
+    return "\n".join(lines), records
+
+
+def stamp_file(path: pathlib.Path, now_str: str | None = None,
+               stamper=None) -> list[dict]:
+    """report file へ刻を入れる。返り = 入れた先の記録 (空 = 何もしていない)。
+
+    stamper = stamp_text を差し替える口。試験が「入れる口を止めた時に落ちるか」を
+    撃つために要る (S4)。書き込みは temp を書いて os.replace = 途中で死んでも
+    半端な file を残さない。失敗しても書き手は止めない (fail-OPEN・黙らない)。
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"[report_validate] WARN: 刻を入れる前に読めませんでした — 続けます: {exc}",
+              file=sys.stderr)
+        return []
+    stamp_at = now_str or _now_naive_local().isoformat(timespec="seconds")
+    try:
+        new_text, records = (stamper or stamp_text)(text, stamp_at)
+    except Exception as exc:  # fail-OPEN (loud)
+        print(f"[report_validate] WARN: 刻を入れる口が落ちました — 続けます: {exc}",
+              file=sys.stderr)
+        return []
+    if not records or new_text == text:
+        return []
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", dir=str(path.parent),
+                prefix=path.name + ".", suffix=".tmp", delete=False) as f:
+            tmp_name = f.name
+            f.write(new_text)
+        os.replace(tmp_name, path)
+        tmp_name = None
+    except Exception as exc:  # fail-OPEN (loud) — 書けなければ元のまま残す
+        print(f"[report_validate] WARN: 刻を書き込めませんでした — 元のまま続けます: {exc}",
+              file=sys.stderr)
+        if tmp_name:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+        return []
+    for r in records:
+        r["value"] = stamp_at
+    return records
+
+
+def render_stamp(path: pathlib.Path, records: list[dict]) -> str:
+    """入れた事を書き手の画面へ出す。黙って書き換えない (家老 19:52 の条件)。"""
+    head = (f"[report_validate] 報告の刻を機械が入れました — {path}\n"
+            "timestamp は書き手が書く欄ではありません。入れた先は次のとおりです。")
+    body = [
+        "  document[{doc}] task_id={tid!r} {how} ({line}行目) → timestamp: '{val}'".format(
+            doc=r["doc"], tid=r.get("task_id"), line=r["line"], val=r.get("value"),
+            how=("欄が無かったので挿しました" if r["action"] == "inserted"
+                 else "AUTO を置き換えました"))
+        for r in records
+    ]
+    tail = ("  意図しない document へ入っていたら、その場で直してください。\n"
+            "  数字が既に書いてある欄には触っていません (家老 12:02 の裁)。")
+    return "\n".join([head] + body + [tail])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 数を残す (cmd_1567) — 門が止めた回数を積み上げる
+#
+# なぜ要るか (軍師二号の指摘・現物で確かめた)
+#   これまで残っていたのは心拍 file 1本だけで、中身は「最後に走った刻と pid」。
+#   走ったかは分かるが、何回 止めたかは分からない。2026-08-01 に「3人が踏んだ」を
+#   家老が知れたのは、3人が自分から申告したからである。申告しなければ誰も知らない。
+#
+# 数えられる物と、数えられない物
+#   数えられる = 鳴った回数 (どの規則が・誰の書き込みで) と、機械が刻を入れた回数
+#   数えられない = 「直った」回数。鳴ったのは書き込みの瞬間で、その後 書き手が
+#     直したかは別の事象である。ここでは数えない。残しておけば後から数え直せる。
+# ══════════════════════════════════════════════════════════════════════════
+JOURNAL_NAME = "queue/.report_guard_journal.jsonl"
+_RULE_CODE_RE = re.compile(r"^\[([A-Za-z0-9]+)\]")
+
+
+def journal_path() -> pathlib.Path:
+    return _SCRIPTS_DIR.parent / JOURNAL_NAME
+
+
+def rule_codes(messages: list[str]) -> list[str]:
+    """名指しの文面から規則の名 (R1・R5e など) だけを採る。"""
+    out = []
+    for m in messages:
+        hit = _RULE_CODE_RE.match(m.strip())
+        if hit and hit.group(1) not in out:
+            out.append(hit.group(1))
+    return out
+
+
+def journal_append(entry: dict, path=None) -> bool:
+    """追記のみ。失敗しても書き手は止めない (fail-OPEN・黙らない)。"""
+    p = pathlib.Path(path) if path else journal_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return True
+    except Exception as exc:
+        print(f"[report_validate] WARN: 数を残せませんでした — 続けます: {exc}",
+              file=sys.stderr)
+        return False
+
+
+def stats(path=None) -> int:
+    """積み上げた数を読む。file が無い事と 0件 は分けて出す。"""
+    p = pathlib.Path(path) if path else journal_path()
+    print(f"=== report_validate が止めた数 ({p}) ===")
+    if not p.is_file():
+        print("  まだ1行も在りません (file 自体が無い = 0件とは違います)。")
+        print("  配線した後、誰かが報告を書けば1行目が入ります。")
+        return 1
+    rows = []
+    broken = 0
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            broken += 1
+    if not rows:
+        print(f"  0件です (file は在りますが、読める行が在りません。読めない行={broken})。")
+        return 0
+    by_rule: dict[str, int] = {}
+    by_writer: dict[str, int] = {}
+    stamped_docs = 0
+    stamped_writes = 0
+    for r in rows:
+        for code in r.get("rules") or []:
+            by_rule[code] = by_rule.get(code, 0) + 1
+        w = r.get("writer") or "?"
+        if r.get("rules"):
+            by_writer[w] = by_writer.get(w, 0) + 1
+        n = len(r.get("stamped") or [])
+        if n:
+            stamped_writes += 1
+            stamped_docs += n
+    fired = sum(1 for r in rows if r.get("rules"))
+    print(f"  書き込み {len(rows)} 回 (最初={rows[0].get('at')} / 最後={rows[-1].get('at')})"
+          + (f" / 読めない行={broken}" if broken else ""))
+    print(f"  門が鳴った書き込み = {fired} 回")
+    for code, n in sorted(by_rule.items(), key=lambda kv: (-kv[1], kv[0])):
+        print(f"    {code}: {n} 回")
+    if by_writer:
+        print("  書き手ごと: " + " / ".join(
+            f"{w}={n}" for w, n in sorted(by_writer.items(), key=lambda kv: -kv[1])))
+    print(f"  機械が刻を入れた書き込み = {stamped_writes} 回 (document {stamped_docs} 個)")
+    print("  これは鳴った回数であって、直った回数ではありません。")
+    print("  鳴ったのは書き込みの瞬間で、その後 書き手が直したかは別の事象です。")
+    return 0
+
+
+# ══════════════════════════════════════════════════════════════════════════
 # 変異試験 — ★己の門を己で壊して検める★ (「書いたから効く」は本夜 三度 破られておる)
 # ══════════════════════════════════════════════════════════════════════════
 _HEALTHY = (
@@ -1030,7 +1318,137 @@ def _cases() -> list[tuple[str, str, str | None, str | None]]:
 #   ⇒ 「族がここに在るべし」を ★data として宣言し、走った後に照合する★。
 #   ★之で消えるのは【黙って消える形】だけである★= 下の表から名を消せば依然として外せる。
 #   而して其の時は ★何を捨てたかを明示して消す★ことになる (条6 = 射程を名乗る)。
-REQUIRED_FAMILIES = ("B1", "B2", "B3", "B3n", "B6", "L0", "L5", "L6", "L7", "N3")
+REQUIRED_FAMILIES = ("B1", "B2", "B3", "B3n", "B6", "L0", "L5", "L6", "L7", "N3",
+                     "S1", "S1n", "S2", "S3", "S4", "S5", "S6")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# S 系 (cmd_1567) = 刻を入れる口を、壊して落ちるか検める
+#
+# 本体は S4 である。入れる口を止めた時に S1/S2 が落ちなければ、この試験は
+# 何も証していないので捨てる。
+#
+# 現物の queue/reports/ へは 1 byte も書かない。file が要る検め (S6) は temp dir で
+# 撃ち、stem も現物の帳面に無い名を使う (条C = 試験の作り物を門の母数へ入れない)。
+#
+# この試験が見ないもの (射程を名乗る)
+#   ・S4 が止めるのは stamp_text ごと差し替える変異までである。stamp_text の中の
+#     置換1行だけを消す変異は、S1/S2 が現に落ちるので捕まるが、S4 の名では出ない
+#   ・hook_main が stamp_file を呼ぶ配線そのものは S6 が順序で撃つ
+# ══════════════════════════════════════════════════════════════════════════
+_S_NOW = "2026-08-01T20:00:00"
+_S_AUTO = "report:\n  task_id: subtask_9567\n  status: done\n  timestamp: AUTO\n"
+_S_REAL = ("report:\n  task_id: subtask_9567\n  status: done\n"
+           "  timestamp: '2026-08-01T10:00:00'\n")
+_S_NONE = "report:\n  task_id: subtask_9567\n  status: done\n"
+# 本文の中に "timestamp:" と "task_id:" を持つ block scalar。ここを触れば S3 が赤くなる。
+#
+# ★本文の行は「timestamp: AUTO」そのものにする★ (2026-08-01・私が現に踏んだ)
+#   初版の本文は「timestamp: AUTO と本文に書いてあります」であった。この形だと
+#   値が AUTO 単体でないので、block scalar を飛ばす口を殺す変異 (V4) を撃っても
+#   置き換えが起きず、S3 は緑のまま生き残った。
+#   = 試験が「本文を鍵と読む」と「本文を書き換える」を区別できていなかった。
+#   足軽四号 15:33 の学び (試験そのものが区別すべき2つを同じ物にしている) と同じ形である。
+_S_BLOCK = ("report:\n  task_id: subtask_9567\n  timestamp: AUTO\n"
+            "  headline: |\n    timestamp: AUTO\n"
+            "    task_id: にせもの\n")
+
+
+def _stamp_checks(stamper) -> list[tuple[str, bool, str]]:
+    """S1/S2 の判定を1つの口へ集める。★S4 が同じ口を no-op で撃つために要る★。"""
+    out = []
+
+    new_auto, rec_auto = stamper(_S_AUTO, _S_NOW)
+    ok1 = (len(rec_auto) == 1 and rec_auto[0]["action"] == "replaced"
+           and f"timestamp: '{_S_NOW}'" in new_auto and "AUTO" not in new_auto)
+    out.append(("S1", ok1,
+                f"AUTO の欄へ刻が入った (記録={len(rec_auto)}件)" if ok1 else
+                f"AUTO の欄へ刻が入っていない (記録={len(rec_auto)}件)"))
+
+    new_none, rec_none = stamper(_S_NONE, _S_NOW)
+    view = reader_view(new_none) or []
+    ok2 = (len(rec_none) == 1 and rec_none[0]["action"] == "inserted"
+           and bool(view) and view[0].get("timestamp") == _S_NOW
+           and "  timestamp:" in new_none)
+    out.append(("S2", ok2,
+                "欄が無い document へ挿さり、読み手の高さから見えた" if ok2 else
+                f"挿さっていない/読み手から見えない (記録={len(rec_none)}件・"
+                f"読み手が見た刻={view[0].get('timestamp') if view else None!r})"))
+    return out
+
+
+def stamp_selftest() -> tuple[bool, list[str]]:
+    """S1〜S6。返り = (赤でないか, 印字する行)。"""
+    lines: list[str] = []
+    ok = True
+
+    # ── S1 / S2 = 入れる口が現に効くか (陽性) ──
+    for name, passed, why in _stamp_checks(stamp_text):
+        ok = ok and passed
+        lines.append(f"  {'ok ' if passed else 'NG '} {name} {why}")
+
+    # ── S1n = 数字が既に在る時は 1 byte も動かさない (負の対照・今の裁の要) ──
+    new_real, rec_real = stamp_text(_S_REAL, _S_NOW)
+    passed = (not rec_real) and new_real == _S_REAL
+    ok = ok and passed
+    lines.append(f"  {'ok ' if passed else 'NG '} S1n 数字が在る欄は触らない "
+                 + ("(本文が 1 byte も動いていない)" if passed else
+                    f"★上書きしている★ (記録={len(rec_real)}件)"))
+
+    # ── S3 = block scalar の中身を鍵と読み違えない ──
+    new_block, rec_block = stamp_text(_S_BLOCK, _S_NOW)
+    body_kept = ("    timestamp: AUTO\n" in new_block
+                 and "    task_id: にせもの" in new_block)
+    passed = (len(rec_block) == 1 and body_kept
+              and new_block.count(f"timestamp: '{_S_NOW}'") == 1)
+    ok = ok and passed
+    lines.append(f"  {'ok ' if passed else 'NG '} S3 block scalar の中身は触らない "
+                 + ("(本文の 2 行はそのまま・入れたのは鍵の 1 箇所だけ)" if passed else
+                    f"★本文を触った/数が合わない★ (記録={len(rec_block)}件・本文保存={body_kept})"))
+
+    # ── S4 = ★本体★ 入れる口を止めれば S1/S2 が落ちるか ──
+    #   落ちなければ S1/S2 は何も証していないので、その時は試験ごと捨てる。
+    def _noop(text, _now):
+        return text, []
+    survived = [n for n, passed, _w in _stamp_checks(_noop) if passed]
+    passed = not survived
+    ok = ok and passed
+    lines.append(f"  {'ok ' if passed else 'NG '} S4 入れる口を止めると S1/S2 が落ちる "
+                 + ("(変異で現に赤くなった)" if passed else
+                    f"★{survived} が緑のまま生き残った = S1/S2 は何も証していない★"))
+
+    # ── S5 = 数を残せない時でも書き手を止めない ──
+    with tempfile.TemporaryDirectory() as td:
+        d = pathlib.Path(td)
+        good = d / "j.jsonl"
+        wrote = journal_append({"at": _S_NOW, "probe": True}, path=good)
+        n_lines = len(good.read_text(encoding="utf-8").splitlines()) if good.is_file() else 0
+        blocked = d / "notadir"
+        blocked.write_text("file であってディレクトリではありません\n", encoding="utf-8")
+        failed = journal_append({"at": _S_NOW}, path=blocked / "j.jsonl")
+    passed = (wrote and n_lines == 1 and failed is False)
+    ok = ok and passed
+    lines.append(f"  {'ok ' if passed else 'NG '} S5 数は 1 行 増え、書けない時は False を返して落ちない "
+                 + (f"(書けた={wrote}/行={n_lines}/書けない時={failed})" if passed else
+                    f"★{wrote=} {n_lines=} {failed=}★"))
+
+    # ── S6 = 順序。刻を入れてから検める (逆なら R5b が鳴る) ──
+    #   現物の queue/reports/ へは書かない。stem も現物の帳面に無い名を使う。
+    with tempfile.TemporaryDirectory() as td:
+        p = pathlib.Path(td) / "zz_stamp_probe_report.yaml"
+        p.write_text(_S_NONE, encoding="utf-8")
+        before = warn_file(p)
+        recs = stamp_file(p, now_str=_S_NOW)
+        after = warn_file(p)
+    hit_before = any("[R5b]" in g for g in before)
+    hit_after = any("[R5b]" in g for g in after)
+    passed = hit_before and not hit_after and len(recs) == 1
+    ok = ok and passed
+    lines.append(f"  {'ok ' if passed else 'NG '} S6 入れる前は R5b が鳴り、入れた後は黙る "
+                 + (f"(file へ現に書き込めた・記録={len(recs)}件)" if passed else
+                    f"★入れる前={hit_before}(True の筈) / 入れた後={hit_after}(False の筈) / "
+                    f"記録={len(recs)}件★"))
+    return ok, lines
 
 
 def selftest() -> int:
@@ -1134,6 +1552,12 @@ def selftest() -> int:
     live_ok, live_lines = live_wiring()
     ok = ok and live_ok
     for _line in live_lines:
+        say(_line)
+
+    # ★S 系 (cmd_1567) = 刻を入れる口を壊して検める★ (本体は S4)
+    stamp_ok, stamp_lines = stamp_selftest()
+    ok = ok and stamp_ok
+    for _line in stamp_lines:
         say(_line)
 
     for name, text, stem, needle in _cases():
@@ -1477,11 +1901,32 @@ def hook_main() -> int:
         print(f"[report_validate] WARN: slim_yaml の除外表を借りられぬ = R2 が効いておらぬ:"
               f" {BORROW_ERROR}", file=sys.stderr)
 
+    # ★刻は検める前に入れる★ (cmd_1567) = 入れた後の姿を R5b/R5e が見る。
+    #   逆順にすると、機械が入れた刻について R5b が鳴る (S6 が此の順序を撃つ)。
+    stamped = stamp_file(path)
+
     problems = validate_file(path)
     warnings = warn_file(path)
-    if not problems and not warnings:
+
+    # ★数を残す★ (cmd_1567) = 鳴った回数が積み上がる。書き手の申告に依らない。
+    try:
+        rel = str(path.relative_to(_SCRIPTS_DIR.parent))
+    except ValueError:
+        rel = str(path)
+    journal_append({
+        "at": _now_naive_local().isoformat(timespec="seconds"),
+        "writer": path.stem.replace("_report", ""),
+        "path": rel,
+        "rules": rule_codes(problems) + rule_codes(warnings),
+        "stamped": [{"doc": r["doc"], "task_id": r.get("task_id"),
+                     "action": r["action"], "value": r.get("value")} for r in stamped],
+    })
+
+    if not problems and not warnings and not stamped:
         return 0
     out = []
+    if stamped:
+        out.append(render_stamp(path, stamped))
     if problems:
         out.append(render(path, problems))
     if warnings:
@@ -1500,6 +1945,8 @@ def main() -> int:
         return selftest()
     if "--liveness" in args:
         return liveness()
+    if "--stats" in args:
+        return stats()
     if not args:
         return hook_main()
 

@@ -49,6 +49,24 @@ LEGACY_BACKUP_DIR="$DATA_HOME/multi-agent-shogun/queue_backup"
 # 保持本数。30 分ごとに取るなら 48 本 = 約 24 時間 前まで戻せる
 KEEP="${QUEUE_BACKUP_KEEP:-48}"
 
+# plans/ の写し先 (cmd_1588・2026-08-02 殿の裁「含めていいよ」)。
+#
+# ■ なぜ tar へ同梱せず、別に鏡を置くか
+#   plans/ は 3,983 本 / 375 MB あり、tar.gz にすると 188 MB・14 秒 掛かる。
+#   30 分ごとに 48 本 保つと、ほぼ同じ中身の 188 MB が 48 本 = 約 9 GB になる。
+#   rsync の差分なら 2 回目以降は 4 秒・数 KB で済む (実測 2026-08-02 20:08)。
+#   queue/ の控えは「git clean -xd で消える」に備える物で、速さが値打ちである。
+#   そこへ 14 秒を足すのは割に合わない。
+#
+# ■ なぜ --delete を付けないか
+#   元から消えた稿を、鏡からも消してしまう。控えとしては逆である。
+#   ゆえに足すだけにする。鏡は元より増えることはあっても減らない。
+#
+# ■ なぜ git へ入れないか
+#   CLAUDE.md が plans/ の commit を禁じている (OSS 本家へ出るため)。控えは D: 側だけで取る。
+PLANS_MIRROR="${PLANS_MIRROR_DIR:-/mnt/d/backup/multi-agent-shogun/plans}"
+RSYNC=/usr/bin/rsync
+
 TAR=/usr/bin/tar
 FIND=/usr/bin/find
 GREP=/usr/bin/grep
@@ -204,6 +222,8 @@ cmd_backup() {
   # 置き場の drive が現に mount されているかを、書く前に見る
   require_mount "$BACKUP_DIR"
 
+  printf 'plans の鏡 = %s (足すだけ・消さない)\n' "$PLANS_MIRROR"
+
   if [ "$dry" = "--dry-run" ]; then
     printf '乾式ゆえ 1 バイトも書かない\n'
     return 0
@@ -265,11 +285,56 @@ cmd_backup() {
     printf '保持 %s 本以内 (今 %s 本)。消す物は無い\n' "$KEEP" "$total"
   fi
 
+  # plans/ の鏡を更新する。ここで落ちても queue/ の控えは既に出来ているので、
+  # 全体を落とさず、落ちたことだけ名乗って先へ進む。
+  mirror_plans
+
   # ★ここが最後である。ここより後に処理を足さないこと★ (cmd_1465 の丙)
   #   走り畢えた刻を 1 行 残す。log の更新時刻は途中で死んでも動くので証にならない。
   #   軍師二号が「落ちた時に気付く口が log だけ」と名指した所を、これで塞ぐ。
   #   書く場所は $QUEUE_STAMP_DIR で差し替えられる (試験が本番の証を汚さないため)。
   write_end_stamp
+  return 0
+}
+
+# plans/ を D: へ写す。足すだけで、鏡からは 1 バイトも消さない。
+#
+# この鏡が守る物 = 殿へお出しした数の裏付けである。
+#   155日/190本/25MiB・813件中790件・pool 243/257・段Aの640本 — どれも根拠は plans/ の中にしか無い。
+#   plans/ は git の追跡外 (CLAUDE.md が commit を禁じている)・queue_backup の tar にも入っておらず、
+#   2026-08-02 まで C: 一枚の上にしか存在しなかった。
+mirror_plans() {
+  local src="$REPO/plans"
+  if [ ! -d "$src" ]; then
+    printf 'plans/ が無いので鏡は更新しない\n'
+    return 0
+  fi
+  if [ ! -x "$RSYNC" ]; then
+    printf '⚠ rsync が無く plans/ の鏡を更新できない (%s)\n' "$RSYNC" >&2
+    return 0
+  fi
+  # 置き場の drive が現に mount されているかを、書く前に見る。
+  # ここを飛ばすと、D: が落ちている時に WSL の root (= C: の中の vhdx) へ静かに落ちる。
+  require_mount "$PLANS_MIRROR"
+  mkdir -p "$PLANS_MIRROR" || { printf '⚠ 鏡の置き場を作れない: %s\n' "$PLANS_MIRROR" >&2; return 0; }
+
+  local out
+  out="$($RSYNC -a --stats "$src/" "$PLANS_MIRROR/" 2>&1)"
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '⚠ plans/ の鏡の更新が落ちた (rsync rc=%s)。queue/ の控えは出来ている\n' "$rc" >&2
+    return 0
+  fi
+  # 「写した」と「現に在る」は別なので、両側を数えて並べる
+  local n_src n_dst
+  n_src=$($FIND "$src" -type f 2>/dev/null | $GREP -c .)
+  n_dst=$($FIND "$PLANS_MIRROR" -type f 2>/dev/null | $GREP -c .)
+  printf 'plans の鏡    : %s (元 %s 本 / 鏡 %s 本・今回 %s 本 写した)\n' \
+    "$PLANS_MIRROR" "$n_src" "$n_dst" \
+    "$(printf '%s' "$out" | $AWK -F': *' '/Number of regular files transferred/{print $2}')"
+  if [ "$n_dst" -lt "$n_src" ]; then
+    printf '⚠ 鏡の本数が元より少ない。写し切れていない公算\n'
+  fi
   return 0
 }
 
@@ -366,6 +431,34 @@ cmd_verify() {
       printf '⚠ 赤: %s が控えの中に無い\n' "$p"; rc=1
     fi
   done
+
+  # plans/ の鏡も「在る」でなく「現に戻せる」で見る。
+  # tar と違い鏡は開く手間が無いので、本数を並べて 1 本 中身を突き合わせる。
+  printf '\n--- plans の鏡 ---\n'
+  if [ ! -d "$PLANS_MIRROR" ]; then
+    printf '⚠ 赤: 鏡が無い: %s\n' "$PLANS_MIRROR"; rc=1
+  else
+    local ps pd
+    ps=$($FIND "$REPO/plans" -type f 2>/dev/null | $GREP -c .)
+    pd=$($FIND "$PLANS_MIRROR" -type f 2>/dev/null | $GREP -c .)
+    printf '元 %s 本 / 鏡 %s 本\n' "$ps" "$pd"
+    [ "$pd" -ge "$ps" ] || { printf '⚠ 赤: 鏡の方が少ない。写し切れていない\n'; rc=1; }
+
+    # 1 本 取り出して中身を突き合わせる。最も新しい物を選ぶ
+    # (最後に写した分が届いているかが、いちばん知りたい所ゆえ)。
+    local newest rel
+    newest=$($FIND "$REPO/plans" -type f -printf '%T@ %p\n' 2>/dev/null | $SORT -rn | /usr/bin/head -1 | /usr/bin/cut -d' ' -f2-)
+    if [ -n "$newest" ]; then
+      rel="${newest#"$REPO/plans/"}"
+      if [ -f "$PLANS_MIRROR/$rel" ] && /usr/bin/cmp -s "$newest" "$PLANS_MIRROR/$rel"; then
+        printf '突き合わせ: %s は鏡と一致\n' "$rel"
+      elif [ -f "$PLANS_MIRROR/$rel" ]; then
+        printf '突き合わせ: %s は鏡と違う (写した後に書き替わった分。鏡の刻を見よ)\n' "$rel"
+      else
+        printf '⚠ 赤: 最も新しい %s が鏡に無い\n' "$rel"; rc=1
+      fi
+    fi
+  fi
 
   printf '\n判定: %s\n' "$([ "$rc" -eq 0 ] && echo '緑 = 今 現に戻せる' || echo '赤 = 戻せない')"
   printf 'この判定が答えないこと: 控えを取った刻より後の書き替えは、この控えに入っていない\n'

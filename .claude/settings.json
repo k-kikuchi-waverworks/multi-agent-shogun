@@ -4,45 +4,6 @@
   },
   "feedbackSurveyRate": 0.0,
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/shell_expansion_guard.py\"",
-            "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/process_signal_guard.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/report_validate.py\"",
-            "timeout": 15
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/grep_scope_warn.py\"",
-            "timeout": 20
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
@@ -76,6 +37,8 @@
       "Bash(rm -rf ~*)",
       "Bash(sudo *)",
       "Bash(su *)",
+      "Bash(kill *)",
+      "Bash(killall *)",
       "Bash(git push --force*)",
       "Bash(git push -f *)",
       "Bash(git reset --hard*)",

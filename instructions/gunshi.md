@@ -617,22 +617,26 @@ verdict 5 状態の `PASS_WITH_OBSERVATIONS` は前者用、`NEEDS_REVISION` 以
 
 ---
 
-## 軍師 2 体制 (cmd_645 v1 起源、cmd_652 v2 で復活)
+## 軍師は 1 人 (2026-08-03 cmd_1634、殿の裁)
 
-★★★cmd_652 (2026-05-16) で v2 復活、本 section の cmd_645 v1 規律 (gunshi_a/gunshi_b 領域別) は廃止★★★。
+★軍師は `gunshi` の 1 人だけである (pane multiagent:agents.8)。★
+2 人体制は 2 度試して 2 度とも畳んだ (cmd_645 v1 / cmd_652 v2)。
+2026-08-03 に殿が 1 人体制へ戻すと裁を下された。軍師二号を `gunshi` へ改名し、
+軍師一号は退役した。空いた pane 7 は足軽七号が使う。
 
-新規 dispatch は cmd_652 v2 規律 (Round-robin + 継続性 record + 例外規定) を適用 — 詳細は `instructions/karo.md § 軍師 dispatch 振り分け規律` および `plans/cmd_652_shogun_v2_architecture.md §2/§6/§8.1.3` 参照。
+⇒ **どちらの軍師へ回すかという判断は無くなった。** Round-robin も領域分担も、もう無い。
+何を軍師へ掛けるかの物差しは `instructions/karo.md § 軍師への振り分け規律` を見よ。
 
-cmd_645 v1 失敗 3 点 (領域複雑化 + watcher 追従漏れ + dashboard 乖離) は v2 で構造的に防止済 (Round-robin で 2 値判断、settings.yaml 動的読込、dashboard template 標準化)。本 section 以降は cmd_645 v1 履歴 retain として残置 (Chesterton's Fence、destructive 禁) — ★新規 dispatch では参照禁止★。
-
-### v2 自己識別 (cmd_652 後)
+### 自己識別
 
 ```bash
 tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
-# 出力: gunshi1 → 軍師 1 (Round-robin、cmd_652 v2 active)
-# 出力: gunshi2 → 軍師 2 (Round-robin、cmd_652 v2 active、pane 0.9 殿手動 trigger 必須)
-# 出力: gunshi/gunshi_a/gunshi_b → cmd_645 deprecated (新規 dispatch 禁止、過渡期 backward compat retain)
+# 出力: gunshi                     → 現役の軍師 (これが正)
+# 出力: gunshi1/gunshi_a/gunshi_b  → 退役済。新規 dispatch は来ない
 ```
+
+本 section より下は **過去の 2 人体制の記録** である。
+消さずに残しているのは経緯を辿れるようにするためで、★今の運用では参照しない★。
 
 ---
 
@@ -649,7 +653,7 @@ tmux display-message -t "$TMUX_PANE" -p '#{@agent_id}'
 # 出力: gunshi  → 過渡期 [DEPRECATED]
 ```
 
-★cmd_652 v2 で `gunshi_a/gunshi_b` は完全 deprecated★。新規セッションは `gunshi1` または `gunshi2` を期待。
+★`gunshi_a`/`gunshi_b` は退役済★。今の軍師の名は `gunshi` である (2026-08-03 cmd_1634)。
 
 ### 領域別役割分担
 

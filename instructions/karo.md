@@ -115,13 +115,13 @@ workflow:
   # === Report Reception Phase ===
   - step: 9
     action: receive_wakeup
-    from: gunshi*  # cmd_652 (2026-05-16) v2: gunshi1/gunshi2 (Round-robin + 継続性 record)
+    from: gunshi  # 2026-08-03 (cmd_1634): 軍師は 1 人。gunshi1 は退役
     via: inbox
     note: "Gunshi reports QC results. Ashigaru no longer reports directly to Karo."
   - step: 10
     action: scan_all_reports
     target: "queue/reports/ashigaru*_report.yaml + queue/reports/gunshi*_report.yaml"
-    note: "Scan ALL reports (ashigaru + gunshi*). cmd_652 (2026-05-16) v2 architecture — gunshi1/gunshi2 active、gunshi/gunshi_a/gunshi_b deprecated retain (cmd_645 backward compat、新規 dispatch 禁止)。Communication loss safety net."
+    note: "報告は ashigaru*_report.yaml と gunshi_report.yaml を全部 見る。2026-08-03 (cmd_1634): 現役の軍師は gunshi の 1 人だけ。gunshi1/gunshi_a/gunshi_b は退役 (file は履歴として残すが新規 dispatch 禁止)。読み落としを拾う安全網である。"
   - step: 11
     action: update_dashboard
     target: dashboard.md
@@ -156,25 +156,23 @@ workflow:
 files:
   input: queue/shogun_to_karo.yaml
   task_template: "queue/tasks/ashigaru{N}.yaml"
-  # cmd_652 (2026-05-16) v2: gunshi1/gunshi2 active (Round-robin + 継続性 record)、deprecated retain
-  gunshi1_task: queue/tasks/gunshi1.yaml       # cmd_652 v2: active 軍師 1 (Round-robin)
-  gunshi2_task: queue/tasks/gunshi2.yaml       # cmd_652 v2: active 軍師 2 (Round-robin、pane 0.9 殿手動 trigger 必須)
-  gunshi_task: queue/tasks/gunshi.yaml         # cmd_645 deprecated (backward compat retain、新規 dispatch 禁止)
-  gunshi_a_task: queue/tasks/gunshi_a.yaml     # cmd_645 deprecated (backward compat retain、新規 dispatch 禁止)
-  gunshi_b_task: queue/tasks/gunshi_b.yaml     # cmd_645 deprecated (backward compat retain、新規 dispatch 禁止)
+  # 2026-08-03 (cmd_1634): 軍師は gunshi の 1 人。下の 3 本は退役 (file は残すが新規 dispatch 禁止)
+  gunshi_task: queue/tasks/gunshi.yaml         # 現役の軍師 (pane multiagent:0.8)
+  gunshi1_task: queue/tasks/gunshi1.yaml       # 退役 (cmd_1634)
+  gunshi_a_task: queue/tasks/gunshi_a.yaml     # 退役 (cmd_645)
+  gunshi_b_task: queue/tasks/gunshi_b.yaml     # 退役 (cmd_645)
   report_pattern: "queue/reports/ashigaru{N}_report.yaml"
-  gunshi1_report: queue/reports/gunshi1_report.yaml
-  gunshi2_report: queue/reports/gunshi2_report.yaml
-  gunshi_report: queue/reports/gunshi_report.yaml         # deprecated (backward compat)
-  gunshi_a_report: queue/reports/gunshi_a_report.yaml     # deprecated (backward compat)
-  gunshi_b_report: queue/reports/gunshi_b_report.yaml     # deprecated (backward compat)
-  cmd_owner_record: queue/cmd_owner_record.yaml           # cmd_652 v2: cmd 系統継続性 record (Round-robin + 同一担当者継続)
+  gunshi_report: queue/reports/gunshi_report.yaml         # 現役の軍師の報告
+  gunshi1_report: queue/reports/gunshi1_report.yaml       # 退役 (cmd_1634、履歴として残す)
+  gunshi_a_report: queue/reports/gunshi_a_report.yaml     # 退役 (cmd_645)
+  gunshi_b_report: queue/reports/gunshi_b_report.yaml     # 退役 (cmd_645)
+  cmd_owner_record: queue/cmd_owner_record.yaml           # cmd 系統ごとの担当者 record
   gpu_occupancy_record: queue/gpu_occupancy_record.yaml   # cmd_652 v2: GPU 占有 orchestration record
   dashboard: dashboard.md
 
 panes:
   self: multiagent:0.0
-  # cmd_652 (2026-05-16) v2: ash1-6 active、ash7 削除 (queue/tasks/ash7.yaml は status: archived 物理 retain)
+  # 2026-08-03 (cmd_1634): 足軽は 1-7 の 7 人。軍師一号が抜けた pane 7 を足軽七号へ振り替えた
   ashigaru_default:
     - { id: 1, pane: "multiagent:0.1" }
     - { id: 2, pane: "multiagent:0.2" }
@@ -182,11 +180,11 @@ panes:
     - { id: 4, pane: "multiagent:0.4" }
     - { id: 5, pane: "multiagent:0.5" }
     - { id: 6, pane: "multiagent:0.6" }
-  # cmd_652 (2026-05-16) v2: 軍師 2 人体制 (Round-robin + 継続性 record)。pane 0.9 殿手動 trigger 必須。
-  gunshi1: { pane: "multiagent:0.8", role: "Round-robin (cmd_652 v2)" }
-  gunshi2: { pane: "multiagent:0.9", role: "Round-robin (cmd_652 v2)" }
-  # cmd_645 deprecated retain (backward compat、watcher 自動起動からも除外、新規 dispatch 禁止)
-  gunshi: { pane: "multiagent:0.8", deprecated: true }
+    - { id: 7, pane: "multiagent:0.7" }
+  # 2026-08-03 (cmd_1634): 軍師は 1 人。gunshi が pane 0.8 に座る
+  gunshi: { pane: "multiagent:0.8" }
+  # 退役した軍師 (watcher 自動起動からも外れる。新規 dispatch 禁止)
+  gunshi1: { pane: "multiagent:0.7", deprecated: true }   # 2026-08-03 (cmd_1634) 退役。pane は足軽七号へ
   gunshi_a: { pane: "multiagent:0.8", deprecated: true }
   gunshi_b: { pane: "multiagent:0.9", deprecated: true }
   agent_id_lookup: "tmux list-panes -t multiagent -F '#{pane_index}' -f '#{==:#{@agent_id},ashigaru{N}}'"
@@ -955,69 +953,71 @@ External PRs are reinforcements. Treat with respect.
 - Dashboard inconsistency → reconcile with YAML ground truth
 - Own context < 20% remaining → report to shogun via dashboard, prepare for /clear
 
-## 軍師 dispatch 振り分け規律 (cmd_652 v2、Round-robin + 継続性 record)
+## 軍師への振り分け規律 (2026-08-03 cmd_1634: 軍師 1 人体制)
 
-cmd_652 (2026-05-16) で軍師 2 人体制 v2 が確立された。家老は **「新 cmd か既存 cmd 系統か」の 2 値判断** で振り分けるのみ、領域 keyword 判定は不要 (cmd_645 v1 失敗教訓: 領域複雑化 → 判定負荷 → 殿 ntfy 増 → 廃止)。
+殿の裁 (2026-08-03) で軍師は **1 人 (`gunshi`、pane multiagent:0.8)** に戻った。
+軍師二号を `gunshi` へ改名し、軍師一号は退役した。空いた pane 7 は足軽七号が使う。
 
-詳細設計は `plans/cmd_652_shogun_v2_architecture.md` §2 + §6 + §8.1.3 参照。
+⇒ **振り分けの判断そのものが無くなった。** 軍師へ回す物は全て `gunshi` へ行く。
+Round-robin も、どちらの軍師かを覚えておく必要も、もう無い。
 
-### 振り分け logic (2 値判断のみ)
+### 何を軍師へ回すか (振り分け先ではなく、掛けるか否かの判断)
 
-```
-1. cmd_id を queue/cmd_owner_record.yaml で参照
-2. 既存 cmd 系統 (record に entry あり) → 同一軍師継続 (セッション途切れ防止)
-3. 新 cmd (record に entry なし) → Round-robin で gunshi1 → gunshi2 → gunshi1 → ... 順次選定
-4. 例外規定該当 (北極星 cmd 等) → §重要 cmd 例外規定 参照
-```
+| | |
+|---|---|
+| **掛ける** | 数を出す仕事 / 殿の裁の材料になる稿 / 恋の品質の判定 |
+| **掛けない** | 1 行の設定変更 / docs の書き換え / 撤去・削除 / 既に答が出た物の台帳反映 / 機械的な rename |
 
-### queue/cmd_owner_record.yaml schema
+物差し = **「これが誤っていたら殿の判断が変わるか」**。変わらぬなら掛けない。
+
+### task YAML path
+
+- `queue/tasks/gunshi.yaml` へ書き、`bash scripts/inbox_write.sh gunshi "..." task_assigned karo` で起こす
+- 退役した `gunshi1.yaml` / `gunshi_a.yaml` / `gunshi_b.yaml` は **新規 dispatch 禁止**。
+  file は履歴として残す (消すな)
+- 古い名前宛てに書いても `inbox_write.sh` が `gunshi` へ振り替える。但し頼るな
+
+### queue/cmd_owner_record.yaml
+
+軍師が 1 人になったので `gunshi:` 欄は常に `gunshi` である。
+**この record が今も要るのは足軽の担当継続のため** (同じ cmd 系統は同じ足軽が続けると、実装の細部を覚えている分だけ速い)。
 
 ```yaml
 records:
   cmd_651:
-    gunshi: gunshi1
-    ashigaru_corpus: ashigaru5      # 同一 cmd 系統 = 同一担当者継続
+    gunshi: gunshi
+    ashigaru_corpus: ashigaru5      # 同じ cmd 系統は同じ足軽が続ける
     ashigaru_training: ashigaru5
-    ashigaru_deploy: ashigaru6      # task type 別 ash は異なってもよい (cmd_id 同じなら gunshi 固定)
+    ashigaru_deploy: ashigaru6      # task の種類が違えば別の足軽でよい
     assigned_at: '2026-05-15T14:30:00'
     last_phase: 4
 round_robin_state:
-  gunshi_next_index: 1   # 0=gunshi1, 1=gunshi2 → 次回 gunshi2 アサイン
-  ashigaru_next_index: 0
+  ashigaru_next_index: 0            # 2026-08-03 (cmd_1634): gunshi_next_index は廃止
 ```
 
-### record update 経路
+- **dispatch 時** — 既存系統なら record を読んで同じ足軽へ、新規なら選んで record へ書く
+- **cmd 完遂時** — 該当 cmd の entry を record から消す
+- **同時書き込み防止** — flock で atomic write
 
-- **dispatch 時 (家老)** — Round-robin 選定 → record write (新 cmd 系統 or 新 task type の場合) / record read (既存系統)
-- **cmd 完遂時 sweep (家老)** — cmd 完遂宣言時に該当 cmd entry を record から削除
-- **同時 dispatch 衝突防止** — flock で atomic write (caveat (b) mid mitigation)
+### 軍師が起草した稿の検分
 
-### task YAML path
-
-- 軍師 1 向け: `queue/tasks/gunshi1.yaml` + inbox: `bash scripts/inbox_write.sh gunshi1 "..." task_assigned karo`
-- 軍師 2 向け: `queue/tasks/gunshi2.yaml` + inbox: `bash scripts/inbox_write.sh gunshi2 "..." task_assigned karo`
-- ★既存 `queue/tasks/gunshi.yaml` / `gunshi_a.yaml` / `gunshi_b.yaml`★ は **cmd_645 deprecated retain** (新規 dispatch 禁止、destructive 禁ゆえ物理 file 残置、cleanup cmd 別途で完全削除候補)
-
-### 相互 spot QC dispatch
-
-- gunshi1 起草 plan の spot QC → gunshi2 に dispatch
-- gunshi2 起草 plan の spot QC → gunshi1 に dispatch
-- 同一 cmd 内の plan refine と spot QC は ★並列禁止対象外★ (順次 dispatch、同一 cmd_owner_record 系統内)
-- ash 完遂報告 (`report_received` inbox) の spot QC は **同一 cmd 系統の軍師に dispatch** (継続性 record 参照、実装詳細知識継続性確保)
+軍師は 1 人ゆえ、**軍師どうしの相互検分はもう出来ない。**
+軍師が起草した plan を確かめる要が在る時は、家老が自ら読むか、足軽へ回す。
+足軽の完遂報告の検分は、これまで通り `gunshi` へ回す。
 
 ### Wake = Full Scan 拡張
 
-`§ "Wake = Full Scan" Pattern` 適用時、scan 対象は glob で `gunshi*_report.yaml` 全網羅:
+`§ "Wake = Full Scan" Pattern` 適用時、scan 対象は glob で全網羅する:
 
 ```
 queue/reports/ashigaru*_report.yaml
-queue/reports/gunshi*_report.yaml      # gunshi1/gunshi2 active + gunshi/gunshi_a/gunshi_b deprecated retain
+queue/reports/gunshi*_report.yaml      # gunshi (現役) + 退役分も履歴として引っ掛かる
 ```
 
-`§ Stall Watchdog` inbox 検査も同様に `gunshi*` glob で全網羅:
+`§ Stall Watchdog` の inbox 検査も同じく glob で見る:
 
 ```
-queue/inbox/gunshi*.yaml              # active + deprecated 全
+queue/inbox/gunshi*.yaml              # 現役 + 退役 全部
 ```
 
 ### 重要 cmd 例外規定 (cmd_652 §8.1.3、品質 priority cmd は Opus 維持)
@@ -1043,16 +1043,16 @@ ash1-5 は default Sonnet medium だが、以下 4 trigger 該当 cmd では Opu
 
 家老判断で本表に追加可。追加時は cmd_owner_record.yaml の該当 entry に `model_override: opus` 反映。
 
-### Round-robin index concurrency 制御
+### index の同時更新を防ぐ
 
-- gunshi_next_index / ashigaru_next_index 更新は flock 経由 atomic
-- script: `flock queue/cmd_owner_record.yaml.lock python3 -c "..."` 経路 (Phase 4 spot QC 時 helper script 化候補)
+- `ashigaru_next_index` の更新は flock 経由で atomic に行う
+- 経路: `flock queue/cmd_owner_record.yaml.lock python3 -c "..."`
 
-### cmd_645 v1 失敗教訓の構造的防止 (本 v2 設計の北極星)
+### 過去の失敗と、それを防いでいる仕組み
 
-| 失敗点 | 構造的防止 mechanism |
+| 失敗点 | 防いでいる仕組み |
 |--------|---------------------|
-| (a) 領域規律複雑化 | Round-robin + 継続性 record (本 section)、領域 keyword 抽出不要 |
+| (a) 領域規律複雑化 | 軍師は 1 人ゆえ振り分け判断が無い。領域 keyword の抽出も不要 |
 | (b) watcher 追従漏れ | settings.yaml `cli.agents` 動的読込 (`scripts/lib/agent_list.sh` helper)、agent 追加/削除は settings.yaml 更新のみで watcher 自動追従 |
 | (c) dashboard 表記乖離 | dashboard.md template に軍師 stack section 標準化 + cmd_owner_record + gpu_occupancy_record 自動取得 |
 

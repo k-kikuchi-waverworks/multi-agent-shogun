@@ -6,10 +6,46 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TARGET="$1"
-CONTENT="$2"
-TYPE="$3"
-FROM="$4"
+# ${N:-} defaults: set -u の下で引数不足時も Usage 分岐へ到達させる (即死させない)
+TARGET="${1:-}"
+CONTENT="${2:-}"
+TYPE="${3:-}"
+FROM="${4:-}"
+
+# ── cmd_1363/cmd_1371: shell に食われぬ本文の受け口 (cmd_1479 で復元) ──────
+# ★本文を二重引用符で渡す限り、shell が inbox_write.sh へ渡す【前に】中身を評価する★
+#   (A)`…` (B)$(…) (C)未定義 $VAR は静かに置換され、道具が受け取った時には原文は失われておる。
+#   ⇒ 道具の内側では直せぬ。★shell を一切通らぬ経路を用意する★のが本受け口である。
+# 使い方 (第2引数の位置に sentinel を置く):
+#   bash scripts/inbox_write.sh karo --body-stdin type from <<'EOF'    ← ★引用符つき heredoc★
+#   本文に ` も $(…) も $VAR も書けて、原文どおり届く
+#   EOF
+#   bash scripts/inbox_write.sh karo --body-file=/path/to/body.txt type from
+#   bash scripts/inbox_write.sh karo --content-file /path/body.txt type from
+_read_body_file() {
+    if [ ! -f "$1" ]; then
+        echo "[inbox_write] FATAL: 本文 file が読めぬ: $1" >&2
+        exit 1
+    fi
+    cat "$1"
+}
+# ★末尾改行を守る作法★ (cmd_1371) — command substitution $(...) は末尾改行を黙って剥がす。
+#   sentinel 文字を継いでから剥がすことで、原文を1 byte も動かさぬ。
+_slurp_stdin() { cat; printf 'x'; }
+case "$CONTENT" in
+    --stdin|--body-stdin|-)
+        CONTENT="$(_slurp_stdin)"; CONTENT="${CONTENT%x}"
+        ;;
+    --content-file=*|--body-file=*)
+        CONTENT="$(_read_body_file "${CONTENT#*=}"; printf 'x')"; CONTENT="${CONTENT%x}"
+        ;;
+    --content-file|--body-file)
+        # 空白区切り形: 本文 file が $3 へ来るゆえ type/from が1つずつ後ろへずれる
+        CONTENT="$(_read_body_file "${3:-}"; printf 'x')"; CONTENT="${CONTENT%x}"
+        TYPE="${4:-}"
+        FROM="${5:-}"
+        ;;
+esac
 
 # Deprecated gunshi redirect (write-layer): gunshi/gunshi_a/gunshi_b → active gunshi (Round-robin)
 # Ensures ashigaru reports land in active gunshi1/2 inboxes regardless of caller using deprecated name.
@@ -126,57 +162,71 @@ _release_lock() {
 attempt=0
 max_attempts=3
 
+# External inputs (content/from/type) and paths MUST NOT be interpolated into the
+# python source: a body containing a backslash (e.g. a Windows path C:\Users\...)
+# becomes a truncated \UXXXXXXXX escape → SyntaxError → all retries fail (cmd_1345),
+# and a body containing ''' escapes the string literal entirely. Pass everything
+# via environment variables; the python source below is a fixed single-quoted string.
+export IW_INBOX="$INBOX"
+export IW_MSG_ID="$MSG_ID"
+export IW_FROM="$FROM"
+export IW_TIMESTAMP="$TIMESTAMP"
+export IW_TYPE="$TYPE"
+export IW_CONTENT="$CONTENT"
+
 while [ $attempt -lt $max_attempts ]; do
     if _acquire_lock; then
         trap _release_lock EXIT
-        if "$SCRIPT_DIR/.venv/bin/python3" -c "
-import yaml, sys
+        if "$SCRIPT_DIR/.venv/bin/python3" -c '
+import os, sys, yaml
 
 try:
+    inbox = os.environ["IW_INBOX"]
+
     # Load existing inbox
-    with open('$INBOX') as f:
+    with open(inbox) as f:
         data = yaml.safe_load(f)
 
     # Initialize if needed
     if not data:
         data = {}
-    if not data.get('messages'):
-        data['messages'] = []
+    if not data.get("messages"):
+        data["messages"] = []
 
     # Add new message
     new_msg = {
-        'id': '$MSG_ID',
-        'from': '$FROM',
-        'timestamp': '$TIMESTAMP',
-        'type': '$TYPE',
-        'content': '''$CONTENT''',
-        'read': False
+        "id": os.environ["IW_MSG_ID"],
+        "from": os.environ["IW_FROM"],
+        "timestamp": os.environ["IW_TIMESTAMP"],
+        "type": os.environ["IW_TYPE"],
+        "content": os.environ["IW_CONTENT"],
+        "read": False
     }
-    data['messages'].append(new_msg)
+    data["messages"].append(new_msg)
 
     # Overflow protection: keep max 50 messages
-    if len(data['messages']) > 50:
-        msgs = data['messages']
-        unread = [m for m in msgs if not m.get('read', False)]
-        read = [m for m in msgs if m.get('read', False)]
+    if len(data["messages"]) > 50:
+        msgs = data["messages"]
+        unread = [m for m in msgs if not m.get("read", False)]
+        read = [m for m in msgs if m.get("read", False)]
         # Keep all unread + newest 30 read messages
-        data['messages'] = unread + read[-30:]
+        data["messages"] = unread + read[-30:]
 
     # Atomic write: tmp file + rename (prevents partial reads)
-    import tempfile, os
-    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname('$INBOX'), suffix='.tmp')
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(inbox), suffix=".tmp")
     try:
-        with os.fdopen(tmp_fd, 'w') as f:
+        with os.fdopen(tmp_fd, "w") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True, indent=2)
-        os.replace(tmp_path, '$INBOX')
+        os.replace(tmp_path, inbox)
     except:
         os.unlink(tmp_path)
         raise
 
 except Exception as e:
-    print(f'ERROR: {e}', file=sys.stderr)
+    print(f"ERROR: {e}", file=sys.stderr)
     sys.exit(1)
-"; then
+'; then
             STATUS=0
         else
             STATUS=$?

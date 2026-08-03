@@ -543,7 +543,6 @@ ash 報告に commit hash が含まれる場合の軍師 spot QC は、以下 pr
 ### 過去事例
 
 - 2026-05-09 cmd_621 P5 step_2: commit `07de510` を fabrication 判定 → 殿実機 `git rebase` 検証で実在判明 (本 protocol 起源、`logs/incidents/cmd_639_07de510_misdetection.md` 参照)
-- retroactive 監査 batch: `bash scripts/retroactive_commit_verify.sh` で過去 cmd 累積 hash を 3 分類 (truth / misdetection_revealed / fabrication_candidate) で audit 可
 
 ## Gunshi Spot QC Template (cmd_640 起源)
 
@@ -592,7 +591,6 @@ cmd_636/637/638/641 cascade FAIL は本規律不在で発生 (commit/plan 整合
 - 過去 cmd で fabrication 判定があり、その後 ash redo で正しい hash が得られた場合 (cmd_621 P5 step_2 教訓)
 - 制度化目的の cmd で「過去事案 verification」が要請される場合 (cmd_639 起源)
 
-retroactive 監査 logic: `bash scripts/retroactive_commit_verify.sh > logs/audits/cmd_<N>_retroactive_verify_<YYYYMMDD>.md`
 
 #### 規律 3: 自己適用検証規律 (cmd_639 起源)
 

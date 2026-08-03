@@ -961,8 +961,15 @@ NINJA_EOF
     disown
 
     # 家老のwatcher
+    # ASW_PHASE=1 (家老だけ・殿の裁 2026-08-03)
+    #   既定の 2 は「通常の起こしを止める」ため、命令が届いても家老はその都度 起きない。
+    #   溜まった後に気づいた物から手を付けるので、来た順でなく差し込み順になる。
+    #   1 に戻すと届くたびに起こされ、来た順に処理される。
+    #   足軽・軍師は 2 のまま = 作業中に割り込まれない (家老は交通整理ゆえ割り込まれても失う物が少ない)。
+    #   ★scripts/watcher_supervisor.sh の家老の行にも同じ env が要る★ (落ちた時の拾い直しで 2 へ戻らぬよう)
     _karo_watcher_cli=$(tmux show-options -p -t "multiagent:agents.${PANE_BASE}" -v @agent_cli 2>/dev/null || echo "claude")
-    nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" karo "multiagent:agents.${PANE_BASE}" "$_karo_watcher_cli" \
+    nohup env ASW_PHASE=1 \
+        bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" karo "multiagent:agents.${PANE_BASE}" "$_karo_watcher_cli" \
         >> "$SCRIPT_DIR/logs/inbox_watcher_karo.log" 2>&1 &
     disown
 

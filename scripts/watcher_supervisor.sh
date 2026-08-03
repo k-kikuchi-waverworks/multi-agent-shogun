@@ -65,7 +65,11 @@ start_watcher_if_missing() {
         fi
 
         cli=$(tmux show-options -p -t "$pane" -v @agent_cli 2>/dev/null || echo "codex")
-        nohup bash scripts/inbox_watcher.sh "$agent" "$pane" "$cli" >> "$log_file" 2>&1 &
+        # 家老だけ ASW_PHASE=1 (殿の裁 2026-08-03)。理由は shutsujin_departure.sh の家老の行を見よ。
+        # ここを落とすと、家老の watcher が1度 落ちた日から黙って 2 (差し込み順) へ戻る。
+        local phase_env=""
+        [ "$agent" = "karo" ] && phase_env="ASW_PHASE=1"
+        nohup env $phase_env bash scripts/inbox_watcher.sh "$agent" "$pane" "$cli" >> "$log_file" 2>&1 &
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [START] inbox_watcher started for ${agent} pane=${pane} PID=$!" >&2
     ) 9>"$lockfile"
 }

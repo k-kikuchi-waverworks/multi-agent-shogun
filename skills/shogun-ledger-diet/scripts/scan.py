@@ -10,6 +10,10 @@ import sys
 
 OPEN_STATUSES = {"pending", "in_progress"}
 
+# 閉じていない。後回しになっている・殿が止めておられるだけである。
+# 2026-08-03 の事故は、この2つを「閉じた物」と見て巻き込んだものである。
+ALIVE_STATUSES = {"deferred", "stopped_by_lord"}
+
 
 def split_ledger(path):
     """台帳を「- id:」で始まる塊に切る。塊のテキストは1文字も変えない。"""
@@ -77,7 +81,11 @@ def main():
     print(f"■ 台帳 {ledger} = {len(raw.splitlines())}行 / cmd {len(blocks)}本")
     counts = collections.Counter(b["status"] for b in blocks)
     for status, n in counts.most_common():
-        mark = "  ← open (退避しない)" if status in OPEN_STATUSES else ""
+        mark = ""
+        if status in OPEN_STATUSES:
+            mark = "  ← open (退避しない)"
+        elif status in ALIVE_STATUSES:
+            mark = "  ← 生きている (既定で残す)"
         print(f"    {n:4d}  {status}{mark}")
     dup = [k for k, v in collections.Counter(b["id"] for b in blocks).items() if v > 1]
     print(f"    id の重複: {dup if dup else 'なし'}")
@@ -85,7 +93,12 @@ def main():
     print("\n  状態ごとの id:")
     for status, _ in counts.most_common():
         ids = [b["id"] for b in blocks if b["status"] == status]
-        print(f"    {status}: {' '.join(ids)}")
+        mark = ""
+        if status in OPEN_STATUSES:
+            mark = " ← open (退避しない)"
+        elif status in ALIVE_STATUSES:
+            mark = " ← 生きている (既定で残す)"
+        print(f"    {status}{mark}: {' '.join(ids)}")
 
     print(f"\n■ inbox {args.inbox_dir} (未読は全部 残す / 既読は直近 {args.keep_read} 件を残す)")
     total_e = total_u = total_move = 0

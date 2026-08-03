@@ -40,19 +40,31 @@ allowed-tools: Read, Bash, Grep
 
 `queue/` は git 管理外である。壊しても git では戻らない。**控えが唯一の戻し道である。**
 
+控えは `queue/` の下の形をそのまま写す。**`apply.py` はこの形を前提に戻し先を決める。**
+平らに写すと、inbox の控えが退避先を上書きして前の便りを消す。
+
 ```bash
-STAMP=$(date +%Y%m%d)
 BK="queue/archive/diet_backup_$(date +%Y%m%d_%H%M)"
-mkdir -p "$BK"
+mkdir -p "$BK/inbox" "$BK/archive"
 cp queue/shogun_to_karo.yaml "$BK"/
-cp queue/inbox/*.yaml "$BK"/
-cp queue/archive/*.yaml "$BK"/ 2>/dev/null   # 既にある退避先も控える (追記で壊した時に戻すため)
+cp queue/inbox/*.yaml "$BK/inbox"/
+cp queue/archive/*.yaml "$BK/archive"/ 2>/dev/null        # 既にある台帳の退避先
+for d in queue/archive/inbox_*; do                        # 既にある inbox の退避先
+  [ -d "$d" ] && cp -r "$d" "$BK/archive"/
+done
 # 控えが現物と1バイトも違わないことを確かめる
 md5sum queue/shogun_to_karo.yaml "$BK"/shogun_to_karo.yaml
-echo "控え = $BK"
+echo "★次の2つを控えておくこと。Step 4 と Step 5 でそのまま打ち込む★"
+echo "控え   = $BK"
+echo "日付   = $(date +%Y%m%d)"
 ```
 
 md5 が違う、または `cp` が落ちた場合は **ここで止まる。以後の step を撃たない。**
+
+★**最後の2行が画面に出した文字列を、必ず書き留めること。**★
+Step 4 と Step 5 は別々の bash 呼出である。**`$BK` も `$STAMP` も引き継がれず、空文字になる。**
+空文字を渡すと `apply.py` は「控えの場所が空」と言って止まるので、事故にはならない。
+だが手が止まる。**変数を使わず、画面に出た文字列を直に打ち込むこと。**
 
 D: の控え (`/mnt/d/backup/multi-agent-shogun/queue_backup/`) は 30分ごとに取られている。
 そちらも在るか併せて見ておくと、戻し道が2本になる。
@@ -102,12 +114,17 @@ Step 2 の出力をもとに、人へこう見せる。
 **YAML として読み込んで組み直さないこと。** 書式やブロック記法が1文字でも変われば台帳が壊れる。
 `apply.py` はテキストの塊のまま移す。
 
+★`--backup` と `--stamp` には **Step 1 が画面に出した文字列を直に書く。**★
+`"$BK"` や `"$STAMP"` と書かない。**別の bash 呼出なので空文字になる。**
+下の例の `diet_backup_20260803_1810` と `20260803` の所が、その差し替える箇所である。
+
 ```bash
 # 台帳
 python3 skills/shogun-ledger-diet/scripts/apply.py \
   --target ledger \
   --approved "殿のご承認 2026-08-03 18:10 = cancelled と superseded のみ。deferred と stopped_by_lord は残す" \
-  --backup "$BK" --stamp "$STAMP" \
+  --backup queue/archive/diet_backup_20260803_1810 \
+  --stamp 20260803 \
   --statuses cancelled,superseded \
   --keep-ids cmd_1246          # 状態が当たっても名指しで残す物 (無ければ省く)
 
@@ -115,7 +132,9 @@ python3 skills/shogun-ledger-diet/scripts/apply.py \
 python3 skills/shogun-ledger-diet/scripts/apply.py \
   --target inbox \
   --approved "殿のご承認 = 既読の古い分のみ。未読は1件も移さない" \
-  --backup "$BK" --stamp "$STAMP" --keep-read 5
+  --backup queue/archive/diet_backup_20260803_1810 \
+  --stamp 20260803 \
+  --keep-read 5
 ```
 
 `--approved` には **人が実際に言った内容**を書く。この一文は退避先の頭にも残り、後から誰の裁で移したか分かる。
@@ -124,10 +143,14 @@ python3 skills/shogun-ledger-diet/scripts/apply.py \
 
 | 出力 | 意味 |
 |---|---|
-| `控えが無い` | Step 1 をやり直す |
+| `控えの場所が空` | `$BK` と書いた。Step 1 が画面に出した文字列を直に打ち込む |
+| `控えが揃っていない` | 控えに現物が無いか、控えが古い。Step 1 をやり直す |
 | `承認の一文が空` | Step 3 に戻る |
-| `pending は open である。--statuses では退避できない` | 開いている物は状態指定では移せない。どうしてもなら `--ids` で1本ずつ名指しする |
+| `pending は open である` | **open な cmd はこの skill では移せない。`--ids` で名指ししても移せない** |
 | `退避する status も id も指定が無い` | 何を移すか決まっていない |
+
+**`pending` / `in_progress` は、この skill では移せない。** `--statuses` でも `--ids` でも移せない。
+開いている cmd を台帳から外すのは、この skill の役目ではない。まず cmd を閉じること。
 
 ### Step 5: 検算 — 合わなければ控えから戻す
 
@@ -145,12 +168,16 @@ python3 skills/shogun-ledger-diet/scripts/apply.py \
 
 戻ったら、人へ「合わなかったので元に戻した」と何が合わなかったかを伝える。**撃ち直さない。**
 
-人の目でも確かめる:
+★`!!!!` の枠で **「戻せなかった。<path> は壊れたままである」** と出た時は、話が別である。★
+その file は今も壊れている。**撃ち直さず、人へすぐ知らせ、手で戻すこと。**
+戻し道は2本ある。控えのディレクトリと、D: の30分ごとの控えである。
+
+人の目でも確かめる (`20260803` の所は Step 1 が出した日付に差し替える):
 
 ```bash
 python3 skills/shogun-ledger-diet/scripts/scan.py                    # 残った内訳
 python3 -c "import yaml;yaml.safe_load(open('queue/shogun_to_karo.yaml',encoding='utf-8'));print('台帳 読める')"
-grep -c '^  read: false' queue/archive/inbox_$STAMP/*.yaml   # 0 でなければ未読が混ざっている = 戻す
+grep -c '^  read: false' queue/archive/inbox_20260803/*.yaml   # 0 でなければ未読が混ざっている = 戻す
 ```
 
 ### Step 6: 報せる
@@ -168,7 +195,14 @@ grep -c '^  read: false' queue/archive/inbox_$STAMP/*.yaml   # 0 でなければ
 python3 -c "import yaml;yaml.safe_load(open('queue/shogun_to_karo.yaml',encoding='utf-8'));print('OK')"
 ```
 
-全部 戻す時は控えのディレクトリから上書きする。
+全部 戻す時は控えのディレクトリから上書きする。控えは `queue/` の下と同じ形をしている。
+
+```bash
+BK=queue/archive/diet_backup_20260803_1810      # Step 1 が出した控えの path
+cp "$BK"/shogun_to_karo.yaml queue/
+cp "$BK"/inbox/*.yaml        queue/inbox/
+cp -r "$BK"/archive/.        queue/archive/
+```
 
 ## やらないこと
 

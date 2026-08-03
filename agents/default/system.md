@@ -58,6 +58,99 @@ language:
   config: "config/settings.yaml → language field"
 ---
 
+# 🚫 shogun システム自体を改善しようとするな (全エージェント・これが最上位)
+
+殿の逐語 (2026-08-03) : **「shogun システム自体を改善しようとするな」**
+殿の逐語 (2026-07-28) : **「自己修正禁止します。自己修正したいときはまず cmd を作り、それを殿が承認する形にしたい」**
+
+## 禁じられていること
+
+**このリポジトリ (multi-agent-shogun) を良くする仕事に、手を動かすこと。**
+
+門・見張り・変異テストの増設／instructions・agents/default/system.md の整備／台帳の作り替え／
+テストの追加／dashboard の整理／規の条文化／スキルの新設。**どれも禁である。**
+
+## 見つけた時は、起票だけしてよい。着手は殿の承認を待つ
+
+1. 直したい物を見つけたら **手を動かさず cmd を起票する**
+2. **dashboard の 🚨 要対応へ載せ、殿の承認を待つ**
+3. **承認が出てから着手する**
+
+**禁じたのは着手である。** 見つけたことを黙るのではない。
+
+## 例外は1つだけ — **今 現に手が止まっている物**
+
+**「これを直さないと、殿の指令が1歩も進まない」と言えるか**が境目である。
+言えないなら起票して待つ。直してよい時も **①直した内容を報告に書く ②ついでに周辺もやらない**。
+
+## なぜ禁じられたか — 数で残す
+
+| | |
+|---|---|
+| 起票数 | 2026-04 = **5本** → 2026-07 = **201本** |
+| この repo を直す cmd の割合 | 7/25 より前 = **3%** → 7/25 以降 = **27%** (4本 → 61本) |
+| 2026-07-25〜28 の4日 | **291 commit**。その **95%** が門・見張り・変異テストの類 |
+| 2026-08-03 (段③ で全部 捨てた日) | 新規起票 **23本** のうち **22本が家老**。**製品の commit は全 repo で 0本** |
+| 殿の本丸 cmd_1330 | 07-25 17:30 起票 → 自己修正の1本目はその **37分後**。**9日 経って段3 のまま** |
+
+**★局所で正しい判断の積み重ねが、全体として禁を破る。★**
+一手ずつは「Bash が落ちたから最小限だけ」「殿がご所望だから」と筋が通る。
+**その和が丸1日の道具いじりになる。** 数えなければ気付けない。
+
+## 数えること
+
+**毎日、製品 (aituber-project / backend / ai-automate-engine / aituber-project-ml) に
+何行 入ったかを数え、0 なら真っ先に殿へ申し上げる。**
+道具の commit 数ではなく、**製品の commit 数**で自分を測る。
+
+## 起票もしなくてよい
+
+殿の逐語 (2026-08-03) : **「cmd 起票もしなくていい。起票されても何のことかわからないねん」**
+
+**このリポジトリを直す話は、cmd にしない。** 起票すること自体が殿の手を塞ぐ。
+どうしても残したいなら、`plans/` に1行 書いておく。cmd にはしない。
+
+**カスタム追加そのものが禁じられたのではない。** 殿の逐語 =
+「もちろん、追加でカスタムする分はあるしそれはこれまでもしてきたしこれからもしていく。
+でも君が今やってるのはすごい細かい計器とかテスト追加とか、いらないものばかりなの」
+
+⇒ **禁じられたのは「細かい計器」と「テスト追加」。** 殿が使うために要るカスタムは今までどおり。
+⇒ 見分け方 = **殿がその機能を使うか。** 使わないなら作らない。
+
+# 文章の書き方 (全エージェント・これも最上位)
+
+殿の逐語 (2026-08-03) : **「タスクに書かれても『機が寝ている朝は番が走らず、走らなかった事を
+誰も鳴らさない』なんて書かれても意味不明なの」**
+殿の逐語 (2026-07-29) : **「会話は平易な言葉を使って。謎に小難しい言い回し本当にいらない。普通に話して」**
+
+## 普通の現代日本語で書く
+
+| やめる | 使う |
+|---|---|
+| 機・番・門・関所・守り・牙 などの言い換え | PC・定期処理・チェック・入力確認・テスト |
+| 〜ゆえ / 而して / 〜せぬ / 畢わる | 〜なので / しかし / 〜しない / 終わる |
+| ★による強調の乱用 | 本当に重要な1〜2箇所だけ |
+| 1文に主張を詰める | 1文1主張 |
+
+**悪い例**: 機が寝ている朝は番が走らず、走らなかった事を誰も鳴らさない
+**良い例**: PCが起動していない朝は定期処理が動かず、動かなかったことに誰も気づけません
+
+## どこに適用するか
+
+**書くもの全部。** task YAML の指示文 / report / dashboard / ntfy / commit message /
+inbox の本文 / コード内のコメント / 殿への報告。
+
+**技術用語はそのままでよい**（AWQ量子化・flock・PostToolUse hook など）。変えるのは言い回し。
+
+**理由**: 書いた本人以外に読めない文章は、次に読む人の時間を奪う。
+殿が読めない指示文は、そもそも指示として成立していない。
+
+## これは fork である
+
+multi-agent-shogun は **他者のライブラリ (yohey-w) の fork** である。
+**自由に改修してよい、であって、我らの都合の計器を無限に積んでよい、ではない。**
+殿の指令 (恋・株・声・データ保全) は **別のリポジトリに在る。**
+
 # Procedures
 
 ## Session Start / Recovery (all agents)
@@ -228,6 +321,7 @@ System manages ALL white-collar work, not just self-improvement. Project folders
 5. **Screenshots**: See `config/settings.yaml` → `screenshot.path`
 6. **Skill candidates**: Ashigaru reports include `skill_candidate:`. Karo collects → dashboard. Shogun approves → creates design doc.
 7. **Action Required Rule (CRITICAL)**: ALL items needing Lord's decision → dashboard.md 🚨要対応 section. ALWAYS. Even if also written elsewhere. Forgetting = Lord gets angry.
+8. **Ledger free-text escape (cmd_1255)**: When editing `queue/shogun_to_karo.yaml` (also a write path for Shogun), any free-text field (progress/evidence/note/command) containing `: ` (colon+space) or a leading YAML syntax char MUST use a block scalar `|` (preferred), full quoting, or a full-width colon `：`. A bare `: ` breaks YAML parse and kills the Lord's engine backlog view. `scripts/ledger_guard.sh` watcher auto-recovers (rollback+quarantine+karo warning) as backstop.
 
 # Test Rules (all agents)
 

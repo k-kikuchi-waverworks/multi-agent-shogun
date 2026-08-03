@@ -54,7 +54,9 @@ start_watcher_if_missing() {
 
     (
         flock -n 9 || return 0
-        if pgrep -Ef "scripts/inbox_watcher.sh ${agent} ${pane}( |$)" >/dev/null 2>&1; then
+        # pgrep は元から ERE。-E はこの環境の procps-ng に無く、付けると常に
+        # invalid option で失敗し「既に動いている」を検出できず二重起動になる
+        if pgrep -f "scripts/inbox_watcher.sh ${agent} ${pane}( |$)" >/dev/null 2>&1; then
             return 0
         fi
 
@@ -75,27 +77,13 @@ ashigaru_pane() {
     echo "multiagent:agents.${idx}"
 }
 
-# cmd_1255 (2026-07-11): 台帳(shogun_to_karo.yaml)parse自己検証gate=ledger_guard watcher。
-# per-agent inbox watcher と異なり pane 非依存の singleton(台帳file監視)。
-# 未起動時のみ nohup 起動(pgrep で重複防止・inbox watcher の start_watcher_if_missing と同型)。
-start_ledger_guard_if_missing() {
-    local lockfile="/tmp/shogun_ledger_guard_start.lock"
-    (
-        flock -n 9 || return 0
-        if pgrep -Ef "scripts/ledger_guard.sh" >/dev/null 2>&1; then
-            return 0
-        fi
-        nohup bash scripts/ledger_guard.sh >> "logs/ledger_guard.log" 2>&1 &
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [START] ledger_guard started PID=$!" >&2
-    ) 9>"$lockfile"
-}
-
 while true; do
-    start_watcher_if_missing "shogun" "shogun:main.0" "logs/inbox_watcher_shogun.log"
+    # 将軍の watcher はここでは扱わない。shutsujin_departure.sh が安全モード
+    # (ASW_DISABLE_ESCALATION=1 / ASW_PROCESS_TIMEOUT=0) 付きで起動しており、
+    # ここから素の環境で起動し直すと殿の pane へ /clear を撃つ側に化けるため。
+    # start_watcher_if_missing "shogun" "shogun:main.0" "logs/inbox_watcher_shogun.log"
     start_watcher_if_missing "karo" "multiagent:agents.0" "logs/inbox_watcher_karo.log"
 
-    # cmd_1255: 台帳parse自己検証gate(singleton・pane非依存)
-    start_ledger_guard_if_missing
 
     # cmd_652 (2026-05-16): ashigaru list を settings.yaml から動的取得
     while IFS= read -r ash; do

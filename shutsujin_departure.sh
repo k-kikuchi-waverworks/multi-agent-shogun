@@ -78,7 +78,9 @@ _ASHIGARU_COUNT=$(echo "$_ASHIGARU_IDS_STR" | wc -w | tr -d ' ')
 if [ -f "$SCRIPT_DIR/scripts/lib/agent_list.sh" ]; then
     # shellcheck source=scripts/lib/agent_list.sh
     . "$SCRIPT_DIR/scripts/lib/agent_list.sh"
-    _GUNSHI_IDS_STR="gunshi $(get_all_gunshi_agents | tr '\n' ' ')"
+    # 2026-08-03 (cmd_1634): 'gunshi' は settings.yaml に載る現役の名になった。
+    #   頭に足す旧来の書き方だと同じ名が 2 度並ぶので、重複を落とす。
+    _GUNSHI_IDS_STR=$(echo "gunshi $(get_all_gunshi_agents | tr '\n' ' ')" | tr ' ' '\n' | awk 'NF && !seen[$0]++' | tr '\n' ' ')
     _ACTIVE_GUNSHI_IDS_STR=$(get_active_gunshi_agents | tr '\n' ' ')
 else
     # fallback: agent_list.sh 不在時 (旧環境)
@@ -431,7 +433,7 @@ EOF
 
     # 軍師タスクファイルリセット
     # cmd_652 (2026-05-16): settings.yaml 動的 + legacy 'gunshi' backward compat retain
-    # gunshi (legacy, deprecated) / gunshi_a, gunshi_b (cmd_645 deprecated retain) / gunshi1, gunshi2 (cmd_652 v2 active)
+    # 2026-08-03 (cmd_1634): 軍師は gunshi の 1 人。gunshi1 / gunshi_a / gunshi_b は退役 (定義だけ残す)
     for gunshi_id in $_GUNSHI_IDS_STR; do
         cat > "./queue/tasks/${gunshi_id}.yaml" << EOF
 # 軍師タスクファイル (${gunshi_id})
@@ -650,7 +652,8 @@ tmux split-window -v
 tmux split-window -v
 
 # ペインラベル・エージェントID・色設定 — settings.yaml から動的に構築
-# cmd_656 (2026-05-16): hard-coded "gunshi" 単一を _ACTIVE_GUNSHI_IDS_STR (gunshi1/gunshi2) 動的列挙に置換
+# cmd_656 (2026-05-16): 決め打ちをやめ _ACTIVE_GUNSHI_IDS_STR で動的に列挙する形へ
+# cmd_1634 (2026-08-03): 軍師は 1 人体制へ戻したが、動的列挙の作りはそのまま使う
 PANE_LABELS=("karo")
 AGENT_IDS=("karo")
 PANE_COLORS=("red")
@@ -666,7 +669,7 @@ for _gi in $_ACTIVE_GUNSHI_IDS_STR; do
 done
 
 # モデル名設定（pane-border-format で常時表示するため）- 動的構築
-# cmd_656: gunshi 判定を prefix 一致 (gunshi*) に拡張 (gunshi1/gunshi2 対応)
+# cmd_656: 軍師の判定は名前の頭一致 (gunshi*) で見る
 MODEL_NAMES=()
 for _ai in "${AGENT_IDS[@]}"; do
     if [[ "$_ai" == gunshi* ]]; then
@@ -819,8 +822,9 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
     fi
 
     # 軍師（pane _ASHIGARU_COUNT+1〜）: Opus Thinking — 戦略立案・設計判断専任
-    # cmd_656 (2026-05-16): _ACTIVE_GUNSHI_IDS_STR 動的列挙で gunshi1/gunshi2 並列起動
-    # legacy 'gunshi' / gunshi_a / gunshi_b は deprecated:true で skip 済 (settings.yaml)
+    # cmd_656 (2026-05-16): _ACTIVE_GUNSHI_IDS_STR を動的に列挙して起動する
+    # cmd_1634 (2026-08-03): 現役は gunshi の 1 人だけ。gunshi1 / gunshi_a / gunshi_b は
+    #   settings.yaml の deprecated:true で列挙から外れる
     _gunshi_idx=0
     for _gi in $_ACTIVE_GUNSHI_IDS_STR; do
         p=$((PANE_BASE + _ASHIGARU_COUNT + 1 + _gunshi_idx))
@@ -983,8 +987,8 @@ NINJA_EOF
     done
 
     # 軍師のwatcher
-    # cmd_656 (2026-05-16): _ACTIVE_GUNSHI_IDS_STR 動的列挙で gunshi1/gunshi2 並列 watcher 起動
-    # logs/inbox_watcher_${_gi}.log でログ分離 (gunshi1.log / gunshi2.log)
+    # cmd_656 (2026-05-16): _ACTIVE_GUNSHI_IDS_STR を動的に列挙して watcher を張る
+    # logs/inbox_watcher_${_gi}.log で軍師ごとにログを分ける
     _gunshi_idx=0
     for _gi in $_ACTIVE_GUNSHI_IDS_STR; do
         p=$((PANE_BASE + _ASHIGARU_COUNT + 1 + _gunshi_idx))
@@ -1115,11 +1119,11 @@ echo "     ┌─────────┬─────────┬──
 echo "     │  karo   │ashigaru3│ashigaru6│"
 echo "     │  (家老) │ (足軽3) │ (足軽6) │"
 echo "     ├─────────┼─────────┼─────────┤"
-echo "     │ashigaru1│ashigaru4│ gunshi1 │"
-echo "     │ (足軽1) │ (足軽4) │ (軍師1) │"
+echo "     │ashigaru1│ashigaru4│ashigaru7│"
+echo "     │ (足軽1) │ (足軽4) │ (足軽7) │"
 echo "     ├─────────┼─────────┼─────────┤"
-echo "     │ashigaru2│ashigaru5│ gunshi2 │"
-echo "     │ (足軽2) │ (足軽5) │ (軍師2) │"
+echo "     │ashigaru2│ashigaru5│ gunshi  │"
+echo "     │ (足軽2) │ (足軽5) │ (軍師)  │"
 echo "     └─────────┴─────────┴─────────┘"
 echo ""
 

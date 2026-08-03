@@ -9,7 +9,7 @@
 #   - get_command_layer_agents   : shogun + karo + 全 active gunshi (ashigaru 除外)
 #   - is_command_layer_agent <name> : 0=true, 1=false
 #   - is_deprecated_agent <name>    : 0=true (deprecated:true 設定あり), 1=false
-#   - get_agent_pane <name>      : settings.yaml の pane: field を返却 (gunshi1/2 用)、なければ空
+#   - get_agent_pane <name>      : settings.yaml の pane: field を返却 (軍師用)、なければ空
 #
 # 使い方:
 #   source scripts/lib/agent_list.sh
@@ -102,7 +102,7 @@ is_command_layer_agent() {
     local target="$1"
     case "$target" in
         shogun|karo) return 0 ;;
-        gunshi*)     return 0 ;;  # gunshi1/gunshi2/gunshi_a/gunshi_b/gunshi (legacy) 全て command-layer
+        gunshi*)     return 0 ;;  # gunshi と退役した gunshi1/gunshi_a/gunshi_b は全て command-layer
         *)           return 1 ;;
     esac
 }

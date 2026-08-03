@@ -47,10 +47,12 @@ case "$CONTENT" in
         ;;
 esac
 
-# Deprecated gunshi redirect (write-layer): gunshi/gunshi_a/gunshi_b → active gunshi (Round-robin)
-# Ensures ashigaru reports land in active gunshi1/2 inboxes regardless of caller using deprecated name.
+# 退役した軍師名の振り替え (書き込み層): gunshi1/gunshi2/gunshi_a/gunshi_b → 現役の軍師へ
+# 2026-08-03 (cmd_1634): 軍師は 1 人体制。現役の名が 'gunshi' になったので、
+#   'gunshi' をこの一覧から外し、代わりに退役した 'gunshi1' と 'gunshi2' を入れた。
+#   これで古い名前宛ての便りも現役の軍師に届く。
 case "$TARGET" in
-    gunshi|gunshi_a|gunshi_b)
+    gunshi1|gunshi2|gunshi_a|gunshi_b)
         _LIB="$SCRIPT_DIR/scripts/lib/agent_list.sh"
         if [ -f "$_LIB" ]; then
             # shellcheck source=scripts/lib/agent_list.sh
@@ -78,16 +80,16 @@ case "$TARGET" in
                     echo "[inbox_write] REDIRECT: deprecated '$TARGET' → '$_BEST_TARGET' (active gunshi, unread=$_BEST_COUNT)" >&2
                     TARGET="$_BEST_TARGET"
                 else
-                    echo "[inbox_write] WARNING: redirect failed, defaulting '$TARGET' → 'gunshi1'" >&2
-                    TARGET="gunshi1"
+                    echo "[inbox_write] WARNING: redirect failed, defaulting '$TARGET' → 'gunshi'" >&2
+                    TARGET="gunshi"
                 fi
             else
-                echo "[inbox_write] WARNING: no active gunshi found, defaulting '$TARGET' → 'gunshi1'" >&2
-                TARGET="gunshi1"
+                echo "[inbox_write] WARNING: no active gunshi found, defaulting '$TARGET' → 'gunshi'" >&2
+                TARGET="gunshi"
             fi
         else
-            echo "[inbox_write] WARNING: agent_list.sh not found, defaulting '$TARGET' → 'gunshi1'" >&2
-            TARGET="gunshi1"
+            echo "[inbox_write] WARNING: agent_list.sh not found, defaulting '$TARGET' → 'gunshi'" >&2
+            TARGET="gunshi"
         fi
         ;;
 esac

@@ -8,9 +8,9 @@ set -euo pipefail
 # - ashigaru / gunshi 列挙は scripts/lib/agent_list.sh 経由で settings.yaml から動的取得
 # - shogun (別 pane shogun:main.0) と karo (multiagent:agents.0) は special、hardcoded retain
 # - ashigaru{N} の pane = multiagent:agents.{N} 規則で導出 (番号 = pane index)
-# - gunshi{N} の pane は settings.yaml `cli.agents.<gunshi>.pane` field を参照
+# - 軍師の pane は settings.yaml `cli.agents.<gunshi>.pane` field を参照
 # - deprecated agent (settings.yaml の deprecated:true) は自動 skip
-# - pane 不在時 (例: gunshi2 の pane 0.9 殿手動起動前) は start_watcher_if_missing 内 pane_exists guard で skip
+# - pane がまだ無い時は start_watcher_if_missing の pane_exists guard で skip する
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$SCRIPT_DIR"

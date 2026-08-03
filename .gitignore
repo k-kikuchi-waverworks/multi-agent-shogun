@@ -207,6 +207,10 @@ logs/audits/
 !skills/shogun-context-cleanup/SKILL.md
 !skills/shogun-decision-triage/
 !skills/shogun-decision-triage/SKILL.md
+!skills/shogun-ledger-diet/
+!skills/shogun-ledger-diet/SKILL.md
+!skills/shogun-ledger-diet/scripts/
+!skills/shogun-ledger-diet/scripts/*.py
 
 # Python venv (explicit deny — whitelist patterns like LICENSE leak through !*/)
 .venv/

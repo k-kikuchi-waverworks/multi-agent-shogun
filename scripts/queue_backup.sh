@@ -338,19 +338,22 @@ mirror_plans() {
   return 0
 }
 
-# 終わりの証を 1 行 書く。書き手と読み手の形を 1 箇所に寄せるため、
-# 名前の付け方は scheduled_liveness_check.py に持たせてある (この script は呼ぶだけ)。
+# 終わりの証を 1 行 書く。
+#
+# 2026-08-03 (cmd_1479 段③・家老の裁「あ」) に、呼んでいた
+# scripts/scheduled_liveness_check.py が消えた。名前の付け方をそちらへ
+# 寄せていたので、この script は python を呼ぶだけだったが、
+# 呼ぶ先が無くなり ★控えは現に出来ているのに証だけが 09:09:37 で止まった★。
+# ⇒ ★その 1 手を外し、証は同じ形のまま bash で直に書く★。
+#   消えた python を戻す方は採らない (殿の裁と逆ゆえ)。
+#   書く場所は $QUEUE_STAMP_DIR で差し替えられる (試験が本番の証を汚さないため)。
+#   形式は消える前の物をそのまま踏襲する ("刻 + 名 + 終了" の 1 行・上書き)。
 write_end_stamp() {
-  local py stamp_args=()
-  py="$([ -x "$REPO/.venv/bin/python3" ] && echo "$REPO/.venv/bin/python3" \
-        || command -v python3 || true)"
-  if [ -z "$py" ]; then
-    printf '⚠ python3 が無く、終わりの証を書けなかった。次の見張りで「証を持たない」と鳴る\n' >&2
-    return 0
-  fi
-  [ -n "${QUEUE_STAMP_DIR:-}" ] && stamp_args=(--logs-dir "$QUEUE_STAMP_DIR")
-  if ! "$py" "$REPO/scripts/scheduled_liveness_check.py" \
-        --stamp queue_backup "${stamp_args[@]}"; then
+  local dir file
+  dir="${QUEUE_STAMP_DIR:-$REPO/logs}"
+  file="$dir/last_queue_backup_end.txt"
+  if ! mkdir -p "$dir" 2>/dev/null \
+     || ! printf '%s queue_backup 終了\n' "$(date '+%Y-%m-%d %H:%M:%S')" > "$file"; then
     # 書けなかったことを黙らせない (次の走行で「証が無い」と鳴った時、
     # 何ゆえ無いのかを辿る手掛かりがここに残る)
     printf '⚠ 終わりの証を書けなかった。次の見張りで「証を持たない」と鳴る\n' >&2

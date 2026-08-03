@@ -62,19 +62,6 @@ else
     CLI_ADAPTER_LOADED=false
 fi
 
-# ★生年の記録 (cmd_1387・家老 17:31 の裁(甲))★
-#   ★何ゆえ出陣にも要るか★= 番人は「名乗る沈黙 > process の齢」を crash-loop と読む
-#   ⇒ ★出陣で生まれた体も、切替で生まれた体と全く同じ顔で映る★
-#   ⇒ ★出陣の朝、真因を渡す物が無ければ、番人の警報を読む者は己で pane を実査する外ない★。
-#   ★★fail-open である★★= ★記録は添え物であり、出陣を止めてはならぬ★
-#   (出陣が失敗すれば全軍が起きぬ = 本日 最も高い代償) ⇒ ★源が無ければ何もせぬ函数を置く★。
-if [ -f "$SCRIPT_DIR/lib/switch_record.sh" ]; then
-    PROJECT_ROOT="${PROJECT_ROOT:-$SCRIPT_DIR}"
-    source "$SCRIPT_DIR/lib/switch_record.sh"
-else
-    record_switch_ts() { return 0; }
-fi
-
 # 足軽IDリストと人数を動的に取得（settings.yaml から）
 if [ "$CLI_ADAPTER_LOADED" = true ]; then
     _ASHIGARU_IDS_STR=$(get_ashigaru_ids)
@@ -769,7 +756,6 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
     tmux set-option -p -t "shogun:main" @agent_cli "$_shogun_cli_type"
     tmux send-keys -t shogun:main "$_shogun_cmd"
     tmux send-keys -t shogun:main Enter
-    record_switch_ts "shogun" "$_shogun_cli_type" "$(get_agent_model "shogun" 2>/dev/null || echo "-")" "boot"
     opencode_startup_delay "$_shogun_cli_type"
     _shogun_display=$(get_model_display_name "shogun" 2>/dev/null || echo "Opus")
     tmux set-option -p -t "shogun:main" @model_name "$_shogun_display" 2>/dev/null || true
@@ -789,7 +775,6 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
     tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_karo_cli_type"
     tmux send-keys -t "multiagent:agents.${p}" "$_karo_cmd"
     tmux send-keys -t "multiagent:agents.${p}" Enter
-    record_switch_ts "karo" "$_karo_cli_type" "$(get_agent_model "karo" 2>/dev/null || echo "-")" "boot"
     opencode_startup_delay "$_karo_cli_type"
     _karo_display=$(get_model_display_name "karo" 2>/dev/null || echo "Sonnet")
     tmux set-option -p -t "multiagent:agents.${p}" @model_name "$_karo_display" 2>/dev/null || true
@@ -812,7 +797,6 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
             tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_ashi_cli_type"
             tmux send-keys -t "multiagent:agents.${p}" "$_ashi_cmd"
             tmux send-keys -t "multiagent:agents.${p}" Enter
-            record_switch_ts "ashigaru${i}" "$_ashi_cli_type" "$(get_agent_model "ashigaru${i}" 2>/dev/null || echo "-")" "boot"
             opencode_startup_delay "$_ashi_cli_type"
         done
         log_info "  └─ 足軽1-${_ASHIGARU_COUNT}（決戦の陣）、召喚完了"
@@ -829,7 +813,6 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
             tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_ashi_cli_type"
             tmux send-keys -t "multiagent:agents.${p}" "$_ashi_cmd"
             tmux send-keys -t "multiagent:agents.${p}" Enter
-            record_switch_ts "ashigaru${i}" "$_ashi_cli_type" "$(get_agent_model "ashigaru${i}" 2>/dev/null || echo "-")" "boot"
             opencode_startup_delay "$_ashi_cli_type"
         done
         log_info "  └─ 足軽1-${_ASHIGARU_COUNT}（平時の陣）、召喚完了"
@@ -855,7 +838,6 @@ with open(f,'w') as fh: yaml.safe_dump(d, fh, default_flow_style=False, allow_un
         tmux set-option -p -t "multiagent:agents.${p}" @agent_cli "$_gunshi_cli_type"
         tmux send-keys -t "multiagent:agents.${p}" "$_gunshi_cmd"
         tmux send-keys -t "multiagent:agents.${p}" Enter
-        record_switch_ts "$_gi" "$_gunshi_cli_type" "$(get_agent_model "$_gi" 2>/dev/null || echo "-")" "boot"
         _gunshi_display=$(get_model_display_name "$_gi" 2>/dev/null || echo "Opus+T")
         tmux set-option -p -t "multiagent:agents.${p}" @model_name "$_gunshi_display" 2>/dev/null || true
         log_info "  └─ 軍師 ${_gi}（${_gunshi_display}）、召喚完了"
@@ -965,66 +947,30 @@ NINJA_EOF
     done
 
     # 既存のwatcherと孤児inotifywait/fswatchをkill
-    # cmd_1339: 旧supervisorも先にkill (残すとpkill直後〜再起動の間に旧コードが
-    # watcherをrace起動し、二重起動・旧配線が混入する)
-    pkill -f "watcher_supervisor.sh" 2>/dev/null || true
     pkill -f "inbox_watcher.sh" 2>/dev/null || true
     pkill -f "inotifywait.*queue/inbox" 2>/dev/null || true
     pkill -f "fswatch.*queue/inbox" 2>/dev/null || true
     sleep 1
 
-    # ═══════════════════════════════════════════════════════════════════
-    # cmd_1339 ③ 出陣gate: watcher起動前に pane 割当と @agent_id を突合
-    # ───────────────────────────────────────────────────────────────────
-    # 2026-07-25 交差配達事故 (0.6=gunshi1/0.7=ashigaru6 のズレを watcher が
-    # index規約で配線→clear_commandが別agentのsessionを吹き飛ばした) の再発防止。
-    # ★ここで止めれば当日の事故は起きなかった★。
-    #   - 規約paneと@agent_id実体が食い違えば → 警告 + @agent_id正本で配線
-    #   - @agent_id実体が見つからなければ → ★watcher起動を中止★ (誤配線より停止が正)
-    # ═══════════════════════════════════════════════════════════════════
-    source "$SCRIPT_DIR/scripts/lib/pane_gate.sh"
-    shutsujin_watcher_pane() {
-        local agent="$1" expected="$2" resolved=""
-        if resolved=$(pane_gate_resolve_by_agent_id "$agent"); then
-            if [ "$resolved" != "$expected" ]; then
-                log_war "⚠️ 出陣gate: ${agent} の pane 規約=${expected} / 実体=${resolved} — @agent_id正本で配線する"
-            fi
-            echo "$resolved"
-            return 0
-        fi
-        if pane_gate_verify "$agent" "$expected"; then
-            echo "$expected"
-            return 0
-        fi
-        log_war "🚨 出陣gate: ${agent} の @agent_id pane が見つからぬ (規約pane=${expected} の実体='$(pane_gate_agent_id_of "$expected" 2>/dev/null || echo "<unset>")')。誤配線防止のため watcher 起動を中止。是正後は watcher_supervisor が自動起動する"
-        return 1
-    }
-
     # 将軍のwatcher（ntfy受信の自動起床に必要）
     # 安全モード: phase2/phase3エスカレーションは無効、timeout周期処理も無効（event-drivenのみ）
-    # cmd_1339 ③: 全watcherの pane は出陣gate (@agent_id突合) を通してから配線する
-    if _shogun_wpane=$(shutsujin_watcher_pane shogun "shogun:main.0"); then
-        _shogun_watcher_cli=$(tmux show-options -p -t "$_shogun_wpane" -v @agent_cli 2>/dev/null || echo "claude")
-        nohup env ASW_DISABLE_ESCALATION=1 ASW_PROCESS_TIMEOUT=0 ASW_DISABLE_NORMAL_NUDGE=0 \
-            bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" shogun "$_shogun_wpane" "$_shogun_watcher_cli" \
-            >> "$SCRIPT_DIR/logs/inbox_watcher_shogun.log" 2>&1 &
-        disown
-    fi
+    _shogun_watcher_cli=$(tmux show-options -p -t "shogun:main" -v @agent_cli 2>/dev/null || echo "claude")
+    nohup env ASW_DISABLE_ESCALATION=1 ASW_PROCESS_TIMEOUT=0 ASW_DISABLE_NORMAL_NUDGE=0 \
+        bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" shogun "shogun:main" "$_shogun_watcher_cli" \
+        >> "$SCRIPT_DIR/logs/inbox_watcher_shogun.log" 2>&1 &
+    disown
 
     # 家老のwatcher
-    if _karo_wpane=$(shutsujin_watcher_pane karo "multiagent:agents.${PANE_BASE}"); then
-        _karo_watcher_cli=$(tmux show-options -p -t "$_karo_wpane" -v @agent_cli 2>/dev/null || echo "claude")
-        nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" karo "$_karo_wpane" "$_karo_watcher_cli" \
-            >> "$SCRIPT_DIR/logs/inbox_watcher_karo.log" 2>&1 &
-        disown
-    fi
+    _karo_watcher_cli=$(tmux show-options -p -t "multiagent:agents.${PANE_BASE}" -v @agent_cli 2>/dev/null || echo "claude")
+    nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" karo "multiagent:agents.${PANE_BASE}" "$_karo_watcher_cli" \
+        >> "$SCRIPT_DIR/logs/inbox_watcher_karo.log" 2>&1 &
+    disown
 
     # 足軽のwatcher
     for i in $(seq 1 "$_ASHIGARU_COUNT"); do
         p=$((PANE_BASE + i))
-        _ashi_wpane=$(shutsujin_watcher_pane "ashigaru${i}" "multiagent:agents.${p}") || continue
-        _ashi_watcher_cli=$(tmux show-options -p -t "$_ashi_wpane" -v @agent_cli 2>/dev/null || echo "claude")
-        nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" "ashigaru${i}" "$_ashi_wpane" "$_ashi_watcher_cli" \
+        _ashi_watcher_cli=$(tmux show-options -p -t "multiagent:agents.${p}" -v @agent_cli 2>/dev/null || echo "claude")
+        nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" "ashigaru${i}" "multiagent:agents.${p}" "$_ashi_watcher_cli" \
             >> "$SCRIPT_DIR/logs/inbox_watcher_ashigaru${i}.log" 2>&1 &
         disown
     done
@@ -1035,30 +981,15 @@ NINJA_EOF
     _gunshi_idx=0
     for _gi in $_ACTIVE_GUNSHI_IDS_STR; do
         p=$((PANE_BASE + _ASHIGARU_COUNT + 1 + _gunshi_idx))
-        _gunshi_idx=$((_gunshi_idx + 1))
-        _gunshi_wpane=$(shutsujin_watcher_pane "$_gi" "multiagent:agents.${p}") || continue
-        _gunshi_watcher_cli=$(tmux show-options -p -t "$_gunshi_wpane" -v @agent_cli 2>/dev/null || echo "claude")
-        nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" "$_gi" "$_gunshi_wpane" "$_gunshi_watcher_cli" \
+        _gunshi_watcher_cli=$(tmux show-options -p -t "multiagent:agents.${p}" -v @agent_cli 2>/dev/null || echo "claude")
+        nohup bash "$SCRIPT_DIR/scripts/inbox_watcher.sh" "$_gi" "multiagent:agents.${p}" "$_gunshi_watcher_cli" \
             >> "$SCRIPT_DIR/logs/inbox_watcher_${_gi}.log" 2>&1 &
         disown
+        _gunshi_idx=$((_gunshi_idx + 1))
     done
 
     _watcher_total=$((_ASHIGARU_COUNT + 2 + _ACTIVE_GUNSHI_COUNT))
     log_success "  └─ ${_watcher_total}エージェント分のinbox_watcher起動完了（将軍+家老+足軽${_ASHIGARU_COUNT}+軍師${_ACTIVE_GUNSHI_COUNT}）"
-
-    # ═══════════════════════════════════════════════════════════════════
-    # cmd_1339 ④: watcher_supervisor を出陣で必ず起動
-    # ───────────────────────────────────────────────────────────────────
-    # ★従来は誰も supervisor を起動しておらず (shutsujin/cron/Makefile いずれにも無し)、
-    # 2026-07-17〜07-25 の8日間 supervisor + ledger_guard が不在のまま誰も気付けなかった★。
-    # 出陣に組込むことで「不在がdefault」の構造を根絶する。二重起動は lifetime lock
-    # (scripts/lib/proc_lock.sh) で supervisor 自身が防ぐ。直前に起動した watcher 群も
-    # 各自 lifetime lock を保持するゆえ、supervisor が重ねて起動することはない。
-    # 不在検知の網は idle_revive_scan cron (3分毎) が担う。
-    # ═══════════════════════════════════════════════════════════════════
-    nohup bash "$SCRIPT_DIR/scripts/watcher_supervisor.sh" >> "$SCRIPT_DIR/logs/watcher_supervisor.log" 2>&1 &
-    disown
-    log_success "  └─ watcher_supervisor 起動（lifetime lock単一化・pane drift検知層つき）"
 
     # STEP 6.7 は廃止 — CLAUDE.md Session Start (step 1: tmux agent_id) で各自が自律的に
     # 自分のinstructions/*.mdを読み込む。検証済み (2026-02-08)。

@@ -12,19 +12,12 @@
 # Step 3: OSS公開対象ファイルを許可
 !.gitignore
 !.gitattributes
-# cmd_1445 (2026-07-28): submodule の宣言。追跡下に在ったが白名簿には無かった。
-#   これが配られぬと fresh clone で git submodule update --init が何も見つけられず、
-#   tests/test_helper 配下の bats 補助が入らぬ = テストが一本も走らぬ形になる。
-!.gitmodules
 !.gitleaks.toml
 !CLAUDE.md
 !LICENSE
 !README.md
 # plans/ directory whitelist leak fix (README.md全階層ルールの上書き — cmd_527 殿判断)
 plans/README.md
-# cmd_1386 (2026-07-26): 上の plans/README.md は最上位1本だけを閉じる。18行 !README.md は先頭 / が無いゆえ
-# 全階層を開く = plans/*/README.md が 10 file 漏れておった (dry-run で実測)。
-plans/**/README.md
 !README_ja.md
 !CHANGELOG.md
 !CONTRIBUTING.md
@@ -49,20 +42,12 @@ plans/**/README.md
 !instructions/cli_specific/kimi_tools.md
 !instructions/cli_specific/opencode_tools.md
 !instructions/cli_specific/cursor_tools.md
-# cmd_1445 (2026-07-28): antigravity だけ白名簿に無かった (兄弟 6 本は在る)。
-#   build_instructions.sh:111 がこの file を読んで antigravity 向け 4 本を組み立てる。
-!instructions/cli_specific/antigravity_tools.md
 
-# Multi-CLI: Build template parts (common sections)
+# Multi-CLI: Build template parts (roles, common sections)
+!instructions/roles/
+!instructions/roles/*.md
 !instructions/common/
 !instructions/common/*.md
-
-# cmd_1451 (2026-07-28): instructions/roles/ を退役させ instructions/retired/ へ移した。
-#   build はもう読まぬ (scripts/build_instructions.sh は instructions/{role}.md のみを見る)。
-#   ★白名簿へ足す理由★= 追跡下に置きながら白名簿に無い形は、index から外して add し直す日に
-#   「add できぬ」へ化ける (cmd_1445 で現物を実演した族)。移した先も同じ罠を持つゆえ塞ぐ。
-!instructions/retired/
-!instructions/retired/*.md
 
 # Multi-CLI: Generated instruction files (built by build_instructions.sh)
 !instructions/generated/
@@ -74,30 +59,9 @@ plans/**/README.md
 !lib/ntfy_auth.sh
 !lib/agent_status.sh
 !lib/agent_registry.sh
-# cmd_1387 (2026-07-27): 体の生年を落とす書き手 (切替と出陣が同じ源を使う)
-#   ★之を白名簿へ入れ忘れると【fresh clone に無い】= 両呼び手とも fail-open ゆえ
-#   ★黙って記録が消える★ = 「在るが配られておらぬ」の族 (本日 gate が名指した当の形)。
-!lib/switch_record.sh
-# cmd_1418 (2026-07-27): pane で CLI プロセスが現に動いているかを見る口。
-#   これも .gitignore:7 の * に黙って弾かれる。白名簿へ入れねば fresh clone に無く、
-#   agent_status.sh の実体欄が全部「不明」になる (在るが配られておらぬ形)。
-!lib/pane_cli_liveness.sh
-# cmd_1445 (2026-07-28): branch 方針の 3 script (auto_merge / branch_drift / pre_deploy) が
-#   source する共有部品。これが欠けると 3 本とも起動時に落ちる。
-!lib/branch_policy.sh
 
 # Multi-CLI: Codex auto-load file
 !AGENTS.md
-# cmd_1441 (2026-07-28): ★AGENTS.md の兄弟 2 本★ = 同じ scripts/build_instructions.sh が
-#   CLAUDE.md から作る生成物でありながら、白名簿に名が無かった。
-#   ★追跡下ゆえ今は配られておる★ = fresh clone にも現に在る (26,734 / 26,697 byte を実測)。
-#   ★危ういのは一度 index から外れた日である★ = 使い捨ての clone で実演した:
-#     `git rm --cached` の後に `git add` を撃つと ★.gitignore に弾かれて拒まれる★
-#     (AGENTS.md は白名簿に在るゆえ通る)。⇒ 生成物の置き場を動かす・作り直しの途中で
-#     一度 index から外す、といった手を踏んだ日に ★3 兄弟のうち 2 本だけが静かに落ちる★。
-#   ★本日 13 度 踏んだのと同じ形ゆえ、踏む前に足す★ (従来は踏んでから足しておった)。
-!.github/copilot-instructions.md
-!agents/default/system.md
 
 # Multi-CLI: OpenCode agent file
 !.opencode/agents/*.md
@@ -126,25 +90,6 @@ plans/**/README.md
 !config/ntfy_auth.env.sample
 !config/opencode-tui.json
 !config/opencode-permissions.yaml
-# cmd_1352 (2026-07-26): 変異の台帳 + 成果物manifest置き場 (沈黙落とし穴gateの正本)
-!config/mutation_registry.yaml
-# cmd_1374 A-1 (2026-07-26): ★跨ぎ台帳★ (対象 repo が /mnt/c/Users 配下ゆえ台帳を shogun 側に置く形)。
-#   ★名指しを忘れると「手元では動くが clone には無い」で静かに落ちる★ = cmd_1367 の族ゆえ必ず書く。
-!config/mutation_registry.web.yaml
-# cmd_1408 (2026-07-27): ★跨ぎ台帳 その二★ = aituber-project-ml (F: の Windows 正本・ml へは 0 file)。
-#   ★六号 実測 09:0x★= 名指しを足すまで `git check-ignore` が .gitignore:7 の `*` で弾いておった
-#   = ★台帳を書いても追跡下へ入らず、fresh clone では毎朝 UNDETERMINED になる形★。
-#   ★併せて名乗る★= ★配布の門 (gate_undistributed_tooling.sh) は此の抜けを捕えぬ★
-#   = 使い捨ての clone で両側を撃って実測 (台帳を配らぬ木でも [PASS] rc=0・参照抽出の hit 0 件)
-#   = ★台帳 yaml は其の門の網の外に在る (web の台帳も同じく外)★ ⇒ 捕えるのは gate_nightly の
-#     `-f "$ML_REG"` の枝のみ (見えねば UNDETERMINED) ⇒ ★ゆえに此の 1 行を落とすな★。
-#   ★★2026-07-30 cmd_1479 (88aa167) 追記 = 上に挙げた門も枝も、どちらも撤去した★★
-#     (gate_undistributed_tooling.sh / gate_nightly.sh)。
-#     ⇒ ★此の 1 行を落としても、今は誰も名指さぬ★ = 落とすなの理由が「門が捕える」から
-#       「捕える者が居ないゆえ、なお落とすな」へ変わっただけである。★落とすな★。
-!config/mutation_registry.ml.yaml
-!config/artifact_manifests/
-!config/artifact_manifests/*.manifest
 
 # Templates
 !templates/
@@ -172,205 +117,25 @@ scripts/seo_qc.sh
 !scripts/stop_hook_inbox.sh
 !scripts/session_start_hook.sh
 !scripts/agent_status.sh
-!scripts/switch_cli.sh
 !scripts/ratelimit_check.sh
-# cmd_1447 (2026-07-28): ★!scripts/ratelimit_check.sh と !scripts/discord_post.sh を此処から落とした。★
-#   機序 = 実体は fd78d52 (2026-07-02・cmd_1159) で scripts/retired/ へ退役したが、その commit は
-#   git mv だけを撃っており .gitignore を触っておらぬ。★白名簿は指す先を失っても何も申さぬ★ゆえ
-#   26 日間 誰も気付かなんだ (指し先が消えても git は黙る = cmd_1440 と同じ族)。
-#   落とす側を選んだ理由 = ★retired 配下を指す形 (乙案) は下の cmd_1445 の註と真っ向から食い違う★。
-#   なお retired 3 本は今も追跡下である。★.gitignore は既に index に在る file を追跡外にはせぬ★
-#   (隔離した木で実測: retired/ratelimit_check.sh は check-ignore で除外と出るが、現に追跡下に在る)。
-#   ★上の「除外と出る」は git check-ignore --no-index を撃った時に限る (六号 実測 2026-07-28 04:28)。★
-#     機序 = check-ignore は★追跡下の path を元より評さぬ★ゆえ素では rc=1 (除外されぬ) を返す。
-#     --no-index は index を見ずに規則だけで判ずるゆえ rc=0 (除外) を返す。同じ path で答が割れる。
-#     実測 = retired/discord_post.sh と retired/dashboard-viewer.py (共に追跡下) は 素 rc=1 / --no-index rc=0。
-#     ★同じ綴りで両方を見た★= retired/ratelimit_check.sh は 63ecdc7 (cmd_1448) で追跡下から外れた後、
-#     ★規則を1行も触れておらぬのに素でも rc=0 へ転じた★= 効いておるのは追跡の有無だけである証。
-# ★cmd_1448 (2026-07-28) で ratelimit_check.sh だけ上の 1 行を戻した (足軽四号)。★
-#   ★六号の判断は当時の前提の下では正しい。前提の方が誤っておった。★
-#   前提の誤り = 退役 commit fd78d52 は「参照0」と名乗ったが、★その時点で現に呼ぶ者が居った★
-#   (android/.../AgentsViewModel.kt:181 が `bash $projectPath/scripts/ratelimit_check.sh` を撃つ。
-#    fd78d52^ の木で実測して確かめた)。走査が .kt を見ておらなんだ ＝ 「0 件」が
-#   「無かった」ではなく「見ておらぬ」であった族。★ゆえに実体を scripts/ へ戻し、指し先を真にした。★
-#   戻した後に現に動くことも実測済 (rc=0・現在値を出力)。retired 位置では
-#   ★己の路の解き方が壊れて依存を読めず落ちておった★ (rc=1) ＝ 指し先を直すだけでは足りなんだ。
-#   ★退役 3 本の残り 2 本は据え置き★= 生きた呼び手を数え直した結果、
-#   discord_post.sh = 0 本 / dashboard-viewer.py = 0 本 (CHANGELOG の履歴記述のみ・呼び手でない)。
-# ★scripts/discord_channel_inventory.sh と scripts/discord_channel_delete.sh は【永久に追跡せぬ】★
-#   (家老裁定 2026-07-26・cmd_1367 軍師一号検分)。★ここに書く理由 = 次の者が迷うのは docs を
-#   読む時ではなく、この file を編む時ゆえ★ (先例 = 下記 gpu_sidecar_stop.sh の運用記録の注)。
-#   ★配らぬ根拠 (拙者が実測して裏を取った・2026-07-26)★:
-#     ・literal token は無い (両 script とも backend/.env から DISCORD_TOKEN を読む) = 実測 0 件。
-#     ・★但し delete.sh に殿の稼働 guild の実 channel/category ID が 40 個 平文で焼かれておる★
-#       (17〜20桁 ID の一意出現数 = 実測 40)。
-#     ・両 script が殿の個人 tree の絶対 path を hardcode (inventory 3 箇所 / delete 2 箇所)。
-#     ・★追跡下から【呼ぶ者】は 0 件★ ゆえ fresh clone は壊れぬ = 配らぬ側に倒して害が無い。
-#       ★正確に記す★ = 名を含む追跡下 file は 1 本ある (skills/discord-ch-state-verify/SKILL.md)
-#       が、それは "Do NOT use for" 行での ★使うなという名指し★ であって呼び出しではない。
-#   ★将来 配るなら★ = ID 表の外出しと path の env 化が前提。
-#   ★経緯の全文 = docs/content/ops/cmd_1367_undistributed_tooling.md★
+!scripts/switch_cli.sh
+!scripts/discord_post.sh
 !scripts/stall_watchdog_scan.sh
 !scripts/stall_watchdog_scan.py
 !scripts/retroactive_commit_verify.sh
 !scripts/mcp_health_check.sh
 !scripts/context_cleanup_diagnose.sh
-# cmd_1418 (2026-07-27): pane の CLI 生死を単体で見る CLI (lib/pane_cli_liveness.sh の入口)
-!scripts/pane_cli_liveness.sh
 # cmd_1255 (2026-07-11): 台帳parse自己検証gate (ledger_guard watcher + 手動検証CLI)
 !scripts/ledger_guard.sh
 !scripts/ledger_validate.py
-# cmd_1333 (2026-07-25): cmd採番の排他払い出しgate (番号衝突根絶)
-!scripts/cmd_id_alloc.sh
-# cmd_1466 (2026-07-28): queue/ を repo の木の外へ控える道具 (足軽一号)。
-#   ★この行が要る理由 = 守り自身が、守るべき事故の射程の中に居た★。
-#   queue/ 配下は 1 本も追跡下に無い (実測 2026-07-28T17:57 = `git ls-files queue` が 0 本) ゆえ
-#   `git clean -xd` 一手で 913 本 / 21.79 MiB が消える。その控えを取る script が
-#   同じ一手で一緒に消えては、控えを取り直す手が残らない。
-#   ★見つけ方 = `git status` ではなく `git check-ignore` である★ (ignore された file は
-#   `??` にすら出ないので、git status は「緑」ではなく「見ていない」を返す)。
-!scripts/queue_backup.sh
-# cmd_1352 (2026-07-26): 沈黙する落とし穴gate (gate-1=commit捕捉 / gate-2=変異台帳再走。
-# 本gate自身が「.gitignore:7 の * に黙って弾かれる」を初回実走で検知し、この否定規則で是正した)
-!scripts/gate_artifact_capture.sh
-!scripts/gate_mutation_replay.py
-# cmd_1387 (2026-07-27): gate-3 = 牙が鈍った其の場で名指す層 (gate_precommit が呼ぶ先)。
-# ★本日 同型の 5 度目 = .gitignore:7 の * に黙って弾かれておった★ (git check-ignore で実測)。
-#   ★之を足さねば「作業ツリーでは緑・HEAD には存在せぬ gate」になる★ =
-#   gate_precommit.sh が呼ぶ先を失い、★他の誰の手元でも走らぬのに、拙者の手元だけ緑★という
-#   cmd_1386 で掘り当てた当の穴に、其れを掘った者が落ちる形になる。
-!scripts/gate_anchor_touched.py
-# cmd_1409 (2026-07-27): gate-4 = ★台帳へ書いたのに登録されておらぬ★ を名指す層 (gate_precommit が呼ぶ先)。
-# ★同型の 11 度目 = .gitignore:7 の * に黙って弾かれておった★ (git add が現に拒んだ・09:45 実測)。
-#   ★之を通さねば「作業ツリーでは呑まれを見張り、配る物では見張らぬ」★ =
-#   gate_precommit.sh が呼ぶ先を失うて ★毎 commit「道具が居らぬ」で鳴る門★になる (T-RA-004 が縛る形)。
-!scripts/gate_registry_append.py
-# (下の 5 行は、上の白名簿の行に対する註ではない。cmd_1386 の道具 ledger_id_census.py への註だったが、
-#  其の道具は cmd_1479 で撤去した。註の中身は .gitignore 自身の話ゆえ残す = 台帳を .d へ割る時の注意)
-#   ★手2 で台帳を .d へ割る時は【shard も同じ穴に落ちる】= 実測済 (2026-07-26T22:37)★:
-#   `git add --dry-run config/mutation_registry.d/*.yaml` が ignored を返し、
-#   且つ 手2 は旧 file を消すゆえ ★HEAD から台帳が丸ごと消え、作業ツリーだけ緑のまま★になる。
-#   ⇒ 割る commit と同じ commit で次の 2 行 (web 台帳を割るなら 4 行) を足すこと:
-#     !config/mutation_registry.d/  /  !config/mutation_registry.d/*.yaml
-# cmd_1363 (2026-07-26): 「道具へ渡す前に shell が食う」関所 (PreToolUse hook)。
-# ★本 file が追跡下に無ければ関所そのものが fresh clone へ渡らず、.claude/settings.json の
-#   hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる★ = 本日3度目の同型ゆえ明示で通す。
-!scripts/shell_expansion_guard.py
-# cmd_1395 (2026-07-27): report YAML の自己検め (PostToolUse hook + 手検めCLI)。
-# ★本日 同型の 6 度目★ = .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
-#   ★併せて cmd_1395 で判った第二の顔★ = 此の shell の `grep` は ugrep --ignore-files 包み
-#   (bash function) ゆえ ★.gitignore を尊ぶ★ ⇒ 白名簿に無い新造 file は
-#   ★`grep -rn ... .` の再帰から黙って消える★ (実測: 同じ pattern が `./scripts` 指定では 14 件、
-#   `.` 指定では 13 件)。⇒ ★anchor の一意性 (規律8) や「全数当たり」を再帰 grep で数える者は、
-#   【登録しようとしておる当の新造 file】を数え落とす★ = 0 件を「安心」と読む道が此処にも在る。
-#   ⇒ 数える時は explicit path か `git ls-files` を使い、★未追跡の物は別勘定で数えよ★。
-!scripts/report_validate.py
-# cmd_1411 (2026-07-27): 「process を殺す力」を綴りでなく力の形で禁ずる関所 (PreToolUse hook)。
-# ★本日 同型の 8 度目★ = .gitignore:7 の * に黙って弾かれておった (git check-ignore で実測)。
-#   ★此度は上の cmd_1363 の註が名指しで警めておる其の形である★ =
-#   ★追跡外のまま settings.json へ hook を宣言すれば、fresh clone では
-#     【呼ぶ相手の居らぬ番人】が残り、殺す力は素通しに戻る★
-#   = ★而も「手元では塞がっておる」ゆえ、誰も気付かぬ★。
-#   ⇒ ★配線 (settings.json) より先に、追跡下へ入れる方が順として正しい★。
-!scripts/process_signal_guard.py
-# cmd_1339/1354 (2026-07-25夜〜07-26朝): 恋の本番TTS(port 9100)を構造的に守る道具。
-# 保護portを実測判定して拒否し、意図的停止は3条件 (意思明示 + 20字以上の理由 + port名指し承認)
-# でのみ通す。★家老裁定 2026-07-26 10:43 = 追跡下へ入れよ★ = fresh clone に渡らねば
-# 「守り」は存在せぬのと同じ (ash一号 cmd_1349 の『fork実体が gitignore された venv にしか
-# 無かった』と同型を、この道具自身が抱えておった)。
-# ★logs/production_stop_journal.log は追跡せぬ★ (運用記録は肥大し秘匿情報が混じりうる=家老裁定)。
-!scripts/gpu_sidecar_stop.sh
-!scripts/gate_precommit.sh
-!scripts/install_gate_hooks.sh
-# cmd_1465 (2026-07-28): 定時実行 7 本の「終わった証」を検める側 (stall_watchdog_scan.py が呼ぶ先)。
-# 一号が 44fa684 で名指した穴と同じ物を、その 40 分後に五号が己の script で踏んでいた。
-# 気づけたのは git status が緑だったためではなく、git status がこの file を見ていなかったため。
-#   ⇒ 追跡外かどうかを git status で確かめるな。git check-ignore で確かめること。
-# 見張りを据える側の script ほど、消えても誰も気づかない (見張りが黙るだけなので)。
-!scripts/scheduled_liveness_check.py
-# cmd_1465 (2026-07-28): 毎朝 06:55 の cron が現に呼んでいる先。五号が census で見つけた。
-#   cron の 5 本のうち、呼ぶ先が git から見えないのはこの 1 本だけ。
-#   中身の commit は持ち主 (cmd_1393) の手番ゆえ、ここでは「見える」ようにするまで。
-!scripts/engine_devserver_morning_check.sh
-# cmd_1381 段5b (2026-07-27): ★我らが現に撃った矢★ (logs/ntfy_send.log) を読む第二の口。
-# ★段3 の兄弟は engine 側の自己試験を読む★ = engine が緑でも scripts/ntfy.sh が死んでおれば
-#  殿へは届かぬ ⇒ ★見ておる物が別ゆえ、両方 clone へ渡らねば片目になる★。
-# ★本日 同型の 7 度目★ (cmd_1395 の申告が 6 度目) = .gitignore:7 の * に黙って弾かれておった
-#  (git check-ignore -v で実測: `.gitignore:7:*  scripts/gate_ntfy_sendlog.py`)。
-!scripts/gate_ntfy_sendlog.py
-
-# cmd_1401 (2026-07-27): ★刃を持たぬ負の主張★を止める門 (bats の `! cmd` は set -e 免除)。
-# ★据えた其の場で git check-ignore -v を撃ち、.gitignore:7 の * に弾かれておることを実測してから
-#  此処へ書いた★ (現に弾かれており、書かねば「配られておる」と思い込む所であった = 本日 9 度目)。
-# ★門の試験 (tests/unit/test_bats_negation_guard.bats) は tests/ が既に許されておるゆえ追記不要★
-#  = 実測で確かめた (git status に ?? として現れた = 追跡されうる状態に在る)。
-!scripts/gate_bats_negation.py
-
-# cmd_1399 (2026-07-27): 再帰 grep が未追跡 file を黙って落とす件を、その場で名乗らせる番人。
-# ★据える前に git check-ignore -v を撃ち、`.gitignore:7:*` に弾かれておることを実測してから
-#  此処へ書いた★ (本日 同型の 13 度目)。
-#   ★此度は皮肉が一段 深い★= 本 file が捕えようとしておる病は「未追跡ゆえ探索から消える」であり、
-#   ★書き忘れれば、其の病を捕える道具自身が未追跡のまま消える★ =
-#   .claude/settings.json の hook 宣言だけが残って【呼ぶ相手の居らぬ番人】になる。
-!scripts/grep_scope_warn.py
-
-# cmd_1435 (2026-07-28): 正本 (CLAUDE.md ほか) と、そこから作る生成物のずれを見る門。
-# ★据える前に git check-ignore -v を撃ち、`.gitignore:7:*` に弾かれておることを実測してから
-#  此処へ書いた★ (書かねば、門は手元でだけ効いて誰にも配られなんだ)。
-# ★試験 (tests/test_cmd1435_generated_sync.bats) は .gitignore:403 の !tests/*.bats に
-#  既に許されておることを、同じく check-ignore で実測した。ゆえに追記は門の1本のみ★
-!scripts/gate_generated_sync.sh
 
 # cmd_1280 (2026-07-14): idle_revive_scan 本体 (cmd_1154 起源・whitelist 漏れを是正。
 # tests/unit/test_idle_revive_cooldown.bats が参照するため追跡必須)
 !scripts/idle_revive_scan.py
-# cmd_1339 (2026-07-25): cron wrapper も追跡 (watcher_supervisor 生存監視④を担う。
-# 従来 whitelist 漏れで未追跡だった)
-!scripts/idle_revive_scan.sh
-# cmd_1367 (2026-07-26): staged crontab 行。★追跡下の instructions/karo.md:695 と
-# docs/.../cmd_1154_idle_revive_scan_adr.md が「これを登録せよ」と名指ししておるのに、
-# 指される側だけ配られておらなんだ★ = 本体 .py/.sh は上2件で個別に是正済みなのに
-# 同じ族の3本目がまた漏れた = ★1件ずつ拾う直し方では同じ穴が繰り返し開く★の実物。
-!scripts/idle_revive_scan.cron
-
-# cmd_1367 (2026-07-26): ★追跡下の scripts/setup_cron.sh:33 が crontab へ仕込む先★。
-# fresh clone では 20 分毎に「そんな file は無い」cron が回り続ける (誰も赤を出さぬ)。
-# memory feedback_idle_backlog_autopull = idle backlog 自動消化は運用則ゆえ道具本体。
-!scripts/idle_backlog_sweep.sh
-!scripts/idle_backlog_sweep.py
-
-# cmd_1367 (2026-07-26): 夜間停電中の誤 /clear 封じ + 復帰 nudge (cmd_1346)。
-# ★gpu_sidecar_stop.sh と同族 = 「守る道具が守られておらぬ」★。
-# crontab の閾値を退避し復旧を二重 (cron + detached bash) に仕込む可逆設計ゆえ、
-# 配られねば「殿の token 切れで全 agent が誤 clear される」事故に丸腰で戻る。
-!scripts/night_blackout_guard.sh
 
 # cmd_652 (2026-05-16): scripts/lib/ helper (settings.yaml 動的読込)
 !scripts/lib/
 !scripts/lib/agent_list.sh
-# cmd_1339 (2026-07-25): lifetime lock 契約 + pane 解決正本 lib
-!scripts/lib/proc_lock.sh
-!scripts/lib/pane_gate.sh
-# cmd_1445 (2026-07-28): branch 方針の道具 4 本。tests/unit/test_branch_policy_scripts.bats が
-#   3 本を名指しており、配られねば fresh clone でそのテストが落ちる。
-#   setup_cron.sh は残り 2 本を crontab へ仕込む口で、下の cmd_1367 の註が現に名指しておる。
-!scripts/auto_merge_short_lived.sh
-!scripts/branch_drift_check.sh
-!scripts/pre_deploy_verify.sh
-!scripts/setup_cron.sh
-
-
-# cmd_1445 (2026-07-28): 追跡下だが白名簿へ足さぬと判じた 9 本 (次の者が同じ判断を繰り返さぬための覚書)。
-#   規則は書かぬ。書けば配る側へ回るゆえ、ここは註のみである。
-#   scripts/retired/ 3 本 (dashboard-viewer.py / discord_post.sh / ratelimit_check.sh)
-#     = 退役済み。追跡下の .sh/.py から呼ぶ者は 0 本。index から外れる日が来たなら、それは撤去である。
-#   skills/waverworks-deploy-theme/ 6 本
-#     = 殿の会社固有の deploy 道具であり、この repo の OSS 配布面ではない (上の Skills 帯は
-#       「public OSS skills」と名乗っており、この skill だけ 0 件なのは意図と読める)。
-#       ★cmd_1447 (2026-07-28) 追記 = 上の二文めに在った「同 dir の .gitignore が deploy.config.yml を
-#       名指しで拒んでおる点も、配らぬ側の証である」は取り下げた。★ 其の行の側が誤りであり
-#       (頭書・中身・追加 commit の三つが揃って commit OK を指す)、cmd_1447 で落としたゆえである。
-#       ★配らぬと判ずる根拠は上の一文め (殿の会社固有ゆえ OSS 配布面ではない) だけが残る。★
 
 
 # SayTask (sample template only, not actual data)
@@ -458,9 +223,6 @@ tests/specs/osato_lms_*
 !tests/*.sh
 !tests/fixtures/
 !tests/fixtures/*.yaml
-# cmd_1355: 実 pane 採取の raw fixture (*.txt は whitelist 外ゆえ明示許可。
-# 名指しせねば gate-1 が [IGNORED] で赤くする — 2026-07-26 に本 file 自身で実測済)
-!tests/fixtures/upstream_session_limit_pane.txt
 !tests/unit/
 !tests/unit/*.bats
 !tests/integration/

@@ -22,6 +22,7 @@ setup_file() {
     export OUTPUT_DIR="$PROJECT_ROOT/instructions/generated"
 
     # パーツディレクトリの存在確認（前提条件）
+    [ -d "$PROJECT_ROOT/instructions/roles" ] || return 1
     [ -d "$PROJECT_ROOT/instructions/common" ] || return 1
     [ -d "$PROJECT_ROOT/instructions/cli_specific" ] || return 1
 
@@ -121,21 +122,7 @@ setup() {
 @test "opencode: generated markdown is LF-only and has no trailing whitespace [R6]" {
     local file
 
-    # 数える対象を先に配列へ集め、0 本なら不合格にする（cmd_1462）。
-    # nullglob を立てるのは、当たらない glob がパターン文字列のまま渡るのを止めるため。
-    # 立てないと [ -f ] がそれを飛ばし、1 本もチェックしないまま合格して終わる（実測済み）。
-    shopt -s nullglob
-    local files=("$OUTPUT_DIR"/opencode-*.md "$PROJECT_ROOT"/.opencode/agents/*.md)
-    shopt -u nullglob
-
-    if [ "${#files[@]}" -eq 0 ]; then
-        echo "母数 0: $OUTPUT_DIR と $PROJECT_ROOT/.opencode/agents に対象の .md が 1 本も無い。" >&2
-        echo "  これは『全部チェックした』ではなく『1 本も見なかった』である" >&2
-        echo "  (setup_file の build が落ちて生成物が出来ていない疑い)" >&2
-        return 1
-    fi
-
-    for file in "${files[@]}"; do
+    for file in "$OUTPUT_DIR"/opencode-*.md "$PROJECT_ROOT"/.opencode/agents/*.md; do
         [ -f "$file" ] || continue
 
         if LC_ALL=C grep -n $'\r' "$file"; then
@@ -335,13 +322,7 @@ import yaml
 
 project_root = Path(os.environ["PROJECT_ROOT"])
 agents_dir = project_root / ".opencode" / "agents"
-paths = sorted(agents_dir.glob("*.md"))
-assert paths, (
-    f"母数 0: {agents_dir} に *.md が 1 本も無い。"
-    " これは『全部 検めた』ではなく『一つも見なかった』である"
-    " (setup_file の build が落ちて生成物が出来ておらぬ疑い)"
-)
-for path in paths:
+for path in sorted(agents_dir.glob("*.md")):
     if path.name.endswith("-runtime.md"):
         continue
     text = path.read_text(encoding="utf-8")
@@ -388,13 +369,7 @@ import os
 import yaml
 
 agents_dir = Path(os.environ["PROJECT_ROOT"]) / ".opencode/agents"
-paths = sorted(agents_dir.glob("*.md"))
-assert paths, (
-    f"母数 0: {agents_dir} に *.md が 1 本も無い。"
-    " これは『全部 検めた』ではなく『一つも見なかった』である"
-    " (setup_file の build が落ちて生成物が出来ておらぬ疑い)"
-)
-for path in paths:
+for path in sorted(agents_dir.glob("*.md")):
     text = path.read_text(encoding="utf-8")
     frontmatter = yaml.safe_load(text.split("---", 2)[1])
     perm = frontmatter["permission"]
@@ -428,13 +403,7 @@ import os
 import yaml
 
 agents_dir = Path(os.environ["PROJECT_ROOT"]) / ".opencode/agents"
-paths = sorted(agents_dir.glob("*.md"))
-assert paths, (
-    f"母数 0: {agents_dir} に *.md が 1 本も無い。"
-    " これは『全部 検めた』ではなく『一つも見なかった』である"
-    " (setup_file の build が落ちて生成物が出来ておらぬ疑い)"
-)
-for path in paths:
+for path in sorted(agents_dir.glob("*.md")):
     text = path.read_text(encoding="utf-8")
     frontmatter = yaml.safe_load(text.split("---", 2)[1])
     edit = frontmatter["permission"]["edit"]

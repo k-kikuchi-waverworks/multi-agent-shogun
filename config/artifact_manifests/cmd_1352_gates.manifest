@@ -1,9 +1,0 @@
-# cmd_1352 成果物 manifest — 本 gate 群そのものを本 gate で守る (自己言及が初期防衛)
-# 文法: scripts/gate_artifact_capture.sh 冒頭コメント参照 (path / dir/ [min=N] / #コメント)
-scripts/gate_artifact_capture.sh
-scripts/gate_mutation_replay.py
-scripts/gate_precommit.sh
-scripts/install_gate_hooks.sh
-config/mutation_registry.yaml
-config/artifact_manifests/ min=1
-docs/content/ops/cmd_1352_silent_pitfall_gates.md

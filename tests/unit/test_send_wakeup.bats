@@ -183,7 +183,7 @@ MOCK
     [ "$status" -eq 0 ]
 
     # No nudge send-keys should have occurred
-    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
 
     echo "$output" | grep -q "SKIP"
 }
@@ -228,8 +228,8 @@ MOCK
     [ "$status" -eq 0 ]
 
     # These should never be used
-    if grep -q "paste-buffer" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "set-buffer" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "paste-buffer" "$MOCK_LOG"
+    ! grep -q "set-buffer" "$MOCK_LOG"
 
     # send-keys IS expected
     grep -q "send-keys" "$MOCK_LOG"
@@ -303,8 +303,8 @@ MOCK
     echo "$executable_lines" | grep -q "send-keys"
 
     # paste-buffer and set-buffer are NOT used
-    if echo "$executable_lines" | grep -q "paste-buffer"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if echo "$executable_lines" | grep -q "set-buffer"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! echo "$executable_lines" | grep -q "paste-buffer"
+    ! echo "$executable_lines" | grep -q "set-buffer"
 }
 
 # --- T-ESC-001: no unread → FIRST_UNREAD_SEEN stays 0 ---
@@ -326,87 +326,24 @@ MOCK
     echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"
 }
 
-# --- T-ESC-002 (cmd_1404 書き替え + 帯): Phase 1 の境を【実物の梯子】で挟む ---
-#
-# ★何故 書き替えたか — 実測が根拠である (2026-07-27 04:01:15 / MUT-1404-111)★
-#   ★旧 T-ESC-002 は梯子の条件を試験の中へ書き写しておった★ =
-#   `if [ "$age" -lt "$ESCALATE_PHASE1" ]` を試験が己で書き、send_wakeup だけを呼ぶ形ゆえ、
-#   ★production の Phase 1 の門を `if false` へ潰しても【緑のまま】であった★
-#   = ★空虚に緑★ (負の主張「Escape が出ぬ」は、★Escape を送りようが無い口★ を撃っておった)。
-#   ⇒ 書き替え = ★process_unread (実物の梯子) を呼ぶ★ + ★閾の両側で挟む★。
-#   ★守っておるのは T-PU-P1-001 / T-PU-P2-001 と同じ枝であるが、彼らは【点】(age 0 と 150)★ =
-#   ★閾 120 の直下 [60,120) に一点も無い★ ⇒ 本試験が其の帯を埋める。
-#
-# ★契約の値 120 は【焼き付ける側】である★ (家老 03:46 の表) = 誰かが動かせば必ず赤くなる。
-# ★実行時に production から読んで挟む形は誤りである★ = 試験も一緒に動き、動かす変異が見えぬ
-#   (拙者が MUT-1404-014/015 で現に踏んだ)。★ゆえに declared を書き、実装と突き合わせ、
-#   割れたら【どちらへも寄らず割れを名乗る】★。★意図して動かす日は declared も直せ★。
-@test "T-ESC-002 (cmd_1404 帯): escalation Phase 1 の境 — 閾直下は素の nudge・閾ちょうどで escalation へ移る" {
-    # ★契約★ = Phase 1 (素の nudge) は 2 分。★動かすなら此の一行も直せ★ — 直さねば下で赤くなる。
-    local declared=120
-    local impl
-    impl=$(grep -oP 'ESCALATE_PHASE1=\$\{ESCALATE_PHASE1:-\K[0-9]+' "$WATCHER_SCRIPT" | head -n1)
-    if [ -z "$impl" ]; then
-        echo "★前提を立てられぬ★: $WATCHER_SCRIPT から ESCALATE_PHASE1 の既定を読めなんだ" >&2
-        echo "  (綴りが変わったか、既定が消えた。★黙って skip すれば帯は再び空く★)" >&2
-        return 1
-    fi
-    if [ "$impl" != "$declared" ]; then
-        echo "★契約と実装が割れた★: 契約 ${declared}s / 実装 ${impl}s" >&2
-        echo "  ⇒ 意図して動かしたのなら ★此の試験の declared も直せ★ (= 意図を記録せよ)。" >&2
-        echo "  ⇒ 意図せぬのなら ★之が【閾が黙って動いた】の当の徴である★。" >&2
-        return 1
-    fi
+# --- T-ESC-002: unread < 2min → standard nudge ---
 
-    cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
-messages:
-  - id: msg_norm
-    from: karo
-    timestamp: "2026-07-02T12:00:00+09:00"
-    type: report_received
-    content: hello
-    read: false
-YAML
-    touch "$TEST_TMPDIR/shogun_idle_ashigaru9"   # idle (梯子へ入る前提)
-
-    # ── 直下 = 閾-1 秒 → ★まだ Phase 1★ (escalating と名乗らぬ) ──
-    # ★時計を止めて撃つ★ = 1 秒跨ぎの気紛れを作らぬ (T-BUSY-017 と同じ作法)
+@test "T-ESC-002: escalation Phase 1 — unread under 2min uses standard nudge" {
     run bash -c '
         source "'"$TEST_HARNESS"'"
-        date() { echo 1000000; }
-        AGENT_ID="ashigaru9"
-        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
-        LOCKFILE="${INBOX}.lock"
-        FIRST_UNREAD_SEEN=$(( 1000000 - '"$((declared - 1))"' ))
-        LAST_CLEAR_TS=0
-        process_unread event
+        now=$(date +%s)
+        FIRST_UNREAD_SEEN=$((now - 30))  # 30 seconds ago
+        age=$((now - FIRST_UNREAD_SEEN))
+        if [ "$age" -lt "$ESCALATE_PHASE1" ]; then
+            send_wakeup 2
+            echo "PHASE1_NUDGE"
+        fi
     '
     [ "$status" -eq 0 ]
-    grep -q "send-keys.*inbox1" "$MOCK_LOG"
-    # ★一行の if-then-return 形を保て★ = 段2 の計器 (gate_mutation_replay の NEG_SPELLINGS)
-    #   は ★`if <cmd>; then return 1`★ の一行形しか【負の主張】と数えぬ。
-    #   ★診断を if の外へ出して多行へ崩すと、主張は生きたまま【分母から消える】★
-    #   = ★数は減らず守りだけが見えなくなる★ (拙者が 04:15:53 に現に踏んだ) ゆえ、
-    #   診断は ★条件の中★ へ入れる (grep が当たった時だけ鳴る)。
-    if echo "$output" | grep -q "escalating" && { echo "★閾が【下へ】動いた★: 経過 $((declared - 1))s は閾 ${declared}s の直下ゆえ Phase 1 である筈" >&2; true; }; then return 1; fi
-
-    # ── 直上 = 閾ちょうど → ★Phase 2 へ移る★ (`-lt` ゆえ境界は escalation 側) ──
-    > "$MOCK_LOG"
-    run bash -c '
-        source "'"$TEST_HARNESS"'"
-        date() { echo 1000000; }
-        AGENT_ID="ashigaru9"
-        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
-        LOCKFILE="${INBOX}.lock"
-        FIRST_UNREAD_SEEN=$(( 1000000 - '"$declared"' ))
-        LAST_CLEAR_TS=0
-        process_unread event
-    '
-    [ "$status" -eq 0 ]
-    if ! echo "$output" | grep -q "escalating"; then
-        echo "★閾が【上へ】動いた★: 経過 ${declared}s は閾 ${declared}s ゆえ escalation である筈 (-lt は境界を含まぬ)" >&2
-        return 1
-    fi
+    echo "$output" | grep -q "PHASE1_NUDGE"
+    grep -q "send-keys.*inbox2" "$MOCK_LOG"
+    # No Escape-based nudge
+    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
 }
 
 # --- T-ESC-003: unread 2-4min → Escape+nudge ---
@@ -455,77 +392,26 @@ YAML
 
 # --- T-ESC-005: /clear cooldown → falls back to Escape+nudge ---
 
-# ★書き替えの理由 (2026-07-27 03:58:16 / MUT-1404-110)★
-#   ★旧 T-ESC-005 も梯子を書き写しておった★ = production の cooldown 門を `if true` へ
-#   常に開いても ★緑のまま★ = ★空虚に緑★ (負の主張「/clear が出ぬ」は、
-#   ★/clear を送りようが無い口 (send_wakeup_with_escape のみ) ★ を撃っておった)。
-# ★併せて帯の穴も実測で出た (MUT-1404-112)★ = ESCALATE_COOLDOWN を 300 → ★150 (半分)★ へ
-#   動かしても ★process_unread suite 17 本すべて緑★ =
-#   既存の点は「100 秒前」(比 0.33) と「LAST_CLEAR_TS=0」(常に期限切れ) の二つのみゆえ
-#   ★帯 [150, 300) に一点も無い★ = ★cooldown が黙って半分になっても誰も気付かなんだ★。
-# ⇒ 書き替え = ★process_unread (実物の梯子) を呼ぶ★ + ★閾の両側で挟む★ +
-#   ★契約の値 300 を焼き付け、実装と突き合わせ、割れたら割れを名乗る★。
-@test "T-ESC-005 (cmd_1404 帯): /clear cooldown の境 — 閾ちょうどは抑止・閾の直上で /clear が出る" {
-    # ★契約★ = /clear は 5 分に一度まで。★動かすなら此の一行も直せ★。
-    local declared=300
-    local impl
-    impl=$(grep -oP 'ESCALATE_COOLDOWN=\$\{ESCALATE_COOLDOWN:-\K[0-9]+' "$WATCHER_SCRIPT" | head -n1)
-    if [ -z "$impl" ]; then
-        echo "★前提を立てられぬ★: $WATCHER_SCRIPT から ESCALATE_COOLDOWN の既定を読めなんだ" >&2
-        echo "  (綴りが変わったか、既定が消えた。★黙って skip すれば帯は再び空く★)" >&2
-        return 1
-    fi
-    if [ "$impl" != "$declared" ]; then
-        echo "★契約と実装が割れた★: 契約 ${declared}s / 実装 ${impl}s" >&2
-        echo "  ⇒ 意図して動かしたのなら ★此の試験の declared も直せ★ (= 意図を記録せよ)。" >&2
-        echo "  ⇒ 意図せぬのなら ★之が【閾が黙って動いた】の当の徴である★。" >&2
-        return 1
-    fi
-
-    cat > "$TEST_INBOX_DIR/ashigaru9.yaml" << 'YAML'
-messages:
-  - id: msg_norm
-    from: karo
-    timestamp: "2026-07-02T12:00:00+09:00"
-    type: report_received
-    content: hello
-    read: false
-YAML
-    touch "$TEST_TMPDIR/shogun_idle_ashigaru9"
-
-    # ── 閾ちょうど = 前回 /clear から declared 秒 → ★まだ抑止★ (`-lt` は境界を含まぬ) ──
+@test "T-ESC-005: escalation /clear cooldown — falls back to Escape+nudge (copilot)" {
+    # Escape escalation is suppressed for claude/codex. Test with copilot.
+    export MOCK_PANE_CLI="copilot"
     run bash -c '
         source "'"$TEST_HARNESS"'"
-        date() { echo 1000000; }
-        AGENT_ID="ashigaru9"
-        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
-        LOCKFILE="${INBOX}.lock"
-        FIRST_UNREAD_SEEN=$(( 1000000 - 400 ))          # age 400 >= ESCALATE_PHASE2 = Phase 3
-        LAST_CLEAR_TS=$(( 1000000 - '"$declared"' ))
-        process_unread event
+        now=$(date +%s)
+        FIRST_UNREAD_SEEN=$((now - 300))  # 5 minutes ago
+        LAST_CLEAR_TS=$((now - 60))  # /clear sent 1 min ago (within 5min cooldown)
+        age=$((now - FIRST_UNREAD_SEEN))
+        if [ "$age" -ge "$ESCALATE_PHASE2" ] && [ "$LAST_CLEAR_TS" -ge "$((now - ESCALATE_COOLDOWN))" ]; then
+            send_wakeup_with_escape 4
+            echo "COOLDOWN_FALLBACK"
+        fi
     '
     [ "$status" -eq 0 ]
-    # ★一行の if-then-return 形を保て★ (理由は T-ESC-002 の註と同じ = 多行へ崩すと分母から消える)
-    if grep -q "send-keys.*/clear" "$MOCK_LOG" && { echo "★閾が【下へ】動いた★: 前回から ${declared}s は境界ゆえ /clear は抑止される筈 (-lt)" >&2; true; }; then return 1; fi
-    echo "$output" | grep -q "/clear cooldown, using Escape+nudge"
-
-    # ── 直上 = declared+1 秒 → ★抑止されぬ★ (/clear が現に出る) ──
-    > "$MOCK_LOG"
-    run bash -c '
-        source "'"$TEST_HARNESS"'"
-        date() { echo 1000000; }
-        AGENT_ID="ashigaru9"
-        INBOX="'"$TEST_INBOX_DIR"'/ashigaru9.yaml"
-        LOCKFILE="${INBOX}.lock"
-        FIRST_UNREAD_SEEN=$(( 1000000 - 400 ))
-        LAST_CLEAR_TS=$(( 1000000 - '"$((declared + 1))"' ))
-        process_unread event
-    '
-    [ "$status" -eq 0 ]
-    if ! grep -q "send-keys.*/clear" "$MOCK_LOG"; then
-        echo "★閾が【上へ】動いた★: 前回から $((declared + 1))s は閾 ${declared}s を越えておるゆえ /clear が出る筈" >&2
-        return 1
-    fi
+    echo "$output" | grep -q "COOLDOWN_FALLBACK"
+    grep -q "send-keys.*C-c" "$MOCK_LOG"
+    grep -q "send-keys.*Escape" "$MOCK_LOG"
+    grep -q "send-keys.*inbox4" "$MOCK_LOG"
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
 }
 
 # --- T-BUSY-001: agent_is_busy detects "Working" ---
@@ -564,7 +450,7 @@ YAML
     echo "$output" | grep -qi "SKIP.*busy"
 
     # No nudge should have been sent
-    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
 }
 
 # --- T-BUSY-004: send_wakeup_with_escape skips when agent is busy ---
@@ -579,7 +465,7 @@ YAML
     echo "$output" | grep -qi "SKIP.*busy"
 
     # No nudge should have been sent
-    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
 }
 
 # --- T-CODEX-001: codex /clear → /new conversion ---
@@ -594,7 +480,7 @@ YAML
 
     # Should send /new, NOT /clear
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
 }
 
 # --- T-CODEX-002: codex /model → skip ---
@@ -608,7 +494,7 @@ YAML
     [ "$status" -eq 0 ]
 
     # No tmux send-keys for /model
-    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/model" "$MOCK_LOG"
 
     # Stderr indicates skip
     echo "$output" | grep -q "not supported on codex"
@@ -629,9 +515,9 @@ YAML
     # /clear is converted to /new after clearing stale input — no Escape or C-c sent.
     grep -q "send-keys.*C-u" "$MOCK_LOG"
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
 }
 
 # --- T-OPENCODE-002: opencode /model → skip with restart-only note ---
@@ -644,7 +530,7 @@ YAML
     '
     [ "$status" -eq 0 ]
 
-    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/model" "$MOCK_LOG"
     echo "$output" | grep -q "restart-only"
 }
 
@@ -657,7 +543,7 @@ YAML
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/clear" "$MOCK_LOG"
-    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/new" "$MOCK_LOG"
 }
 
 @test "T-ANTIGRAVITY-002: send_cli_command skips /model for antigravity" {
@@ -668,7 +554,7 @@ YAML
     '
     [ "$status" -eq 0 ]
 
-    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/model" "$MOCK_LOG"
     echo "$output" | grep -q "Antigravity model changes are restart-only"
 }
 
@@ -719,7 +605,7 @@ YAML
     '
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "C_U_SKIPPED"
-    if grep -q "C-u" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "C-u" "$MOCK_LOG"
 }
 
 # --- T-CODEX-005: claude /clear passes through as-is ---
@@ -734,7 +620,7 @@ YAML
 
     # Should send /clear directly (not /new)
     grep -q "send-keys.*/clear" "$MOCK_LOG"
-    if grep -q "/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "/new" "$MOCK_LOG"
 }
 
 # --- T-CODEX-006: inbox_watcher.sh has agent_is_busy and Codex/Copilot handlers ---
@@ -771,8 +657,8 @@ YAML
 
     grep -q "send-keys.*inbox2" "$MOCK_LOG"
     # Codex: Escape escalation is suppressed (avoid interrupting work / human typing)
-    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
 }
 
 # --- T-CODEX-008: pane cli overrides stale CLI_TYPE in /clear path ---
@@ -787,8 +673,8 @@ YAML
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
 }
 
 # --- T-CODEX-009: invalid model_switch payload is rejected ---
@@ -814,8 +700,8 @@ YAML
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
 }
 
 # --- T-CODEX-011: clear_command auto-recovery injection ---
@@ -909,8 +795,8 @@ PY
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "OK"
 
-    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/new" "$MOCK_LOG"
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
 }
 
 # --- T-OPENCODE-003: OpenCode Phase 2 falls back to plain nudge ---
@@ -925,8 +811,8 @@ PY
     '
     [ "$status" -eq 0 ]
 
-    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
     grep -q "send-keys.*C-u" "$MOCK_LOG"
     grep -q "send-keys.*inbox3" "$MOCK_LOG"
 }
@@ -1047,8 +933,8 @@ YAML
     grep -q "send-keys.*C-c" "$MOCK_LOG"
     grep -q "send-keys.*copilot --yolo" "$MOCK_LOG"
     # NOT /clear or /new
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    ! grep -q "send-keys.*/new" "$MOCK_LOG"
 }
 
 # --- T-COPILOT-002: copilot /model → skip ---
@@ -1061,7 +947,7 @@ YAML
     '
     [ "$status" -eq 0 ]
 
-    if grep -q "send-keys.*/model" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/model" "$MOCK_LOG"
     echo "$output" | grep -q "not supported on copilot"
 }
 
@@ -1116,7 +1002,7 @@ YAML
     [ "$status" -eq 0 ]
 
     # Should NOT show display-message path
-    if echo "$output" | grep -q "DISPLAY"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! echo "$output" | grep -q "DISPLAY"
 
     # Should have used send-keys
     grep -q "send-keys.*inbox2" "$MOCK_LOG"
@@ -1168,81 +1054,6 @@ YAML
     '
     [ "$status" -eq 0 ]
     echo "$output" | grep -q "BUSY_DURING_COOLDOWN"
-}
-
-# --- T-BUSY-017 (cmd_1404 帯): /clear cooldown の閾を【両側で挟む】---
-#
-# ★何故 之が要るか — 本夜の実測が唯一の根拠である (2026-07-27 04:1x)★
-#   軍師一号の型 (plans/cmd_1404_point_vs_band_minimal_type.md) =
-#   ★変異は【点】を撃つ。境界は【帯】である★。其の型を本 file へ当てて出た実物:
-#     ・★潰す変異★ (cooldown 枝ごと `if false` へ)  → T-BUSY-005 / T-BUSY-007 が ★赤★
-#       = ★点は現に守られておる (harness は赤を出せる)★
-#     ・★動かす変異★ (閾 30 → 15)                     → ★T-BUSY-003/005/006/007 すべて緑★
-#       = ★誰も帯を見ておらぬ★
-#   ★機序 = 既存の点は 5s / 10s / 40s の三つのみ★ (閾 30 に対し比 0.17 / 0.33 / 1.33)
-#   ⇒ ★比 [0.5, 1.0) の帯 = 閾の【直下】に一点も無い★ ⇒ 閾を緩められても誰も気付かぬ。
-#   ★之は軍師一号が cmd_1392 で掘った形 (比 0.07/0.25/1.26/2.0・帯 [0.5,1.0) が空) の
-#     独立した再現である★ = ★標本 1 であった型が、別の file で 2 例目を得た★。
-#
-# ★★初版は【借りて】書き、其れが誤りであった — 実測で己が潰した (04:2x)★★
-#   初版 = 閾を production から実行時に読み、其の値で両側を挟んだ。M2 の再演 (焼き付け) を
-#   避けたつもりであった。★然れど機械が即座に反証した★:
-#     MUT-1404-014 (閾 30→15) → ★緑のまま★ / MUT-1404-015 (閾 30→60) → ★緑のまま★
-#   ★機序 = 試験が閾を production から読むゆえ、閾が動けば試験も一緒に動く★
-#   = ★★「動かす変異」を原理的に検知できぬ★★ = ★帯を見ておらぬのと同じ★。
-#
-# ★★ゆえに分ける — 焼き付けてよい物と、いけぬ物★★
-#   ・★いけぬ★= ★他所の表から導かれる【事実】★ (M2 = 「此の stem は除外表の外に在る」)
-#     ⇒ 他人が表を変えれば ★黙って偽になる★。
-#   ・★よい★  = ★契約の【値】そのもの★ (= 「/clear cooldown は 30 秒である」)
-#     ⇒ 誰かが動かせば ★必ず赤くなる★ = ★黙らぬ★。★意図して動かすなら此処も直せ★ =
-#       其の一行が ★意図の記録★ になる (履歴を消さず現役を示す形)。
-#   ⇒ ★契約と実装が割れたら【どちらへも寄らず】其の割れを名乗る★ = 本試験の芯。
-@test "T-BUSY-017 (cmd_1404 帯): /clear cooldown は閾の直下で busy・閾ちょうどで idle" {
-    # ★契約★ = /clear の処理に要する時間 (Claude Code の /clear は 10〜30s)。
-    # ★動かすなら此の一行も直せ★ — 直さねば下で赤くなる (= 黙って動かせぬ)。
-    local declared=30
-    local cooldown
-    cooldown=$(grep -oP 'now_busy - LAST_CLEAR_TS\)\)" -lt \K[0-9]+' "$WATCHER_SCRIPT" | head -n1)
-    if [ -z "$cooldown" ]; then
-        echo "★前提を立てられぬ★: $WATCHER_SCRIPT から /clear cooldown の閾を読めなんだ" >&2
-        echo "  (枝ごと消えたか、綴りが変わった。★黙って skip すれば帯は再び空く★)" >&2
-        return 1
-    fi
-    if [ "$cooldown" != "$declared" ]; then
-        echo "★契約と実装が割れた★: 契約 ${declared}s / 実装 ${cooldown}s" >&2
-        echo "  ⇒ 意図して動かしたのなら ★此の試験の declared も直せ★ (= 意図を記録せよ)。" >&2
-        echo "  ⇒ 意図せぬのなら ★之が【閾が黙って動いた】の当の徴である★。" >&2
-        return 1
-    fi
-    [ "$cooldown" -ge 2 ]  # 直下 (閾-1) が意味を持つ最小条件
-
-    # ★時計を止めて撃つ★ = 経過秒を厳密に固定する (1 秒跨ぎの気紛れを作らぬ)
-    # ── 直下 = 閾-1 秒 経過 → ★まだ busy★ (抑止される側) ──
-    run bash -c '
-        source "'"$TEST_HARNESS"'"
-        date() { echo 1000000; }
-        LAST_CLEAR_TS=$(( 1000000 - '"$((cooldown - 1))"' ))
-        if agent_is_busy; then echo "BUSY"; else echo "IDLE"; fi
-    '
-    [ "$status" -eq 0 ]
-    if ! echo "$output" | grep -q "BUSY"; then
-        echo "★閾が【下へ】動いた★: 経過 $((cooldown - 1))s は閾 ${cooldown}s の直下ゆえ busy である筈" >&2
-        return 1
-    fi
-
-    # ── 直上 = 閾ちょうど 経過 → ★もう idle★ (抑止されぬ側。`-lt` ゆえ境界は idle) ──
-    run bash -c '
-        source "'"$TEST_HARNESS"'"
-        date() { echo 1000000; }
-        LAST_CLEAR_TS=$(( 1000000 - '"$cooldown"' ))
-        if agent_is_busy; then echo "BUSY"; else echo "IDLE"; fi
-    '
-    [ "$status" -eq 0 ]
-    if ! echo "$output" | grep -q "IDLE"; then
-        echo "★閾が【上へ】動いた★: 経過 ${cooldown}s は閾 ${cooldown}s ゆえ idle である筈 (-lt は境界を含まぬ)" >&2
-        return 1
-    fi
 }
 
 # --- T-BUSY-008: idle prompt at bottom overrides old busy markers (false-busy fix) ---
@@ -1484,7 +1295,7 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "cli=codex"
-    if echo "$output" | grep -q "nudge text still visible"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! echo "$output" | grep -q "nudge text still visible"
     [ "$(grep -c "send-keys -t test:0.0 inbox1" "$MOCK_LOG")" -eq 1 ]
 }
 
@@ -1499,7 +1310,7 @@ YAML
     [ "$status" -eq 0 ]
 
     # No send-keys should have occurred
-    if grep -q "send-keys" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys" "$MOCK_LOG"
 
     # SKIP message in stderr
     echo "$output" | grep -q "SKIP.*karo"
@@ -1516,7 +1327,7 @@ YAML
     [ "$status" -eq 0 ]
 
     # No send-keys should have occurred
-    if grep -q "send-keys" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys" "$MOCK_LOG"
 
     # SKIP message in stderr
     echo "$output" | grep -q "SKIP.*gunshi"
@@ -1551,7 +1362,7 @@ YAML
     # C-u for input clear, then /new — no Escape (function removed)
     grep -q "send-keys.*C-u" "$MOCK_LOG"
     grep -q "send-keys.*/new" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
 }

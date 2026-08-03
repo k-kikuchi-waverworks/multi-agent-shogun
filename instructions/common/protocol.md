@@ -2,61 +2,23 @@
 
 ## Mailbox System (inbox_write.sh)
 
-Agent-to-agent communication uses file-based mailbox.
-
-### 既定の書き方 — ★shell を通さぬ口を使え★ (cmd_1371)
-
-```bash
-# ★これが既定である★ — 引用符つき heredoc。本文に ` も $(…) も $VAR も書けて原文どおり届く
-bash scripts/inbox_write.sh <target_agent> --body-stdin <type> <from> <<'EOF'
-本文をここへ。★記号を避ける必要は無い★
-EOF
-
-# 長文・引用符が入り組む本文は file 渡し (Write tool で本文を書いてから)
-bash scripts/inbox_write.sh <target_agent> --content-file /path/to/body.txt <type> <from>
-```
-
-★`<<'EOF'` と単引用符で囲め★ — 裸の `<<EOF` は本文全体が展開に晒される (関所が止める)。
-
-### 位置引数の形 (後方互換・★危うい★)
+Agent-to-agent communication uses file-based mailbox:
 
 ```bash
 bash scripts/inbox_write.sh <target_agent> "<message>" <type> <from>
-
-# 例 (平文のみ・記号を含まぬ時に限る)
-bash scripts/inbox_write.sh karo "cmd_048を書いた。実行せよ。" cmd_new shogun
-bash scripts/inbox_write.sh karo "足軽5号、任務完了。報告YAML確認されたし。" report_received ashigaru5
-bash scripts/inbox_write.sh ashigaru3 "タスクYAMLを読んで作業開始せよ。" task_assigned karo
 ```
 
-★この形は今も動くが、本文は shell を通る★:
-- ` (backtick) は **command として実行され、その位置が出力へ置換される**
-- `$(…)` も同じ / **未定義の `$VAR` は黙って空文字へ落ちる (最も危うい)**
-- ★食われた証拠は道具に届く前に消える★ = 道具も受け手も気付けぬ
+Examples:
+```bash
+# Shogun → Karo
+bash scripts/inbox_write.sh karo "cmd_048を書いた。実行せよ。" cmd_new shogun
 
-**記号を含むなら上の既定の形を使え。**
+# Ashigaru → Karo
+bash scripts/inbox_write.sh karo "足軽5号、任務完了。報告YAML確認されたし。" report_received ashigaru5
 
-### 道具が毎回名乗る (信じてよい経路か)
-
-配達のたび `[inbox_write] OK: … (経路=… 関所=… 守り=…)` が出る。
-`守り` は三値で、**entry (queue/inbox/*.yaml) にも `via` / `guard` / `safety` として焼かれる**:
-
-| 守り | 意味 |
-|------|------|
-| `by-construction` | shell を通っておらぬ = ★この穴が原理的に存在せぬ★ |
-| `by-guard` | shell は通ったが、★関所が此の pane で生きておる★ (90秒内の心拍を見た) |
-| `UNPROTECTED` | shell を通り、且つ**関所が走った証が無い** ← ★送った本文を自分の目で読み返せ★ |
-
-★`by-guard` を「此の本文が検められた」と読むな★ — 札が答える問いと答えぬ問いは別である:
-- 答える = 「関所は此の pane で走っておるか」
-- ★答えぬ = 「此の本文が実際に検められたか」★ (script の内側から本 script を呼ぶ経路を、関所は元より見ておらぬ)
-
-★`UNPROTECTED` は「関所が死んでおる」の断定ではない★ — 走った証を我らが持たぬ、という我らの側の申告である
-(存在は証せるが不在は証せぬ)。未検証を緑に混ぜぬため、言えぬ側は赤へ倒しておる。
-
-厳格に運用したい呼び手は `IW_REQUIRE_SAFE_BODY=1` を立てよ (位置引数の本文を拒む)。
-
-詳細と、なぜこの形になったかの実測は `docs/content/ops/cmd_1371_body_transport.md`。
+# Karo → Ashigaru
+bash scripts/inbox_write.sh ashigaru3 "タスクYAMLを読んで作業開始せよ。" task_assigned karo
+```
 
 Delivery is handled by `inbox_watcher.sh` (infrastructure layer).
 **Agents NEVER call tmux send-keys directly.**
@@ -143,7 +105,7 @@ Race condition is eliminated: context reset wipes old context. Agent re-reads YA
 
 ## File Operation Rule
 
-**Always Read before Write/Edit.** Some CLIs reject Write/Edit on files not read in this session, so treat this as mandatory everywhere. **Confirm your own CLI once** — try an edit on a file you have not read, and see whether it is refused.
+**Always Read before Write/Edit.** Claude Code rejects Write/Edit on unread files.
 
 ## Inbox Communication Rules
 

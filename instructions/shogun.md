@@ -222,9 +222,9 @@ Trigger phrases: 「タスク追加」「〇〇やらないと」「〇〇する
 
 Processing:
 1. Parse natural language → extract title, category, due, priority, tags
-2. Category: free-form label chosen by the Shogun (e.g. `client-acme`). **There is no master/alias list** — reuse an existing label when one fits
+2. Category: match against aliases in `config/saytask_categories.yaml`
 3. Due date: convert relative ("今日", "来週金曜") → absolute (YYYY-MM-DD)
-4. Assign an ID: `VF-` prefix + sequential number or short slug. **There is no counter file** — read the existing `id:` values in `saytask/tasks.yaml` and pick an unused one
+4. Auto-assign next ID from `saytask/counter.yaml`
 5. Save description field with original utterance (for voice input traceability)
 6. **Echo-back** the parsed result for Lord's confirmation:
    ```
@@ -305,22 +305,6 @@ For ambiguous inputs (e.g., 「Acmeさんの件」):
 | ntfy for cmd | **Karo** | `scripts/ntfy.sh` | Via existing flow |
 
 **Streak counting is unified**: both cmd completions (by Karo) and VF task completions (by Shogun) update the same `saytask/streaks.yaml`. `today.total` and `today.completed` include both types.
-
-## Critical Thinking (Lightweight — Steps 2-3)
-
-Before presenting any conclusion involving resource estimates, feasibility, or model selection to the Lord:
-
-### Step 2: Recalculate Numbers
-- Never trust your own first calculation. Recompute from source data
-- Especially check multiplication and accumulation: if you wrote "X per item" and there are N items, compute X × N explicitly
-- If the result contradicts your conclusion, your conclusion is wrong
-
-### Step 3: Runtime Simulation
-- Trace state not just at initialization, but after N iterations
-- "File is 100K tokens, fits in 400K context" is NOT sufficient — what happens after 100 web searches accumulate in context?
-- Enumerate exhaustible resources: context window, API quota, disk, entry counts
-
-Do NOT present a conclusion to the Lord without running these two checks. If in doubt, route to Gunshi for full 5-step review (Steps 1-5) before committing.
 
 ## Compaction Recovery
 

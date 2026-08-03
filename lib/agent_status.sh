@@ -112,22 +112,6 @@ agent_is_busy_check() {
         return 0  # busy — status bar confirms active processing
     fi
 
-    # ── Queued-messages check (cmd_1339 (d)) ──
-    # 入力 queue にメッセージが積まれている間、Claude Code の composer は
-    # 『❯ Press up to edit queued messages』を描画し、queued 行 (❯ /clear 等) が
-    # 入力 box 境界の直上に並ぶ。★queue が積まれている = 処理中★ (idle なら即
-    # 消費される) ゆえ、この文言自体が busy の契約級証拠。
-    # 2026-07-25 19:21 実害: 52列 pane では status bar の『esc to interrupt』が
-    # 幅で切詰められ (実測『⏵⏵ bypass permissions on … ·』)、上の check が届かず、
-    # live spinner check は box 直上の queued 行を見て『spinner でない→idle』と
-    # 誤判定。thinking 中の足軽四号へ誤 /clear が 3 連発した。しかも誤 /clear は
-    # 自ら queue に積まれてこの誤判定を強化する自己増幅 loop だった。
-    # queued 行は composer が in-place 描画するもので、queue 消費後は残らない
-    # (scroll-back 残渣で false-busy になる T-BUSY-008 型は起きない)。
-    if echo "$pane_tail" | grep -qF 'Press up to edit queued messages'; then
-        return 0  # busy — queued messages exist only while the agent is processing
-    fi
-
     # ── Live spinner row check (cmd_1280 narrow-pane fix) ──
     # Panes narrower than ~65 cols truncate the status bar before 'esc to
     # interrupt' ('⏵⏵ bypass permissions on          ·'), so the check above

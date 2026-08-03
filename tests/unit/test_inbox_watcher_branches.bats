@@ -290,9 +290,9 @@ teardown() {
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/new-chat" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
     # cursor branch returns before the general C-c + send path
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
     echo "$output" | grep -q "NEW_CONTEXT_SENT=1"
 }
 
@@ -308,7 +308,7 @@ teardown() {
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "already sent"
-    if grep -q "send-keys.*/new-chat" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/new-chat" "$MOCK_LOG"
 }
 
 # --- T-CURSOR-103: cursor /model is NOT skipped (general path) ---
@@ -349,11 +349,11 @@ teardown() {
 
     grep -q "send-keys.*C-c" "$MOCK_LOG"
     grep -q "send-keys.*/clear" "$MOCK_LOG"
-    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/new" "$MOCK_LOG"
     # startup prompt after /clear is claude-only
-    if grep -q "Session Start" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "Session Start" "$MOCK_LOG"
     # /clear timestamp recorded for the 30s busy cooldown
-    if echo "$output" | grep -q "LAST_CLEAR_TS=0"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! echo "$output" | grep -q "LAST_CLEAR_TS=0"
     echo "$output" | grep -q "LAST_CLEAR_TS="
 }
 
@@ -386,7 +386,7 @@ teardown() {
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/clear" "$MOCK_LOG"
-    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/new" "$MOCK_LOG"
     echo "$output" | grep -q "CONTEXT-RESET"
 }
 
@@ -406,8 +406,8 @@ teardown() {
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "suppressing Escape escalation"
-    if grep -q "send-keys.*Escape" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-c" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*Escape" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-c" "$MOCK_LOG"
     grep -q "send-keys.*inbox2" "$MOCK_LOG"
 }
 
@@ -424,7 +424,7 @@ teardown() {
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/clear" "$MOCK_LOG"
-    if grep -q "send-keys.*/new" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -q "send-keys.*/new" "$MOCK_LOG"
     echo "$output" | grep -q "CONTEXT-RESET.*antigravity"
 }
 
@@ -442,9 +442,9 @@ teardown() {
     [ "$status" -eq 0 ]
 
     grep -q "send-keys.*/new-chat" "$MOCK_LOG"
-    if grep -q "send-keys.*/clear" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-u" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "Session Start" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*/clear" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-u" "$MOCK_LOG"
+    ! grep -q "Session Start" "$MOCK_LOG"
 }
 
 # ═══════════════════════════════════════════════════════════════
@@ -485,8 +485,8 @@ teardown() {
     '
     [ "$status" -eq 0 ]
 
-    if grep -qE "send-keys -t test:0.0 x$" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*C-u" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! grep -qE "send-keys -t test:0.0 x$" "$MOCK_LOG"
+    ! grep -q "send-keys.*C-u" "$MOCK_LOG"
     grep -q "send-keys -l" "$MOCK_LOG"
     grep -q "Session Start" "$MOCK_LOG"
 }
@@ -574,7 +574,7 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "forcing idle flag"
-    if grep -q "inbox_write karo" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "inbox_write karo" "$MOCK_LOG"
 }
 
 # --- T-STALE-003: non-ashigaru stale-busy → flag forced, no stall_alert ---
@@ -593,7 +593,7 @@ YAML
 
     echo "$output" | grep -q "forcing idle flag"
     echo "$output" | grep -q "FLAG_CREATED"
-    if grep -q "inbox_write karo" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "inbox_write karo" "$MOCK_LOG"
 }
 
 # --- T-STALE-004: busy (claude) not yet stale → Stop hook deferral, no nudge ---
@@ -612,9 +612,9 @@ YAML
 
     echo "$output" | grep -q "Stop hook will deliver"
     # Timer started so the stale-busy safety net can fire later
-    if echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
+    ! echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"
     # No nudge while busy
-    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
 }
 
 # --- T-STALE-005: busy (non-claude) → escalation timer paused, no nudge ---
@@ -634,6 +634,6 @@ YAML
     [ "$status" -eq 0 ]
 
     echo "$output" | grep -q "pausing escalation timer"
-    if echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効であった
-    if grep -q "send-keys.*inbox" "$MOCK_LOG"; then return 1; fi   # cmd_1401: `! cmd` は set -e 免除ゆえ無効になりうる
+    ! echo "$output" | grep -q "FIRST_UNREAD_SEEN=0"
+    ! grep -q "send-keys.*inbox" "$MOCK_LOG"
 }

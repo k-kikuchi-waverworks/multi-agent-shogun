@@ -1,7 +1,0 @@
-# cmd_1355b 成果物 manifest — backend 台帳延長 (守り手を守る台帳・軍師一号具申R3)
-# 文法: scripts/gate_artifact_capture.sh 冒頭コメント参照
-# 注: backend repo 側の成果物 (config/mutation_registry.yaml, tests/harness/gate2_env.sh) は
-#     別 repo ゆえ本 manifest の管轄外 — backend commit の git show --stat で自己実証する
-scripts/gate_mutation_replay.py
-docs/content/ops/cmd_1355_backend_registry_extension.md
-config/artifact_manifests/cmd_1355b_backend_registry.manifest

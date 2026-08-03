@@ -12,7 +12,6 @@
 # 動作:
 #   inotifywait(close_write,moved_to) → debounce ~2s → flock下でledger_validate.py実行
 #     PASS → .last_good snapshot 更新(★台帳への書込は一切しない=正常系副作用ゼロ★) + log
-#            + cmd_1336: 手動起票検知(採番gate非経由entryをjournal突合で検知→家老へ警告のみ)
 #     FAIL → ①破損版を queue/archive/corrupt_shogun_to_karo_<ts>.yaml へquarantine(非破壊)
 #            ②.last_good を台帳へ復元(rollback)  ※.last_good不在時はrollbackせず警告のみ
 #            ③家老inboxへ警告emit(inbox_write.sh ... error ledger_guard)
@@ -47,18 +46,6 @@ PYTHON="${LEDGER_PYTHON:-$SCRIPT_DIR/.venv/bin/python3}"
 # 家老警告emit経路。test では tmp shim を差し込んで実inboxを汚さない。
 INBOX_WRITE="${LEDGER_GUARD_INBOX_WRITE:-$SCRIPT_DIR/scripts/inbox_write.sh}"
 
-# ─── cmd_1336: 手動起票検知層 config (★警告のみ・rollback/quarantine 経路に不干渉★) ───
-# ALLOC_JOURNAL   = cmd_id_alloc.sh の払い出し記録 (突合先)
-# BASELINE        = 検知層導入時点の最大id (それ以前の既存entryはgrandfather=誤警告しない)
-# WARNED          = 警告済みid (同一idへの警告は一度のみ=家老spam防止)
-ALLOC_JOURNAL="${ALLOC_JOURNAL:-$QUEUE_DIR/.cmd_id_alloc.journal}"
-# cmd_1341 (B-N3): 耐久mirror (cmd_id_alloc.sh が払い出しと同時に併記)。journal 喪失時の
-# 誤検知(S1)防止 = gate経由の払い出しは mirror にも残るゆえ、どちらかに在れば journaled 扱い
-ALLOC_MIRROR="${ALLOC_JOURNAL_MIRROR:-$QUEUE_DIR/archive/alloc_journal_mirror.yaml}"
-MANUAL_ALLOC_BASELINE="${MANUAL_ALLOC_BASELINE:-$QUEUE_DIR/.ledger_guard_manual_baseline}"
-MANUAL_ALLOC_WARNED="${MANUAL_ALLOC_WARNED:-$QUEUE_DIR/.ledger_guard_warned_ids}"
-MANUAL_ALLOC_DETECT="${MANUAL_ALLOC_DETECT:-1}"
-
 ledger_log() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
     mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null || true
@@ -83,120 +70,6 @@ emit_karo_warning() {
     fi
 }
 
-# ═══ cmd_1336: 採番gate非経由の手動起票 検知層 (警告のみ) ═══════════
-#
-# 検知できるもの:
-#   (S1) baseline より新しい純数値id (cmd_N) の entry が払い出しjournalに無い = gate非経由追記
-#   (S2) 台帳内で entry id が重複 (ledger_validate.py は重複を検査しない=本検知層が唯一の網)
-# 検知できないもの (正直な明示):
-#   - baseline 以前の番号での手動追記 (導入時grandfather帯。番号は既使用ゆえ新規衝突は起きない)
-#   - suffix付きid (cmd_123b 等) / archive file への直接追記 / 番号を変えない本文編集
-#   - journal を消されると gate経由分も S1 誤検知しうる → cmd_1341 で緩和: 耐久mirror
-#     (queue/archive/alloc_journal_mirror.yaml) も突合先。両方消えた場合のみ誤検知が残る
-#
-# ★台帳へは一切書かない・戻り値は常に0 = rollback/quarantine 経路に関与しない★
-# (検知の誤爆で正常な台帳が巻き戻るのが最悪の結果、ゆえ構造的に切り離す)
-
-# 台帳 entry id 抽出。grep でなく YAML parse = block scalar 自由文内の
-# 「id: cmd_N」を構造的に誤検知しない。validate PASS 後にのみ呼ぶ前提。
-# 重複idもそのまま列挙 (S2 の材料)。純数値 cmd_N のみ対象。
-extract_entry_ids() {
-    "$PYTHON" - "$LEDGER_FILE" <<'PYEOF'
-import re, sys, yaml
-with open(sys.argv[1], encoding="utf-8") as f:
-    data = yaml.safe_load(f)
-key = "commands" if "commands" in data else "queue"
-for cmd in data.get(key) or []:
-    if isinstance(cmd, dict):
-        cid = cmd.get("id") or cmd.get("cmd_id")
-        if isinstance(cid, str) and re.fullmatch(r"cmd_[0-9]+", cid):
-            print(cid)
-PYEOF
-}
-
-# 次の空き番号の目安 (cmd_id_alloc.sh compute_next_id と同じ union 走査を inline 再現。
-# ★alloc script を呼ばない=guard は台帳lock保持中ゆえ、同一lockを取る alloc 呼出はdeadlock★)
-compute_next_free_id() {
-    local re='^[[:space:]]*-?[[:space:]]*(id|cmd_id):[[:space:]]*["'"'"']?cmd_[0-9]+'
-    local max
-    max=$(
-        {
-            grep -hE "$re" "$LEDGER_FILE" 2>/dev/null || true
-            find "$QUARANTINE_DIR" -type f -name '*.yaml' -print0 2>/dev/null \
-                | xargs -0 -r grep -hE "$re" 2>/dev/null || true
-            if [ -f "$ALLOC_JOURNAL" ]; then
-                cut -f1 "$ALLOC_JOURNAL" 2>/dev/null || true
-            fi
-        } \
-            | grep -oE 'cmd_[0-9]+' \
-            | sed -e 's/^cmd_//' -e 's/^0*\([0-9]\)/\1/' \
-            | sort -n | tail -1
-    )
-    echo "cmd_$(( ${max:-0} + 1 ))"
-}
-
-detect_manual_alloc() {
-    [ "$MANUAL_ALLOC_DETECT" = "1" ] || return 0
-
-    local ids
-    if ! ids=$(extract_entry_ids 2>/dev/null); then
-        ledger_log "MANUAL-ALLOC: id抽出失敗 — skip (次回checkで再試行)"
-        return 0
-    fi
-    [ -n "$ids" ] || return 0
-
-    # baseline 初期化 (初回のみ): 既存entry全てをgrandfatherし、以後の新番号だけを検査する
-    if [ ! -f "$MANUAL_ALLOC_BASELINE" ]; then
-        local maxnow
-        maxnow=$(printf '%s\n' "$ids" | sed 's/^cmd_//' | sort -n | tail -1)
-        printf '%s\n' "${maxnow:-0}" > "$MANUAL_ALLOC_BASELINE"
-        ledger_log "MANUAL-ALLOC: baseline initialized = cmd_${maxnow:-0} (既存entryはgrandfather)"
-        return 0
-    fi
-    local baseline
-    baseline=$(head -1 "$MANUAL_ALLOC_BASELINE" 2>/dev/null)
-    case "$baseline" in
-        ''|*[!0-9]*)
-            ledger_log "MANUAL-ALLOC: baseline file 不正 ($MANUAL_ALLOC_BASELINE) — skip"
-            return 0 ;;
-    esac
-
-    local dups
-    dups=$(printf '%s\n' "$ids" | sort | uniq -d)
-
-    local id n reason findings="" fresh_ids=""
-    for id in $(printf '%s\n' "$ids" | sort -u); do
-        n="${id#cmd_}"
-        [ "$n" -gt "$baseline" ] 2>/dev/null || continue
-        grep -qx "$id" "$MANUAL_ALLOC_WARNED" 2>/dev/null && continue
-        reason=""
-        if printf '%s\n' "$dups" | grep -qx "$id"; then
-            reason="台帳内id重複=衝突"
-        elif ! { [ -f "$ALLOC_JOURNAL" ] && cut -f1 "$ALLOC_JOURNAL" 2>/dev/null | grep -qx "$id"; } \
-            && ! { [ -f "$ALLOC_MIRROR" ] && grep -qE "^- id: ${id}([^0-9]|\$)" "$ALLOC_MIRROR" 2>/dev/null; }; then
-            reason="gate非経由(払い出しjournal/mirror記録なし)"
-        fi
-        [ -n "$reason" ] || continue
-        findings="${findings}${id}=${reason} / "
-        fresh_ids="${fresh_ids}${id} "
-    done
-
-    [ -n "$findings" ] || return 0
-    findings="${findings% / }"
-
-    local next_free
-    next_free=$(compute_next_free_id)
-    local msg="⚠️採番gate非経由の手動起票を検知【${findings}】。是正手順=①id重複(衝突)の場合: 先着(journal記録側)を正とし、手動側entryのidを空き番号へ改番+renumber_note追記(targeted Edit・全書換禁)。②改番先/緊急起票の番号は必ず「bash scripts/cmd_id_alloc.sh --claim --origin karo」で払い出せ(現時点の目安=${next_free}だが--claimの出力が正式)。③重複でなければ番号自体は有効(台帳記帳済ゆえ以後の払い出しと衝突しない)=是正は以後のgate経由徹底のみ。本警告は同一idにつき一度のみ。詳細=logs/ledger_guard.log"
-    if bash "$INBOX_WRITE" karo "$msg" warning ledger_guard >/dev/null 2>&1; then
-        ledger_log "MANUAL-ALLOC: karo warning emitted → ${findings}"
-        # 警告が届いた id のみ warned 記録 (emit失敗時は次回checkで再警告=取り零し防止)
-        printf '%s\n' $fresh_ids >> "$MANUAL_ALLOC_WARNED"
-    else
-        ledger_log "MANUAL-ALLOC: WARN inbox_write failed (次回checkで再警告) → ${findings}"
-    fi
-    return 0
-}
-
 # ─── guard check 本体(flock内で呼ばれる想定。test は直接呼んでよい) ───
 # PASS: .last_good を更新するのみ(台帳write無し)。 FAIL: quarantine + rollback + 警告。
 run_guard_check() {
@@ -205,8 +78,6 @@ run_guard_check() {
         # ★PASS=正常系。台帳へは絶対に書かない=正しい編集を消さない★
         cp -p "$LEDGER_FILE" "$LAST_GOOD_FILE" 2>/dev/null || cp "$LEDGER_FILE" "$LAST_GOOD_FILE"
         ledger_log "PASS: ledger valid → last_good snapshot updated"
-        # cmd_1336: 手動起票検知 (警告のみ。戻り値・台帳・rollback経路に不干渉)
-        detect_manual_alloc || true
         return 0
     fi
 
@@ -248,8 +119,6 @@ startup_check() {
     if err=$(validate_ledger "$LEDGER_FILE"); then
         cp -p "$LEDGER_FILE" "$LAST_GOOD_FILE" 2>/dev/null || cp "$LEDGER_FILE" "$LAST_GOOD_FILE"
         ledger_log "STARTUP: ledger valid → last_good initialized"
-        # cmd_1336: 起動時も手動起票検知 (guard停止中に入った手動追記を再起動時に拾う)
-        detect_manual_alloc || true
         return 0
     fi
     # ★起動時FAIL=警告のみ・rollbackしない(設計§(d)・§5(5))★
@@ -271,9 +140,8 @@ main_loop() {
     while true; do
         # 台帳ディレクトリ単位で監視(Edit の atomic rename=tmp→rename も moved_to で拾う)。
         # 30s timeout で inotify 不発(WSL2)の安全網。
-        # 207>&- : lifetime lock fd を子へ相続させない (cmd_1339)
         inotifywait -q -t 30 -e close_write,moved_to,create \
-            "$(dirname "$LEDGER_FILE")" >/dev/null 2>&1 207>&- || true
+            "$(dirname "$LEDGER_FILE")" >/dev/null 2>&1 || true
 
         # 対象ファイルが直近で変わっていなければ何もしない(dir内の別file変更を無視)
         [ -f "$LEDGER_FILE" ] || continue
@@ -288,13 +156,5 @@ main_loop() {
 # ─── Entry point(testing guard) ───
 if [ "${__LEDGER_GUARD_TESTING__:-}" != "1" ]; then
     set -uo pipefail
-    # cmd_1339: lifetime lock 契約 — 二重起動側は自主退場 (pgrep 可視性に非依存)。
-    # 2026-07-25 に supervisor 再起動で ledger_guard も二重起動した実害の再発防止。
-    # shellcheck source=lib/proc_lock.sh
-    . "$SCRIPT_DIR/scripts/lib/proc_lock.sh"
-    if ! proc_lock_acquire "ledger_guard" 207 "ledger_guard ledger=$LEDGER_FILE"; then
-        ledger_log "DUPLICATE: ledger_guard 既に稼働中 ($(proc_lock_read_meta ledger_guard)) — 本 instance は退場"
-        exit 0
-    fi
     main_loop
 fi

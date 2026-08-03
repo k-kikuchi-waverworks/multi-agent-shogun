@@ -39,9 +39,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SETTINGS_FILE="${PROJECT_ROOT}/config/settings.yaml"
 LOG_FILE="${PROJECT_ROOT}/logs/switch_cli.log"
-# ★cmd_1387 (2026-07-27 14:2x)★: 切替の刻を【機械が読める形】で落とす先。
-#   ★之は log の代わりではない★ = log は人が読む物・本 file は番人が読む物。
-SWITCH_HISTORY_FILE="${PROJECT_ROOT}/queue/state/switch_history.tsv"
 
 # cli_adapter.sh をロード
 source "${PROJECT_ROOT}/lib/cli_adapter.sh"
@@ -53,16 +50,6 @@ log() {
     echo "$msg" >&2
     echo "$msg" >> "$LOG_FILE" 2>/dev/null || true
 }
-
-# ─── 切替の刻を落とす (cmd_1387・家老 14:21 の命(1)) ───
-# ★書き手の本体は lib/switch_record.sh に在る★= ★出陣 (shutsujin_departure.sh) にも
-#   同じ物が要るゆえ源を 1 つに保つ★ (写せば形が黙って割れる = 本日の族)。
-# ★源が無くとも切替は止めぬ (fail-open)★= 欠けるのは名乗りだけである。
-if [ -f "${PROJECT_ROOT}/lib/switch_record.sh" ]; then
-    source "${PROJECT_ROOT}/lib/switch_record.sh"
-else
-    record_switch_ts() { log "WARN: lib/switch_record.sh が無い — 生年の記録を落とせぬ"; return 0; }
-fi
 
 # ─── Usage ───
 usage() {
@@ -549,10 +536,6 @@ log "Launching new CLI: ${TARGET_CMD}"
 tmux send-keys -t "$PANE_TARGET" "$TARGET_CMD" 2>/dev/null || true
 sleep 0.3
 tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
-
-# ★此処が【新 CLI の生年】である★ (cmd_1387) — 番人が齢と突き合わせる刻ゆえ、
-#   metadata 更新や完了 log でなく ★Enter を送った直後★ に落とす。
-record_switch_ts "$AGENT_ID" "$TARGET_CLI_TYPE" "$TARGET_MODEL"
 
 # Step 6: tmux pane metadata 更新
 DISPLAY_NAME=$(get_model_display_name "$AGENT_ID")

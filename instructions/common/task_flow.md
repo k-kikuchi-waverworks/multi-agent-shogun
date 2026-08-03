@@ -11,18 +11,10 @@ Lord: command → Shogun: write YAML → inbox_write → Karo: decompose → inb
 Status is defined per YAML file type. **Keep it minimal. Simple is best.**
 
 Fixed status set (do not add casually):
-- `queue/shogun_to_karo.yaml`: `pending`, `in_progress`, `deferred`, `done`,
-  `superseded`, `archived`, `dispatched`, `cancelled` (8 values — schema v2 vocabulary)
-- `queue/tasks/ashigaruN.yaml`: `assigned`, `blocked`, `in_progress`, `done`, `failed`,
-  `cancelled`, `archived` (+ placeholder-only `idle`, see below)
+- `queue/shogun_to_karo.yaml`: `pending`, `in_progress`, `done`, `cancelled`
+- `queue/tasks/ashigaruN.yaml`: `assigned`, `blocked`, `done`, `failed`
 - `queue/tasks/pending.yaml`: `pending_blocked`
-  - **現物がありません** (2026-07-28 18:04 実測)。この綴りを持つのは本文書と、
-    本文書から作られる写しだけです。読む口も書く口も 0 本で、git の履歴にも
-    一度も現れません。**消さずに残しています** — 未実装の設計かもしれず、
-    消すのは戻しにくいためです。**使う前に、まず現物を作る所から始めてください。**
 - `queue/ntfy_inbox.yaml`: `pending`, `processed`
-- `queue/reports/*_report.yaml`: **この欄の正本は本文書ではありません。**
-  下の「Report File」の節を見てください。
 
 Do NOT invent new status values without updating this section.
 
@@ -46,58 +38,31 @@ Meanings and allowed/forbidden actions (short):
   - Allowed: read-only (history)
   - Forbidden: continuing work under this cmd (use a new cmd instead)
 
-- `deferred`: postponed, may resume later
-  - Allowed: staying in the active file (it is not finished)
-  - Forbidden: treating it as `done` — it has not been validated
-
-- `dispatched`: handed to an executor and being worked (non-terminal, like `in_progress`)
-  - Allowed: staying in the active file until the work lands
-  - Forbidden: leaving it here after the work lands — move it to a terminal status
-
-- `superseded`: replaced by a later cmd; this one will not be finished as written
-  - Allowed: read-only (history). Terminal.
-  - Forbidden: continuing work under this cmd (the successor cmd owns it)
-
-- `archived`: settled and retired as a record
-  - Allowed: read-only (history). Terminal.
-  - Forbidden: reopening (use a new cmd instead)
-
 ### Archive Rule
 
 The active queue file (`queue/shogun_to_karo.yaml`) must only contain
-non-terminal entries: `pending`, `in_progress`, `deferred`, `dispatched`.
-All terminal statuses are archived.
+`pending` and `in_progress` entries. All other statuses are archived.
 
-When a cmd reaches a terminal status (`done`, `superseded`, `cancelled`, `archived`),
-Karo must move the entire YAML entry to `queue/archive/shogun_to_karo_<timestamp>.yaml`
-(the generational archive that actually exists — 16 generations as of 2026-07-28 07:24).
-`queue/shogun_to_karo_archive.yaml` (singular, at the queue root) has never existed.
+When a cmd reaches a terminal status (`done`, `cancelled`, `paused`),
+Karo must move the entire YAML entry to `queue/shogun_to_karo_archive.yaml`.
 
 | Status | In active file? | Action |
 |--------|----------------|--------|
 | pending | YES | Keep |
 | in_progress | YES | Keep |
-| deferred | YES | Keep (not finished — it resumes in place) |
-| dispatched | YES | Keep (handed out, still being worked) |
 | done | NO | Move to archive |
-| superseded | NO | Move to archive |
 | cancelled | NO | Move to archive |
-| archived | NO | Move to archive |
+| paused | NO | Move to archive (restore to active when resumed) |
 
 **Canonical statuses (exhaustive list — do NOT invent others)**:
 - `pending` — not started
 - `in_progress` — acknowledged, being worked
-- `dispatched` — handed to an executor, being worked
-- `deferred` — postponed, may resume later
-- `done` — complete (covers former "completed", "active")
-- `superseded` — replaced by a later cmd
+- `done` — complete (covers former "completed", "superseded", "active")
 - `cancelled` — intentionally stopped, will not resume
-- `archived` — settled and retired as a record
+- `paused` — stopped by Lord's decision, may resume later
 
-This is the same 8-value vocabulary as the slim entry schema v2 in the Karo
-instructions, and the same set the allocator script accepts. Any other status
-value (e.g., `completed`, `active`, `resolved`) is forbidden. If found during
-archive, normalize to the canonical set above.
+Any other status value (e.g., `completed`, `active`, `superseded`) is
+forbidden. If found during archive, normalize to the canonical set above.
 
 **Karo rule (ack fast)**:
 - The moment Karo starts processing a cmd (after reading it), update that cmd status:
@@ -116,10 +81,6 @@ Meanings and allowed/forbidden actions (short):
   - Allowed: Karo unblocks by changing to `assigned` when ready, then inbox_write
   - Forbidden: nudging or starting work while `blocked`
 
-- `in_progress`: the assignee has picked it up and is working
-  - Allowed: the assignee sets this themselves after Karo wrote `assigned`
-  - Forbidden: another agent setting it on someone else's file
-
 - `done`: completed
   - Allowed: read-only; used for consolidation
   - Forbidden: reusing task_id for redo (use redo protocol)
@@ -127,39 +88,6 @@ Meanings and allowed/forbidden actions (short):
 - `failed`: failed with reason
   - Allowed: report must include reason + unblock suggestion
   - Forbidden: silent failure
-
-- `cancelled`: intentionally stopped before completion
-  - Allowed: read-only (history)
-  - Forbidden: resuming under the same task_id (issue a new one)
-
-- `archived`: the post itself has been retired (the agent no longer runs)
-  - Allowed: the file stays where it is, as a record
-  - Forbidden: **treating this as terminal.** See the archive rule below
-
-### タスクファイルの終端 / 非終端 (cmd_1463 で明文化)
-
-`scripts/slim_yaml.py` はこの区別で動きます。文書と機械が食い違うと、
-ファイルが消えるか、消えるべきものが残ります。
-
-| 値 | 終端か | slim_yaml の動き |
-|---|---|---|
-| `idle` / `assigned` / `blocked` / `in_progress` | 非終端 | そのまま置く |
-| `done` / `failed` / `cancelled` | 終端 | archive へ移す (常駐の持ち場なら idle の置き札へ戻す) |
-| `archived` | **非終端として扱う** | そのまま置く |
-
-**`archived` を終端にしてはいけません。** 現に `queue/tasks/` には
-`karo.yaml` / `ashigaru7.yaml` / `gunshi_a.yaml` / `gunshi_b.yaml` の 4 本が
-`archived` で在ります (2026-07-28 実測)。終端にすると 4 本ともファイルごと
-archive へ移り、家老の状態が消えます。`archived` は「退いた持ち場の記録」であって
-「終わったタスク」ではありません。
-
-**`completed` は使わないでください。`done` が正です。**
-控えには `completed` が 34 本 残っていますが、これは歴史であり、直しません
-(台帳の側では `done — complete (covers former "completed", "active")` で決着済み)。
-
-**`blocked` と `failed` は、控え 97 本の範囲では一度も使われていません**
-(2026-07-28 実測)。値が誤りだからではなく、その事態がまだ起きていないためです。
-「使われているはず」と読まないでください。
 
 Note:
 - Normally, "idle" is a UI state (no active task), not a YAML status value.
@@ -181,39 +109,6 @@ Note:
 - `processed`: processed; keep record
   - Allowed: read-only
   - Forbidden: flipping back to pending without creating a new entry
-
-### Report File: `queue/reports/*_report.yaml` (cmd_1461 で明文化)
-
-**この欄だけは、正本が本文書ではありません。正本は読み手のコードです** —
-`scripts/idle_revive_scan.py` の `COMPLETION_STATUSES`。
-
-そう決めた理由: この欄を読む機械が 3 本あり、**文書を直しても機械の判定は変わらない**
-ためです。文書を正本にすると、規と振る舞いが二度と揃いません。
-
-完了として読まれる語 = `done` / `completed` / `success`
-(2026-07-28 18:04 実測。3 本とも同じ集合でした)。
-
-| 機械 | 完了と読めた時に何が決まるか |
-|---|---|
-| `scripts/idle_revive_scan.py` | 完了と読めなければ、その足軽を revive する |
-| `scripts/stall_watchdog_scan.py` | 完了と読めた報告だけを「着地」と数える |
-| `scripts/report_validate.py` | 完了と読めた報告にだけ R5c/R5d を当てる |
-
-**語を足す時は 3 本まとめて足してください。** 1 本だけ足すと、同じ報告が
-「完了」と「未完了」の両方に読まれます。
-
-実例 (2026-07-28 まで現に在りました): `report_validate.py` は完了語を手で写して
-持っており、その写しは **読み手が一度も持たない語** (`complete` / `finished`) を
-完了と読み、**読み手が持つ語** (`success`) を完了と読みませんでした。
-写した本人は「読み手のコードを写した」と註に書いています。**誰も嘘をついておらず、
-写しが照合されないまま残っていただけです。**
-今は `report_validate.py` が読み手から借りる形になり、食い違いは
-`python3 scripts/report_validate.py --selftest` の **B6** が機械で捕えます。
-
-**`aligned` は報告の status ではありません。** 報告の中に `status: aligned` が
-現に出ますが、これは `north_star_alignment:` の下の欄です
-(2026-07-28 18:00 実測 = 35 箇所すべてがこの入れ子)。
-`status:` を行で数えると混ざります。**数える時は階層を見てください。**
 
 ## Immediate Delegation Principle (Shogun)
 
@@ -247,7 +142,7 @@ Step 9: Ashigaru completes → inbox_write karo → watcher nudges karo
 
 ## "Wake = Full Scan" Pattern
 
-This CLI cannot "wait" — sitting at the prompt means the session is stopped, not waiting. **Confirm this in your own pane once.**
+Claude Code cannot "wait". Prompt-wait = stopped.
 
 1. Dispatch ashigaru
 2. Say "stopping here" and end processing

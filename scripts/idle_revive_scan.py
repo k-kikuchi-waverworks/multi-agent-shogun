@@ -30,42 +30,14 @@
 #     (iii) 乖離 corroboration = task/report YAML の mtime が dashboard mtime より新しい
 #          (= 現場は進んだのに家老の記録が追随せず。mtime のみ・prose 非scrape)
 #   hit → karo へ clear_command(rate limit --karo-min-interval-min, default 20 分)。
-#   ★cmd_1339 労働証跡 gate★: dashboard mtime は代理変数 — 家老の実労働 (task YAML
-#   書込 K2 / from:karo inbox 送信 K3 / 台帳追記 K4) が window 内なら clear しない
-#   (証拠一覧は scan_karo_degrade 直前の comment block 参照)。
 #   SessionStart hook が persona/state を復旧、CLAUDE.md Session Start が queue YAML から
 #   dashboard を再構築するゆえ state 損失ゼロ(非破壊)。karo 連続 escalation は shogun へ。
 #   backstop の定期 self-clear は karo.md 規律側(docs Task D)。本 script は primary(reactive)。
-#
-# ★停電型 (相関沈黙) quorum gate★ (cmd_1339・runbook §5):
-#   2026-07-25 19:51-20:45 殿 token 切れで全8体が同時沈黙 → 閾値を素通りして誤 clear。
-#   「1体だけ止まっている」(agent 固有の固着) と「全員止まっている」(系の上流障害) は
-#   別物 — 独立障害が N 体同時に起きる確率は無視できるため、相関沈黙は共通原因の証拠。
-#   同一 scan cycle で stall 条件成立が ≥ quorum_min_stalled (3) 体かつ scan 対象の
-#   ≥ quorum_ratio (75%) なら系イベントと判定し:
-#     - 個別 clear (revive/escalation) を全面抑止 (家老 degrade clear も含む)
-#     - 家老へ warning 1通のみ (queue/state/blackout_suppress で 30分 throttle)
-#     - rate limit / consecutive は消費しない = 復帰後は即座に従来判定へ戻る
-#   分母 = active task を持つ scan 対象 (busy 含む=busy は系が健全である証拠)。
-#   分子 = idle+出力停止、または absent+出力停止 (tmux server 消失型も同じ網)。
-#   対象が 1〜2 体では不成立 = 個別検知は殺さない。
-#   補強 (軍師一号具申): 発行直前に pane 本文の上流障害文字列 (usage limit / credit /
-#   auth / rate limit) を検知したら個別にも抑止 — 上流障害中の /clear は context を
-#   失うだけで何も直さないため。
-#
-# ★上流障害 台帳 + 枠復帰の再開通知★ (cmd_1355・2026-07-26 全軍3h停止の再発防止):
-#   上流障害 (session limit 等) で /clear を抑止した agent は queue/state/upstream_outage.yaml
-#   へ記録され、episode 初回に家老へ検知警報1通、解除条件 (resets ETA 経過等) 成立で
-#   家老へ「再開せよ」1通が上がる。詳細 = UPSTREAM_OUTAGE_STATE_FILE 周辺 comment と
-#   docs/content/ops/cmd_1355_upstream_outage_guard.md。
 #
 # Usage:
 #   python3 scripts/idle_revive_scan.py [--dry-run] [--stall-min N] [--min-interval-min N]
 #     [--max-consecutive N] [--karo-stale-min N] [--karo-min-interval-min N]
 #     [--no-karo-check] [--dashboard-path PATH] [--pane-state-file PATH]
-#     [--quorum-min-stalled N] [--quorum-ratio F] [--no-quorum-gate]
-#     [--blackout-throttle-min N] [--upstream-alert-throttle-min N]
-#     [--selftest-upstream] [--expected-interval-sec N] [--gap-warn-factor F]
 #     [--json] [--queue-root PATH]
 #
 # On hit (非 dry-run): `inbox_write.sh {agent} "<本文>" clear_command idle_revive_scan` を発行。
@@ -76,8 +48,6 @@
 import argparse
 import datetime
 import json
-import os
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -85,16 +55,10 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-# 終わりの証を書く口 (cmd_1465 の丙)。書き手と読み手を同じ file に置いてある。
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import scheduled_liveness_check as liveness  # noqa: E402
 DEFAULT_TASKS_DIR = REPO_ROOT / "queue" / "tasks"
 DEFAULT_REPORTS_DIR = REPO_ROOT / "queue" / "reports"
 DEFAULT_STATE_DIR = REPO_ROOT / "queue" / "state"
-# test 注入口: 本番 inbox へ書かず stub に記録させるため env で差し替え可能にする
-# (fixture roster での変異試験が実 inbox を汚さぬための唯一の経路。本番は未設定)。
-INBOX_WRITE_SH = Path(os.environ.get("IDLE_REVIVE_INBOX_WRITE",
-                                     str(REPO_ROOT / "scripts" / "inbox_write.sh")))
+INBOX_WRITE_SH = REPO_ROOT / "scripts" / "inbox_write.sh"
 
 # (b) revive 候補となる task status。それ以外(done/completed/idle/reassigned_* 等)は除外。
 ACTIVE_STATUSES = {"assigned", "in_progress"}
@@ -116,175 +80,6 @@ DEFAULT_KARO_STALE_MIN = 20        # dashboard.md staleness 閾値。家老 clea
 DEFAULT_KARO_MIN_INTERVAL_MIN = 20 # rate limit: karo 連続 clear 最小間隔(≥15-20分・設計 §4)。
 DEFAULT_DASHBOARD = REPO_ROOT / "dashboard.md"
 KARO_STATE_KEY = "karo"
-
-# ── cmd_1339: 停電型 (相関沈黙) quorum gate パラメータ (runbook §5) ──
-DEFAULT_QUORUM_MIN_STALLED = 3     # 系イベント判定に要する同時 stall 最小体数。1〜2体では不成立。
-DEFAULT_QUORUM_RATIO = 0.75        # 同 上、scan 対象 (busy 含む) に対する stall 割合の下限。
-DEFAULT_BLACKOUT_THROTTLE_MIN = 30 # 家老への停電型 warning の最小間隔 (supervisor不在警告と同型)。
-BLACKOUT_AGENT_KEY = "*fleet*"     # 停電型判定の合成 result entry が名乗る agent 名。
-BLACKOUT_STATE_FILE = "blackout_suppress"  # queue/state/ 配下の throttle 専用 state file。
-
-# ── cmd_1392: 観測者の不在 (process が名乗る沈黙の間 存在しておらなんだ) ──
-# ★閾 3 の根拠★: cron 周期 180 秒 × 3 = 9 分 < stall_min 15 分 ⇒
-#   ★正常な再起動 (1 回きり) では絶対に鳴らぬ★・★起き直り続ける agent は
-#   stall_min に達する前に鳴る★ = 「撃たぬ側へ倒すだけ」の永久免除の罠を塞ぐ。
-DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD = 3
-
-# ★cmd_1392 是正 (2026-07-27)★: 抑止の【分母】。scan() の入口で毎回 0 へ戻し、
-#   判定へ入った体数 (judged) と、其のうち齢を判じられた/判じられなんだ体数を数える。
-# ★scan() の戻り値を 3 組から動かさぬ★= 他の 2 つの牙 (test_idle_revive_cooldown /
-#   test_idle_revive_log_selfproof) が 3 組で受けておるゆえ ★最小 churn へ倒す★。
-IMPOSSIBLE_JUDGE_STATS = {"judged": 0, "age_known": 0, "age_unknown": 0}
-
-# ══════════════════════════════════════════════════════════════════════════
-# ★cmd_1387 (2026-07-27 14:2x): 【我らが撃った切替】が crash-loop の顔で映る★
-# ──────────────────────────────────────────────────────────────────────────
-# ★実害の形★= 14:12〜14:21 に ★三体 (ashigaru1/2/6) が同時に restart_loop_alert★。
-#   真因は ★家老 13:59:53 / 将軍 14:12:25 の一斉切替★ であり、pane は三体とも
-#   生きて働いておった (家老が実査済)。★番人の判定は正しい★ = 齢は現に若く、
-#   名乗る沈黙は現に長い。★誤っておったのは【読む者に真因を渡さなんだ事】である★。
-#
-# ★★ゆえに直すのは【判定】ではなく【名乗り】である★★ (家老 14:21 の裁):
-#   ・母数から外さぬ = ★外せば「切替を装えば抑止を逃れる」口が開く★
-#   ・抑止するか否かは 1bit も動かさぬ = ★本節は出力の文字列にしか触れぬ★
-#   ・添えるだけ = ★門に己の射程を名乗らせる★ (六号が K-17 で立てた形と同じ)
-#
-# ★本節が【見ておらぬ物】も名乗る★:
-#   ・switch_cli.sh を通さぬ切替 (人が手で CLI を起こし直した等) は記録に出ぬ
-#   ・記録が無い事は「切替が無かった」の証ではない = ★源が不在なだけ★
-SWITCH_HISTORY_FILE = "switch_history.tsv"   # queue/state/ 配下・switch_cli.sh が追記
-# ★猶予★= 記録は Enter 送出の直後に落ちるが、process の誕生は其の前後に僅かに散る
-#   (shell の起動・CLI の fork)。★猶予は【添える側】を広くする★ = 誤って添えても
-#   判定は動かず、読む者が pane を実査して否めるゆえ害が小さい。
-# ★★初版は 120 秒であった = 見立てであり実測ではなかった★★ (家老 17:00 の第七条 =
-#   ★「言えぬ」と名乗る前に【安く言える道】が無いかを先に見よ★) ⇒ ★1 分で割れた★:
-#   ★2026-07-27 17:0x 実測★= 現に走る 8 体で ★誕生 − launch(log) = +0.4 〜 +1.3 秒★
-#     (ash1 0.9 / ash2 0.7 / ash3 0.8 / ash4 0.4 / ash5 1.0 / ash6 1.3 / gunshi1 0.5 / gunshi2 0.6)
-#   ⇒ ★誕生は必ず launch の【後】に来る★ ⇒ 猶予は原理上 0 でも成り立つ。
-#   ★而して 0 にはせぬ★= 記録の書込が誕生より僅かに後れる形 (writer が Enter の後に書く) と
-#   時計のずれに備える ⇒ ★実測の最大 1.3 秒に対し 23 倍の余裕で 30 秒★。
-#   ★之を広く取り過ぎた時に何が起きるか★= ★一斉切替の日に【古い process にも札が付く】★ =
-#   札が意味を失う (T-SW-004 が其の向きを縛る)。
-SWITCH_EXPLAINS_SLACK_SEC = 30
-# ★scan() の戻り値は 3 組から動かさぬ★ (他の牙が 3 組で受けておる = 最小 churn)。
-#   ⇒ 母数の型 (IMPOSSIBLE_JUDGE_STATS) に倣い、読んだ源を module へ置いて main が名乗る。
-SWITCH_READ_STATS = {"source": "unread", "records": 0, "bad_lines": 0}
-
-# ══════════════════════════════════════════════════════════════════════════
-# ★cmd_1394: 番人が【己の振舞い】を証す★ (2026-07-27 未明・家老が二度誤った)
-# ──────────────────────────────────────────────────────────────────────────
-# 穴(a) ★log は【撃つと判じた】と【撃った】を一字も区別せなんだ★:
-#   ACTION=revive の行は判定直後に無条件で print され、--dry-run の return も
-#   発行直前 gate (probe/上流障害) も その【後】に在る。⇒ log だけでは
-#   「抑止が効いておったか」を永久に判じられず、撃った証は clear_log.yaml の
-#   last_clear_ts のみであった。実測: 22:48〜23:18 の 11 scan は全て「対象なし」=
-#   ★抑止は一度も試されておらぬ★= 害が無かったのは守りゆえでなく撃つ場面が
-#   無かったゆえ (「緑のtestが何も証明していない」の log 版)。
-#   ⇒ ACTION 行に MODE= / PHASE=decided を焼き、★実行相で OUTCOME= を1行★出す。
-#     ★決定 1 件に対し OUTCOME 丁度 1 行★ = 沈黙が「撃った」に化けられぬ。
-# 穴(b) ★走行そのものの欠測を名指す行が一つも無かった★:
-#   23:18:01 → 00:15:02 の 57 分 (*/3 ゆえ 18 scan 欠) が log から読めぬ。
-#   ★「対象なし が出ておらぬ」と「走っておらぬ」は別である★ — 後者は
-#   ★観測者の不在★であり、固着を誰も見ておらぬ窓を意味する。
-#   ⇒ 走行の刻を1つ残し、次回走行が前回との差で欠測を名指す。
-# ══════════════════════════════════════════════════════════════════════════
-SCAN_HEARTBEAT_FILE = "idle_revive_last_scan.yaml"  # queue/state/ 配下・走行の刻のみ
-DEFAULT_EXPECTED_INTERVAL_SEC = 180  # cron の周期 (*/3 分)。欠測判定の物差し。
-DEFAULT_GAP_WARN_FACTOR = 2.0        # 周期の何倍を超えたら欠測と名指すか (1 回飛ばしを許容)。
-
-# 上流障害 (account/API 層) の pane 兆候文字列。★clear では直らない障害に限定する★:
-# 新 session を張っても同じ壁に当たる account/認証/枠系のみ。一時的な API 5xx は
-# /clear+再読で復帰しうるため含めない (過剰抑止で真の固着を見逃さないための境界)。
-#
-# ★★cmd_1385: この tuple は【抑止】の引き金であり、【断定】の根拠ではない★★
-#   pane 本文に文言が在ることは「壁を見た」ことを意味せぬ — banner は枠が戻った後も
-#   scrollback に残り続ける (cmd_1355 が既に実測し、T-QRM-012 は解除側でそれを前提に
-#   書かれておる)。★同じ事実を、解除の側では前提にしながら検知の側では無視しておった★
-#   のが 2026-07-26 の実害の機序である (詳細は upstream_wall_verdict の docstring)。
-#   ⇒ 抑止は本 tuple で広く (誤って抑止しても /clear を1回見送るだけ)、
-#     ★断定 (家老への上流障害警報) は upstream_wall_verdict の "live" に限る★。
-UPSTREAM_FAILURE_PATTERNS = (
-    "usage limit",              # Claude usage limit reached 型 (殿 token 枠)
-    "rate limit", "rate_limit", # rate_limit_error / Rate limited
-    "credit balance",           # credit balance is too low
-    "authentication_error",
-    "oauth token has expired",
-    "please run /login",
-    "overloaded",               # overloaded_error (上流容量・clear で直らない)
-    # ── cmd_1355: 2026-07-26 未明の実 pane 文言 (推測でなく capture-pane 採取) ──
-    # 実バイト列 (ashigaru6 pane %3 scrollback・tests/fixtures/upstream_session_limit_pane.txt に凍結):
-    #   「  ⎿  You've hit your session limit · resets 4:30am」(· = C2 B7)
-    #   「     /usage-credits to finish what you’re working」(’ = E2 80 99)
-    # この文言が pattern に無かったため枠切れ沈黙が idle 固着と誤判定され、軍師一号/二号へ
-    # 各3回・家老へ3回の誤 /clear が撃たれた (誤 clear が pane の証拠文言ごと消した)。
-    # ★pattern は折返し (pane幅52) を跨がぬ短句のみ★ — "resets 4:30am (asia/tokyo)" の様な
-    # 長句は物理行を跨いで割れるため足さない。
-    "session limit",            # You've hit your session limit · resets 4:30am (Asia/Tokyo)
-    "/usage-credits",           # /usage-credits to finish what you’re working on. (CLI 誘導行)
-    # ── cmd_1401 (2026-07-27 01:5x): ★週次上限の族が丸ごと抜けておった★ ──
-    # 実測: 「You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)」を現行の網へ
-    # 食わせると ★detect_upstream_failure が None★ = ★抑止の引き金が一つも当たらぬ★ =
-    # ★週次上限で沈黙した agent は番人の目に【ただの固着】と映り /clear が撃たれる★
-    # (cmd_1355 の実害と同型)。★3 体以上が同時に当たれば停電型 quorum が救うが、
-    #  1〜2 体だけが当たった時は救いが無い★ — 8 体が別々に枠を食う今夜は現に起こりうる。
-    # 根拠 (推測ではない)。ただし根拠の強さは下のとおりで、実際より高く書かない。
-    #   残っている物 = commit 40cdde0 "fix(cmd_1401): 週次上限の族が網に無かった"。
-    #     この commit が pattern と、下の selftest U10 の banner 文字列そのものを入れた。
-    #     文字列は selftest 側に literal で焼いてあるので、git に残り続ける。
-    #   残っていない物 = 最初にこの banner を見て報告した2つの記録
-    #     (家老が9 pane を見て書き写した dashboard の行 / 足軽四号の report YAML)。
-    #     どちらも .gitignore で追跡外なので、上書きされた時点で git からも復元できない。
-    #     2026-07-28 に確認: この literal を含む commit は 40cdde0 の1本だけで、
-    #     dashboard と report YAML の側には1つも無い。
-    #   ⇒ 元の観測そのものは、もう誰も読み返せない。ここは弱い側として名乗っておく。
-    #
-    # 直した経緯 (cmd_1450)。元は上の2つを、ファイル名のうしろにコロンと行番号を付けた形で
-    # 指していた。指し先はどちらも上書きされる帳面で、report YAML は今 142行しかない
-    # (指していた行番号は 2778 で、とうに範囲外になっていた)。
-    # 行番号を直しても、次の上書きでまた壊れる。壊れるのは行番号ではなく指す先の性質による。
-    # ⇒ 行番号を捨て、git に残る commit を指す形へ替えた。
-    #
-    # 本物の pane を byte 単位で凍らせた物は今も無い。
-    # 次にこの banner を見た者は capture-pane で fixture へ凍結すること
-    # (tests/fixtures/upstream_session_limit_pane.txt と同じ形)。
-    # ★"weekly limit" の 2 語だけを採る★= 折返しを跨がぬ短句の掟どおり。長い方
-    # ("You've hit your weekly limit") は此の短句に含まれるゆえ二重には置かぬ。
-    "weekly limit",             # You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)
-)
-
-# ── cmd_1385: 主文 (head) と 続き行 (continuation) の区別 ──
-# 凍結 fixture (tests/fixtures/upstream_session_limit_pane.txt = 本物の塞がった pane) の
-# 実測: banner は 4 行の塊であり、
-#   非空行#1 「⎿  You've hit your session limit · resets 4:30am」  ← 主文 (期限も同一行)
-#   非空行#2 「   (Asia/Tokyo)」                                   ← 続き行
-#   非空行#3 「   /usage-credits to finish what you’re working」   ← 続き行
-#   非空行#4 「   on.」                                            ← 続き行
-# ★主文だけが「壁」を名乗れる★。続き行は主文にぶら下がる断片にすぎぬ。
-UPSTREAM_CONTINUATION_PATTERNS = ("/usage-credits",)
-UPSTREAM_HEAD_PATTERNS = tuple(
-    p for p in UPSTREAM_FAILURE_PATTERNS if p not in UPSTREAM_CONTINUATION_PATTERNS)
-
-# ★己の期限を banner 自身が名乗る族★ — 上記 fixture で "resets 4:30am" が主文と
-# ★同一行★に在ることを byte で確かめた pattern のみを入れる。推測で広げぬ
-# ("credit balance" / "authentication_error" 等は期限を持たぬ族ゆえ対象外 = 従来どおり
-#  人が直すまで壁であり続ける)。
-#
-# ★cmd_1389 で本 tuple の役目は【狭まった】★ — 次の一点だけを担う:
-#   ★「期限を読めなんだ時に、其れを【行が崩れた証】と読んでよい族か」★。
-#   ★期限が読めた時は本 tuple を一度も見ぬ★ (下の upstream_wall_verdict を見よ) =
-#   ★族の登録漏れが【期限を名乗る banner】に対しては構造的に起こらぬ★。
-#
-# ★cmd_1401: "weekly limit" は【入れぬ】★ — 理由を残す (次に読む者が足したくなる形ゆえ):
-#   本 tuple は「期限を読めなんだ時に【行が崩れた証】と読んでよい族か」を決める。
-#   ★週次の期限は「resets Jul 29, 4am」= 日付つきで、現行 RESETS_RE (resets の直後に
-#   数字を待つ綴り) では ★読めぬ★ (実測: parse_resets_eta → None)。
-#   ⇒ 此処へ入れれば「読めぬ = 残渣 = 断定せぬ」へ倒れ、★家老への上流障害警報が消える★。
-#   ★週次の壁は現に立っておる★ゆえ live のまま上げるのが正しい。
-#   ★日付形を読む綴りを足すのは、実 pane の凍結を得てからにせよ★ (推測で網を広げぬ)。
-UPSTREAM_TIMED_HEAD_PATTERNS = ("session limit",)
-
-UPSTREAM_LIVE = "live"          # 壁は今も立っておる (断定してよい)
-UPSTREAM_RESIDUE = "residue"    # 壁の痕は在るが、既に崩れておる (断定してはならぬ)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -349,1189 +144,8 @@ def get_pane_states(repo_root: Path):
 
 
 # ─────────────────────────────────────────────────────────────
-# cmd_1339 (e)(f): /clear は破壊的操作 — 単発 pane 再probe + 文脈材料
-# ─────────────────────────────────────────────────────────────
-# ★非対称の明示★: nudge の誤配・誤発火は軽症 (起こされた agent は自分の inbox を
-# 読むだけ) だが、/clear の誤発火は稼働中の session context を殺す。2026-07-25
-# 19:21 に thinking 中の足軽四号へ誤 /clear が 3 連発した (52列 pane で status bar
-# の『esc to interrupt』が切詰められ、queued 行が spinner 判定を汚した=
-# lib/agent_status.sh 側で根治済)。本層はそれに加え、scan 時点と発行時点の
-# TOCTOU を閉じる: ★発行直前にその agent の pane を再 probe し、busy へ転じて
-# いれば発行しない★。閾値 (stall_min 等) は触らない=機構の修理であって
-# 感度の推測調整ではない。
-
-_SINGLE_AGENT_STATE_BASH = r'''
-set -uo pipefail
-cd "$1"
-agent="$2"
-source lib/agent_registry.sh
-source lib/agent_status.sh
-PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
-pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
-if [ -z "$pane" ]; then echo "absent"; exit 0; fi
-agent_is_busy_check "$pane" "" && rc=0 || rc=$?
-case $rc in 0) echo busy ;; 1) echo idle ;; *) echo absent ;; esac
-'''
-
-
-def probe_agent_state(agent):
-    """単一 agent の pane 状態を今この瞬間に再 probe する ('busy'|'idle'|'absent'|'unknown')。
-
-    pane 解決は agent_registry (cmd_1339 で @agent_id 第一正本化済) 経由 —
-    pane 番号のずれで別 agent の pane を読む誤 probe を構造的に避ける。
-    """
-    try:
-        proc = subprocess.run(
-            ["bash", "-c", _SINGLE_AGENT_STATE_BASH, "_", str(REPO_ROOT), agent],
-            capture_output=True, text=True, timeout=30,
-        )
-        lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
-        v = lines[-1] if lines else ""
-        return v if v in ("busy", "idle", "absent") else "unknown"
-    except (OSError, subprocess.SubprocessError):
-        return "unknown"
-
-
-_PANE_TAIL_BASH = r'''
-set -uo pipefail
-cd "$1"
-agent="$2"
-source lib/agent_registry.sh
-PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
-pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
-[ -n "$pane" ] || exit 0
-tmux capture-pane -t "$pane" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -2
-'''
-
-
-def agent_context_note(agent, reports_dir):
-    """(f) 家老が『誤検知か本当の固着か』を判断できる材料を 1 行で返す。
-
-    内容 = 対象 pane の末尾 2 行 (空白圧縮・160 字上限) + report YAML の最終更新
-    経過分。警報だけ渡されても家老は pane を実査するまで判断できぬ、という
-    2026-07-25 の実戦不便 (足軽四号誤 clear の検分) への直接回答。
-    """
-    tail = ""
-    try:
-        proc = subprocess.run(
-            ["bash", "-c", _PANE_TAIL_BASH, "_", str(REPO_ROOT), agent],
-            capture_output=True, text=True, timeout=30,
-        )
-        lines = [" ".join(l.split()) for l in proc.stdout.splitlines() if l.strip()]
-        tail = " / ".join(lines)
-        if len(tail) > 160:
-            tail = tail[-160:]
-    except (OSError, subprocess.SubprocessError):
-        pass
-    if not tail:
-        tail = "取得不能"
-    age = "不明"
-    try:
-        rp = reports_dir / f"{agent}_report.yaml"
-        if rp.is_file():
-            age_min = (datetime.datetime.now().timestamp() - rp.stat().st_mtime) / 60.0
-            age = f"{round(age_min, 1)}分前"
-    except OSError:
-        pass
-    return f"直前pane末尾『{tail}』/ report最終更新={age}"
-
-
-# ─────────────────────────────────────────────────────────────
-# cmd_1392: ★観測者の不在を観測値に混ぜぬ★ — process の齢を測る
-# ─────────────────────────────────────────────────────────────
-# ★2026-07-27 00:24:04 の実害★: WSL2 が建て直り、tmux shell が 00:17:19 に生まれた。
-#   番人は其の 3 分 19 秒 前 (00:14) に実射へ戻されており、★己が 57 分 寝ておった事も、
-#   見張る相手が未だ生まれておらぬ事も知らぬまま★、空白を沈黙として数え始めた。
-#   ⇒ 00:24:04 に ★齢 6.5 分の process へ「91.5 分 / 95.4 分の沈黙」を名乗って /clear★
-#     (14.1 倍の不可能)。停電型 quorum は 00:15〜00:18 は現に効いておったが、
-#     ★agent が一体ずつ戻ると分子が 3 を割り、まだ戻らぬ 2 体が「少数の固着」に見えた★
-#     = ★復旧の途中には必ず穴が開く★。
-#
-# ★本層が問うのは真偽ではなく【存在】である★ =「本当に働いておったか」は問わぬ。
-#   「其の process は、名乗ろうとしておる沈黙の間、存在しておらなんだ」— 之だけを問う。
-#   ⇒ 世界知識も他 agent の状態も要らず ★agent 1 体で閉じる★ = quorum と独立に効く。
-#
-# ★齢の取得と矛盾の判定を別の口に分けてある★ — 混ぜると試験が実 process を
-#   起こさねば書けなくなる (設計 §6・軍師二号)。判定は scan() の側に在る。
-# ─────────────────────────────────────────────────────────────
-# ★★cmd_1392 是正 (2026-07-27 10:xx・軍師二号が code の内側で見つけた汚れ)★★
-#
-# ★病★= ★★二つの【族の違う時計】を直に較べておった★★:
-#   ・齢     … `ps -o etimes=`      = ★boot 起点の単調時計 (/proc/uptime) 一族★
-#   ・沈黙   … file の st_mtime 差   = ★CLOCK_REALTIME (stat) 一族★
-#   ⇒ `age_sec < claimed_silence_sec` は ★別々の物差しの目盛りを引き算しておった★。
-#
-# ★実害の向き (拙者が 303 process 全数で実測・2026-07-27 10:03)★:
-#   ★差 (mtime齢 − etimes齢) は ★片側★ = min 0.8s / 中央 1,899.2s / max 1,900.8s・
-#     ★負は 0 本★ ⇒ ★etimes は齢を【必ず短く】申す★ (WSL2 の suspend を uptime が数えぬゆえ)。
-#   ⇒ ★`age < claimed` が成立しやすくなる★= ★★抑止が過剰に掛かる★★ =
-#     ★味方を斬る側ではなく【真の固着を見逃す】側★。
-#   ★且つ我らが己で書いた界が破れておった★= 註「抑止は【遅延】であって【免除】ではない・
-#     最大 stall_min」は、汚れの下では ★最大 stall_min + 31.6 分★ になっておった。
-#
-# ★★処方 = 【正しい刻を当てる】ではない。【較べられる物同士で較べる】である★★
-#   (家老 09:58 の枷 = 「どちらが真の刻かを断ずるな = 外部の基準を我らは持たぬ」)。
-#   ⇒ ★齢も mtime 一族から採る★= ★`/proc/<pid>` の inode mtime = process の【生年】★。
-#     ★沈黙が `Path.stat().st_mtime` を読むのと ★同じ syscall・同じ時計★ である★。
-#   ⇒ ★★補正値は一切 焼かぬ★★ (軍師一号 10:02 の枷 = 「ずれは一定でない = boot から
-#     離れるほど汚れる」ゆえ、定数で引く道は必ず腐る)。
-#
-# ★実測で確かめた性質 (2026-07-27 10:01〜10:03・母数つき)★:
-#   (a) 生まれたての process = /proc mtime と spawn 時刻の差 ★+0.20 秒★
-#   (b) 同じ inode を 5 回 (2秒毎) stat = ★値は不動 (集合の大きさ 1)★・/proc 掃き後も不動
-#   (c) 303 process 全数で ★mtime 由来の齢が負 = 0 本★
-#   (d) pid 1 の生年 = ★00:13:11★ ⇒ ★log 由来 00:13:45 / `uptime -s` 00:33採取 00:13:52 と整合★
-#       (★之は【真の刻を当てた】主張ではない = 独立な三者が近い、という以上を申さぬ★)
-#
-# ★言えぬ側を名乗る★= ★kernel が此の inode を作り直す事が万に一つも無いか、拙者は証せぬ★
-#   (b で不動は見たが【不在の証明】は出せぬ)。⇒ ★作り直されれば齢は【若く】出る = 抑止側★
-#   ゆえ ★従前と同じ向きの誤り★であり、守りを新たに減らしはせぬ。
-#   ★負の齢は None (判じられぬ) へ倒す★= 計器が壊れた時に抑止も revive も断ぜぬため。
-#
-# ★齢の取得と矛盾の判定を別の口に分けてある★ — 混ぜると試験が実 process を
-#   起こさねば書けなくなる (設計 §6・軍師二号)。判定は scan() の側に在る。
-_PANE_PROC_AGE_BASH = r'''
-set -uo pipefail
-cd "$1"
-agent="$2"
-source lib/agent_registry.sh
-PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
-pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
-[ -n "$pane" ] || exit 0
-ppid=$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null || echo "")
-[ -n "$ppid" ] || exit 0
-# ★齢は此処で測らぬ★= ★pid だけを返し、齢は python が mtime 一族で測る★
-# (★以前は此処で ps へ経過秒を問うており、其れが族の混線の入口であった★
-#  = ★其の綴りを此の文へ書けば T-AGE-016 が鳴る★ゆえ、綴らずに記す)。
-pgrep -P "$ppid" 2>/dev/null || true
-'''
-
-
-def _proc_start_mtime(pid):
-    """`/proc/<pid>` の inode mtime = ★process の生年を mtime 一族で読む★。読めねば None。
-
-    ★`newest_output_mtime` が file へ撃つのと ★同じ stat★ である★ =
-      之が「較べられる物同士で較べる」の実体じゃ。
-    """
-    try:
-        return os.stat(f"/proc/{int(pid)}").st_mtime
-    except (OSError, ValueError, TypeError):
-        return None
-
-
-def _oldest_child_age_from_pids(stdout_text, now_ts):
-    """子 pid の並びから ★最も古い子★ の齢 (秒) を返す。判じられぬ時は None。
-
-    ★名を替えた理由 (cmd_1392 是正)★= 以前は `_oldest_child_age(ps の etimes 並び)` で
-      あった。★入力の意味が【齢の並び】から【pid の並び】へ変わる★ゆえ、名を据え置けば
-      ★古い試験が新しい実装を素通りで緑にする★ (pid の最大値は最も古い子ではない = 逆)。
-      ★★意味が変われば名も変える★★ = 読み手と試験に気付かせる唯一の口である。
-
-    ★別の口にしてある理由★= 実 process を起こさずに【最も古い子を取っておるか】
-      【子 0 件を齢 0 に化けさせておらぬか】を直に撃てるようにするため。
-
-    ★最も古い子を取る理由★: 子が複数在る過渡 (旧 CLI が終いきらぬ等) で若い方を取れば
-      抑止が広がる。★抑止は狭い側へ倒す★ — 誤って抑止すれば真の固着を見逃すゆえ。
-
-    ★子 0 件は None (= 齢 0 ではない)★: CLI 不在は【固着】でも【矛盾】でもない
-      別の状態であり、齢 0 として扱えば ★何もかもを抑止する門★ になる。
-
-    ★負の齢も None★: 生年が now より後 = 計器が壊れておる ⇒ ★黙って 0 へ丸めぬ★。
-    """
-    starts = [m for m in (_proc_start_mtime(tok) for tok in stdout_text.split())
-              if m is not None]
-    if not starts:
-        return None
-    age = now_ts - min(starts)          # ★最も古い子 = 生年が最も小さい子★
-    return age if age >= 0 else None
-
-
-def agent_proc_age_sec(agent, now_ts=None):
-    """agent の CLI process の齢 (秒)。判じられぬ時は None。
-
-    ★now_ts を渡させる理由 (cmd_1392 是正)★= 沈黙は scan 開始の一点 (`now_ts`) から
-      測っておる。齢だけを【後の刻】から測れば、scan が長引いた分だけ齢が水増しされ
-      ★同じ族に揃えた筈が、また別の起点で較べる形★になる。★同じ一点から測る★。
-
-    ★pane_pid そのものを見ぬ理由 (2026-07-27 02:03:45 実測)★:
-      全 pane の pane_pid の etime が ★一律 6,386 秒★ = tmux session の齢しか映さぬ =
-      ★/exit して CLI だけ起こし直した agent を見分けられぬ★。
-      ★直下の子★を見た時のみ ash2 が 5,435 秒 (他は ~6,370) と現に割れた。
-
-    ★`claude` と名を焼かぬ理由★: config/settings.yaml の CLI は可変ゆえ
-      (codex / opencode / kimi へ切替えた pane で ★黙って盲になる★)。
-    """
-    # ★`time.time()` を使わぬ★= ★本 module は `time` を import しておらぬ★ =
-    #   拙者は 10:0x に其の一行を書き、★NameError の地雷を live な番人へ埋めておった★
-    #   (10:09 実射で露見・機序は下の註)。★scan と同じ `datetime` 一族から採る★。
-    if now_ts is None:
-        now_ts = datetime.datetime.now().timestamp()
-    try:
-        proc = subprocess.run(
-            ["bash", "-c", _PANE_PROC_AGE_BASH, "_", str(REPO_ROOT), agent],
-            capture_output=True, text=True, timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return _oldest_child_age_from_pids(proc.stdout, now_ts)
-
-
-# ─────────────────────────────────────────────────────────────
-# cmd_1339 quorum 補強: 上流障害文字列の検知 (軍師一号具申)
-# ─────────────────────────────────────────────────────────────
-_PANE_UPSTREAM_BASH = r'''
-set -uo pipefail
-cd "$1"
-agent="$2"
-source lib/agent_registry.sh
-PANE_BASE=$(tmux show-options -gv pane-base-index 2>/dev/null || echo 0)
-pane=$(agent_registry_pane_for_agent "$agent" "$PANE_BASE" 2>/dev/null || echo "")
-[ -n "$pane" ] || exit 0
-tmux capture-pane -t "$pane" -p 2>/dev/null | grep -v '^[[:space:]]*$' | tail -30
-'''
-
-
-def pane_upstream_text(agent):
-    """上流障害検知用に pane 末尾 30 行 (空行除く) を返す。取得不能は空文字。
-
-    幅は cmd_1356 (OBS-4) で 15→30 行: 凍結 fixture の banner 行は末尾から10行目で
-    tail -15 の余裕は5行しか無く、CLI が chrome を数行足すだけで窓の外へ落ちる
-    (軍師二号 実測)。grep 対象が15行増えるだけで費用ゼロ。
-
-    エラー banner は prompt 付近 (末尾) に出るため末尾のみ見る — pane 全面を見ると
-    agent が編集中のコード本文 (「rate limit」等の語を含みうる) を拾う誤検知が増える。
-    """
-    try:
-        proc = subprocess.run(
-            ["bash", "-c", _PANE_UPSTREAM_BASH, "_", str(REPO_ROOT), agent],
-            capture_output=True, text=True, timeout=30,
-        )
-        return proc.stdout
-    except (OSError, subprocess.SubprocessError):
-        return ""
-
-
-def detect_upstream_failure(text):
-    """pane 本文に上流障害 (account/API 層) の兆候文字列があれば該当 pattern を返す。
-
-    hit した agent への /clear は抑止する: 上流障害中の clear は context を失うだけで
-    何も直さない (新 session も同じ壁に当たる)。抑止は state を消費しない =
-    障害解消後は従来判定が即座に働く。
-    """
-    if not text:
-        return None
-    low = text.lower()
-    for pat in UPSTREAM_FAILURE_PATTERNS:
-        if pat in low:
-            return pat
-    return None
-
-
-def select_informative_pattern(cands):
-    """★並び順に依らず★ 候補から最も情報の多い pattern を1つ選ぶ (cmd_1389)。
-
-    ★何故 first-match を捨てたか (2026-07-26 22:25・軍師二号 A3 の実測)★:
-      旧実装は `next((p for p in HEAD if p in low), None)` = ★台帳の並び順が勝者を決める★。
-      "usage limit" は tuple の【先頭】に居るゆえ、"usage limit" と "session limit ·
-      resets 4:30am" が同じ pane に在れば ★usage limit が勝ち、期限を見る枝へ一度も
-      入らなんだ★ = ★残渣判定を丸ごと迂回する★。
-      ⇒ ★判定を支配しておったのは【台帳の並び順】という無関係な事情である★。
-
-    ★選び方 (三段・全て並び順に依らぬ)★:
-      (1) ★己の期限を名乗る族 (TIMED) を先に採る★ = 期限が読めなんだ時に
-          「行が崩れた」と読んでよい、という ★fixture 裏づけの積極的な知識★ を
-          持っておる分だけ情報が多い (持たぬ族は「人が直すまで壁」としか言えぬ)。
-      (2) 同族内では ★長い literal★ = より具体的に名指しておる方。
-      (3) なお同じなら辞書順 = ★決定的にする為だけの最後の綱★ (意味は無い)。
-    """
-    return sorted(
-        cands,
-        key=lambda p: (p not in UPSTREAM_TIMED_HEAD_PATTERNS, -len(p), p),
-    )[0]
-
-
-def upstream_wall_verdict(text, now=None):
-    """★壁が【今も立っておるか】★ を三値で判ずる。(verdict, pattern, reason) を返す。
-
-    verdict ∈ {UPSTREAM_LIVE, UPSTREAM_RESIDUE, None}。
-
-    ★何故 detect_upstream_failure では足りぬか (cmd_1385・2026-07-26 の実害)★:
-      番人は「pane に文言が在る」を「上流が塞がっておる」と読み替えて家老へ断定を
-      送っておった。だが ★banner は枠が戻った後も pane に残る★ — この事実は
-      cmd_1355 が既に実測し、T-QRM-012 (「resume notice fires ... even with banner
-      still on pane」) として ★解除の側では前提に書かれておった★。
-      ★同じ事実を、検知の側だけが見ておらなんだ★。
-      実害 = 家老が残渣を live と読み、19:30 に殿へ「週次上限ゆえ3日待つか従量課金か」
-      の3択を誤った前提で迫りかけた (19:39 撤回)。
-
-    ★判定 (いずれも実測に基づく。推測で広げておらぬ)★:
-      (1) 主文が無く続き行だけが見える → RESIDUE。
-          根拠 = 続き行は主文の 2 行下にぶら下がる断片ゆえ、続き行が見えて主文が
-          見えぬのは ★banner が画面上端へ流れた★ = その後に出力が在った、という
-          こと以外に起こりようが無い。本日の偽陽性 3 件中 2 件 (ashigaru3 19:30 /
-          gunshi1 20:00) がこの形であった (家老へ届いた警報本文の検知文言が
-          『/usage-credits to finish what you’re working』= 続き行 単独、かつ
-          resets ETA=解釈不能 = 主文も期限も画面外、と二重に裏づく)。
-      (2) ★期限が読めた★ 主文で、その期限が既に過ぎておる → RESIDUE。
-          根拠 = fixture で "session limit" と "resets 4:30am" は同一行ゆえ、
-          主文が生きて見えておるなら期限も必ず読める。
-          過ぎておる判定は既存 MAX_RESETS_ETA_AHEAD_HOURS を流用する
-          (parse_resets_eta は【次の】到来時刻を返すゆえ、既に過ぎた 4:30am は
-           翌日へ繰上がり検知時刻から 6h 超先になる = cmd_1356 が確立した読み方)。
-      (3) 期限が ★読めず★、且つ主文が己の期限を名乗る族 (TIMED) → RESIDUE。
-          根拠 = 同一行に在る筈の resets が見えぬのは行が崩れた証。
-      (4) それ以外 → LIVE。
-
-    ★cmd_1389 の是正 (2026-07-26 22:25 軍師二号 A3・実測)★:
-      旧実装は (2)(3) へ入る条件を ★pattern 名 (head ∈ TIMED)★ で決めており、しかも
-      head の選び方が ★first-match★ であった。⇒ ★"usage limit" が tuple 先頭に居るゆえ、
-      「usage limit」と「session limit · resets 4:30am」が同居する pane では
-      usage limit が勝ち、期限を見る枝へ一度も入らぬ = 残渣判定を丸ごと迂回した★。
-      是正は二本:
-        (1) ★期限を読めたか (parse_resets_eta が値を返したか) を先に問う★ =
-            ★pattern 名に依らぬ★ ⇒ ★族の登録漏れが【期限を名乗る banner】に対して
-            構造的に起こらなくなる★ (新しい文言が来ても自動で期限の枝へ入る)。
-        (2) ★first-match をやめ、全 pattern を当てて最も情報の多い物を採る★
-            (select_informative_pattern) ⇒ ★台帳の並び順が判定を支配せぬ★。
-      ★TIMED tuple は消しておらぬ★ = 「期限を【読めなんだ】時に其れを行崩れと読んでよい族か」
-      という一点だけを担う (=(3))。此処だけは fixture の裏づけが要るゆえ pattern 名で判ずる。
-
-    ★残しておる限り (正直明示・cmd_1389 では塞いでおらぬ)★:
-      ★parse_resets_eta が読めるのは "resets <時刻>" の形のみ★ ゆえ、軍師二号が
-      例に挙げた「Your limit will reset at 4:30am」(★resets でなく reset at★) は
-      依然 読めず → 期限を持たぬ族として LIVE になる。★之を塞ぐには実 pane の
-      byte 凍結が要る★ (推測で網を広げれば「在りもせぬ物に効く網」が増える) =
-      ★次に其の banner を見た者が capture-pane で凍結せよ★。
-
-    ★この関数は【抑止】には使わぬ★ — 抑止 (/clear の見送り) は誤っても安いゆえ
-    detect_upstream_failure のまま広く掛ける。本関数が絞るのは ★断定★ だけである。
-    (detect_upstream_failure 側の first-match は ★是正の対象外★ = 其処の戻り値は
-     【抑止するか否か】でなく【台帳へ焼く札】にすぎず、hit の有無は並び順に依らぬ。)
-    """
-    if now is None:
-        now = datetime.datetime.now()
-    if not text:
-        return None, None, ""
-    low = text.lower()
-    heads = [p for p in UPSTREAM_HEAD_PATTERNS if p in low]
-    if not heads:
-        conts = [p for p in UPSTREAM_CONTINUATION_PATTERNS if p in low]
-        if not conts:
-            return None, None, ""
-        cont = select_informative_pattern(conts)
-        return (UPSTREAM_RESIDUE, cont,
-                f"続き行『{cont}』のみが見え、主文が画面に居らぬ = banner は既に流れた "
-                f"(= その後に出力が在った)")
-    head = select_informative_pattern(heads)
-    others = sorted(p for p in heads if p != head)
-    also = f" (同じ画面に他の主文も見えておる: {'/'.join(others)})" if others else ""
-    eta = parse_resets_eta(text, now)
-    if eta is not None:
-        ahead_h = (eta - now).total_seconds() / 3600.0
-        if ahead_h > MAX_RESETS_ETA_AHEAD_HOURS:
-            return (UPSTREAM_RESIDUE, head,
-                    f"主文『{head}』の reset 時刻は既に過ぎておる "
-                    f"(次の到来が {eta.isoformat(timespec='minutes')} = "
-                    f"{round(ahead_h, 1)}h 先 > 妥当域 {MAX_RESETS_ETA_AHEAD_HOURS}h){also}")
-        return (UPSTREAM_LIVE, head,
-                f"主文『{head}』と同じ画面が生きた期限 "
-                f"({eta.isoformat(timespec='minutes')} = {round(ahead_h, 1)}h 先) "
-                f"を名乗っておる{also}")
-    if head in UPSTREAM_TIMED_HEAD_PATTERNS:
-        return (UPSTREAM_RESIDUE, head,
-                f"主文『{head}』が己の reset 時刻を名乗らぬ = 同一行に在る筈の "
-                f"resets が画面外へ落ちておる (行が崩れた banner の断片){also}")
-    return (UPSTREAM_LIVE, head,
-            f"主文『{head}』を検知 (期限を読めず・期限を持たぬ族 = "
-            f"人が直すまで壁であり続ける){also}")
-
-
-# ─────────────────────────────────────────────────────────────
-# cmd_1355: 上流障害の台帳 + ★枠が戻った時に誰が起こすのか★
-# ─────────────────────────────────────────────────────────────
-# 2026-07-26 未明の実害の後半 = 「枠が 4:30 に戻った後、誰も起こさなかった」(全軍 3h 停止の
-# 大半)。上流障害で沈黙した agent は枠が回復しても自分では再開しない — pane の限界文言も
-# 消えずに残り続ける (実測: 04:4x 時点でも ashigaru6 pane に 4:30am の banner が残存)。
-# ゆえに:
-#   (1) 上流障害で /clear を抑止した agent を queue/state/upstream_outage.yaml へ記録
-#       (誤 clear が pane の証拠文言を消す実害があったゆえ、pane でなく台帳を正とする =
-#        原理(ii)「操作でなく状態の変化を証拠に」の台帳版)
-#   (2) episode 初回検知時に家老へ warning 1通 (throttle 付き。10通 spam 型の再発禁)
-#   (3) 解除条件成立で家老へ「再開せよ」を 1 episode に 1通だけ上げる。配達層
-#       (inbox_write → watcher nudge/escalation) が再送を担うゆえ 1通で足る —
-#       家老自身が枠切れ中でも、枠回復後の nudge でこの 1通が家老を起こす。
-#
-# ★解除条件 (優先順)★:
-#   R1: resets ETA (pane 文言から parse) + grace を経過   ← 主判定 (実効)
-#   R2: ETA を読めなんだ場合、初回検知から FALLBACK_RESUME_MIN 経過
-#   R3: 台帳の全 agent の pane から上流障害文言が消え、かつ ≥1 体が idle
-#       ← 家老の見立て (task YAML) の主判定候補だったが、★banner は枠回復後も pane に
-#          残り続けると実測された★ため補助へ降格 (自然には成立しない。/clear や再開で
-#          文言が流れた場合のみ効く)
-# ★R1 の脆さ (正直明示)★: "resets 4:30am" は 12h 表記・分省略・(Asia/Tokyo) が折返しで
-# 別行に落ちる・表示TZ=host TZ の仮定・「検知直後に reset 済みの stale banner」誤読
-# (→翌日へ繰上げ) を抱える。parse 失敗は R2 fallback が引き受け、★parse 成功だが値が
-# 妥当域外 (cmd_1356: 初回検知から MAX_RESETS_ETA_AHEAD_HOURS 超先=stale banner の翌日
-# 誤読・実測23.8h) も使用点の蓋 (resets_eta_implausible) が R2 へ倒す★。
-# OUTAGE_EXPIRE_HOURS は台帳の掃除屋 (通知せぬ) であり「起こされる」保証は R1/R2 の役。
-# 詳細 caveats は
-# docs/content/ops/cmd_1355_upstream_outage_guard.md を正とする。
-UPSTREAM_OUTAGE_STATE_FILE = "upstream_outage.yaml"
-UPSTREAM_ALERT_THROTTLE_FILE = "upstream_alert_throttle"  # detect/resume 共用の最終送信時刻
-DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN = 30  # blackout 警報と同じ流儀 (episode once が主・これは保険)
-RESUME_GRACE_MIN = 3          # resets ETA 経過後の余裕 (時計ずれ・上流反映遅延の吸収)
-FALLBACK_RESUME_MIN = 60      # ETA 不明/妥当域外時: 初回検知からこの分数で点検通知 (R2)
-OUTAGE_EXPIRE_HOURS = 24      # 台帳 episode の消費期限 = ★掃除屋 (通知せぬ)★。台帳が腐って
-                              # 永続する事故を畳む下限保証であり「誰かが起こされる」保証では
-                              # ない — 起こすのは R1/R2 (cmd_1356 U7 / MUT-1355-005 が毎朝守る)
-MAX_RESETS_ETA_AHEAD_HOURS = 6  # ★ETA 妥当域の蓋 (cmd_1356)★: rolling 枠の reset は検知から
-                              # 高々 ~5h 先。初回検知からこれ超先の ETA は stale banner の
-                              # 翌日誤読 (実測23.8h) とみなし R1 の根拠にせぬ (R2 へ倒す)
-RESETS_RE = re.compile(
-    r"resets\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.IGNORECASE)
-
-
-def parse_resets_eta(text, now):
-    """pane 文言の resets 時刻 (例 'resets 4:30am') を次回到来の naive local datetime へ。
-
-    解釈不能なら None (R2 fallback が引き受ける)。★検知時点で parse する前提★ =
-    「resets 4:30am」は検知時刻から見た次の 4:30 を指す (23時検知→翌 4:30 / 2時検知→当日 4:30)。
-    検知が reset 後にずれ込んだ stale banner は翌日へ繰上がる誤読になる — parse 自体は
-    生のまま通し、その値は★使用点の妥当域蓋 (resets_eta_implausible・cmd_1356) が R2 へ倒す★。
-    """
-    if not text:
-        return None
-    m = RESETS_RE.search(text)
-    if not m:
-        return None
-    hour = int(m.group(1))
-    minute = int(m.group(2) or 0)
-    ampm = (m.group(3) or "").lower()
-    if ampm == "pm" and hour != 12:
-        hour += 12
-    elif ampm == "am" and hour == 12:
-        hour = 0
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return None
-    eta = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    if eta <= now:
-        eta += datetime.timedelta(days=1)
-    return eta
-
-
-def resets_eta_implausible(episode, eta):
-    """★ETA 妥当域の蓋 (cmd_1356)★ — 「parse 成功だが値が誤り」(R2 の外の第三状態) を判じる。
-
-    基準は first_detected: rolling 枠の reset は検知から高々 ~5h 先にしか来ぬゆえ、
-    初回検知より MAX_RESETS_ETA_AHEAD_HOURS 超先の ETA は「検知が reset 後にずれ込んだ
-    stale banner の翌日誤読」(実測 23.8h・軍師二号 OBS-1) とみなし R1 の根拠にせぬ。
-
-    ★蓋は値を使う瞬間 (release 判定 / 警報整形) に掛ける★ = 台帳の書き手を問わず効き
-    (旧コードが書いた台帳・手編集にも効く)、記録は生のまま残る = 可笑しな値が台帳と
-    警報に見え続ける (人が気付ける経路を殺さぬ)。parse 時に None 化する形を採らぬのは、
-    凍結 fixture『resets 4:30am』の採否が test 実行時刻で変わり T-QRM-010/nightly が
-    時刻依存になるため (時刻で分岐が変わる test は「緑が何も証明せぬ」族)。
-
-    first_detected が読めぬ台帳は蓋の真偽を判じられぬ → False (eta を信じる) 側に倒す:
-    その台帳では R2 も first_detected を必要とするため、蓋で eta まで捨てると起こす経路が
-    R3 だけになり「誰も起こさぬ」(北極星の死因) に近づく — 蓋の目的と逆行する。
-    """
-    first = parse_iso_to_naive_local(episode.get("first_detected"))
-    if first is None:
-        return False
-    return (eta - first).total_seconds() / 3600.0 > MAX_RESETS_ETA_AHEAD_HOURS
-
-
-def load_outage(state_dir: Path):
-    p = state_dir / UPSTREAM_OUTAGE_STATE_FILE
-    if not p.is_file():
-        return None
-    try:
-        with p.open(encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-    except (yaml.YAMLError, OSError) as e:
-        print(f"[idle_revive] WARN: outage 台帳 parse 失敗: {p}: {e}", file=sys.stderr)
-        return None
-    if not isinstance(data, dict) or not isinstance(data.get("episode"), dict):
-        return None
-    return data["episode"]
-
-
-def save_outage(state_dir: Path, episode):
-    state_dir.mkdir(parents=True, exist_ok=True)
-    p = state_dir / UPSTREAM_OUTAGE_STATE_FILE
-    if episode is None:
-        try:
-            p.unlink()
-        except FileNotFoundError:
-            pass
-        return
-    doc = {
-        "# managed by": "scripts/idle_revive_scan.py (cmd_1355)",
-        "episode": episode,
-    }
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
-    tmp.replace(p)
-
-
-# ★cmd_1385: episode を閉じる時、その一件を追記式の台帳へ焼く★
-#   2026-07-26 に「本日の警報は何本で、何本が偽陽性であったか」を数えようとして、
-#   ★数えられなんだ★ = (a) 番人の log は 16,000 行あって 1 行も時刻を持たぬ
-#   (b) upstream_outage.yaml は episode close で削除され、検知文言も resets_hint も
-#   消える (c) 家老 inbox は流れる — 実測: 18:24 の1通は調査開始前に既に消えており、
-#   19:30 の1通は ★本調査の最中 (20:46→20:56 の間) に消えた★。
-#   ⇒ 警報の是非を後から検分できぬ番人は、感度を直すことも出来ぬ。
-#   ⇒ 閉じる瞬間に、その episode の全てを 1 record として残す。
-#     ★とりわけ close_reason="all_recovered" は【当人は現に働けた】= 偽陽性の
-#      機械証拠である★ (番人自身が 剪定 の際にそう判じておる)。
-UPSTREAM_HISTORY_FILE = "upstream_outage_history.yaml"
-UPSTREAM_HISTORY_MAX = 500  # 追記式ゆえ際限なく伸びる — 古い順に落とす (掃除屋)
-
-
-def outage_history_append(state_dir: Path, episode, close_reason, now=None):
-    """閉じた episode を追記式台帳へ 1 record 焼く。失敗しても本流は止めぬ。"""
-    if now is None:
-        now = datetime.datetime.now()
-    first = parse_iso_to_naive_local(episode.get("first_detected"))
-    rec = {
-        "first_detected": episode.get("first_detected"),
-        "closed_ts": now.isoformat(timespec="seconds"),
-        "close_reason": close_reason,
-        "lived_min": (round((now - first).total_seconds() / 60.0, 1)
-                      if first is not None else None),
-        "resets_hint": episode.get("resets_hint"),
-        "resets_eta": episode.get("resets_eta"),
-        # ★断定を上げたか★ — 上げた警報だけが家老/殿の判断へ届く。
-        "detect_notified_ts": episode.get("detect_notified_ts"),
-        "resume_notified_ts": episode.get("resume_notified_ts"),
-        "agents": {
-            a: {k: e.get(k) for k in ("pattern", "excerpt", "verdict",
-                                      "verdict_reason", "detected_ts", "task_id")}
-            for a, e in sorted((episode.get("agents") or {}).items())
-            if isinstance(e, dict)
-        },
-    }
-    p = state_dir / UPSTREAM_HISTORY_FILE
-    try:
-        state_dir.mkdir(parents=True, exist_ok=True)
-        data = None
-        if p.is_file():
-            with p.open(encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-        eps = data.get("episodes") if isinstance(data, dict) else None
-        if not isinstance(eps, list):
-            eps = []
-        eps.append(rec)
-        doc = {
-            "# managed by": "scripts/idle_revive_scan.py (cmd_1385) — append-only",
-            "# read me": ("close_reason=all_recovered は【当人は現に働けた】= "
-                          "その episode は偽陽性であったことの機械証拠"),
-            "episodes": eps[-UPSTREAM_HISTORY_MAX:],
-        }
-        tmp = p.with_suffix(p.suffix + ".tmp")
-        with tmp.open("w", encoding="utf-8") as f:
-            yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
-        tmp.replace(p)
-    except (OSError, yaml.YAMLError) as e:
-        # 台帳は証拠であって本流ではない。焼けなんだ事実は名乗るが scan は止めぬ。
-        print(f"[idle_revive] WARN: outage 履歴の追記に失敗 ({close_reason}): {e}",
-              file=sys.stderr)
-
-
-def _excerpt_line(text, pattern):
-    """pattern を含む最初の物理行を空白圧縮 120 字以内で返す (台帳の証拠引用)。"""
-    for line in (text or "").splitlines():
-        if pattern in line.lower():
-            s = " ".join(line.split())
-            return s[:120]
-    return ""
-
-
-def outage_record(state_dir: Path, agent, pattern, text, task_id=None, now=None):
-    """上流障害で抑止した agent を台帳へ記録する。
-
-    戻り値 = (episode, episode_created, agent_added)。既存 entry は上書きしない
-    (最初の検知時刻・文言を保全 — 誤 clear が pane 証拠を消した実害への備え)。
-    """
-    if now is None:
-        now = datetime.datetime.now()
-    episode = load_outage(state_dir)
-    created = False
-    if episode is None:
-        episode = {
-            "first_detected": now.isoformat(timespec="seconds"),
-            "resets_hint": _excerpt_line(text, pattern),
-            "resets_eta": None,
-            "detect_notified_ts": None,
-            "resume_notified_ts": None,
-            "agents": {},
-        }
-        created = True
-    if not isinstance(episode.get("agents"), dict):
-        episode["agents"] = {}
-    if episode.get("resets_eta") is None:
-        eta = parse_resets_eta(text, now)
-        if eta is not None:
-            episode["resets_eta"] = eta.isoformat(timespec="seconds")
-            if not episode.get("resets_hint"):
-                episode["resets_hint"] = _excerpt_line(text, pattern)
-    added = False
-    if agent not in episode["agents"]:
-        # cmd_1385: ★見た物は全部残し、断定だけを絞る★ — verdict を entry へ焼く。
-        # 台帳は【抑止した事実】の記録であって【壁が立っておる証明】ではない、を
-        # entry 自身に名乗らせる (次に読む者が台帳を断定と読み違えぬため)。
-        verdict, _vpat, vreason = upstream_wall_verdict(text, now)
-        episode["agents"][agent] = {
-            "detected_ts": now.isoformat(timespec="seconds"),
-            "pattern": pattern,
-            "task_id": task_id,
-            "excerpt": _excerpt_line(text, pattern),
-            "verdict": verdict,
-            "verdict_reason": vreason,
-        }
-        added = True
-    save_outage(state_dir, episode)
-    return episode, created, added
-
-
-def episode_has_live_wall(episode):
-    """★断定してよいか★ — 台帳の agent に一人でも LIVE が居るか。
-
-    cmd_1385: 家老への「上流障害検知」警報は ★壁が今も立っておる★ という断定ゆえ、
-    RESIDUE (banner の残渣) しか無い episode では上げてはならぬ。抑止・台帳・
-    R1/R2 の再開通知はそのまま働く = 北極星 (枠が戻った時に誰かが起こす) は死なぬ。
-
-    ★verdict key を持たぬ旧 entry は LIVE 扱いにする★ = 旧台帳・手編集で断定が
-    黙って消えるほうが危ういゆえ、後方互換は「鳴る側」へ倒す。
-    """
-    for e in (episode.get("agents") or {}).values():
-        if not isinstance(e, dict):
-            continue
-        if e.get("verdict", UPSTREAM_LIVE) == UPSTREAM_LIVE:
-            return True
-    return False
-
-
-def outage_release_check(episode, agent_states, now):
-    """解除条件 R1/R2/R3 の判定。(release_bool, reason_str) を返す純関数。
-
-    agent_states = {agent: {"pane_state": .., "upstream_pattern": pat|None}} —
-    台帳に残る (未回復の) agent のみ。呼出元が probe 済みの値を渡す (test 注入可能)。
-    """
-    eta = parse_iso_to_naive_local(episode.get("resets_eta"))
-    eta_distrusted = None
-    if eta is not None and resets_eta_implausible(episode, eta):
-        # cmd_1356: parse 成功だが妥当域外 (stale banner の翌日誤読=実測23.8h)。
-        # 値は台帳/警報に生のまま残る (人が気付ける) が、R1 の根拠にはせず R2 へ倒す。
-        eta_distrusted, eta = episode.get("resets_eta"), None
-    if eta is not None:
-        if now >= eta + datetime.timedelta(minutes=RESUME_GRACE_MIN):
-            return True, (f"R1: resets ETA {episode['resets_eta']} + "
-                          f"{RESUME_GRACE_MIN}分 grace を経過")
-    else:
-        first = parse_iso_to_naive_local(episode.get("first_detected"))
-        if first is not None and now >= first + datetime.timedelta(
-                minutes=FALLBACK_RESUME_MIN):
-            why = (f"resets ETA {eta_distrusted} は妥当域"
-                   f"({MAX_RESETS_ETA_AHEAD_HOURS}h)超=stale banner 誤読の疑いゆえ信ぜず"
-                   if eta_distrusted else "resets 時刻を読めなんだゆえ")
-            return True, (f"R2: {why}、初回検知 "
-                          f"{episode['first_detected']} から {FALLBACK_RESUME_MIN}分で点検通知")
-    if agent_states:
-        banners = [s for s in agent_states.values() if s.get("upstream_pattern")]
-        any_idle = any(s.get("pane_state") == "idle" for s in agent_states.values())
-        if not banners and any_idle:
-            return True, "R3: 全対象 pane から上流障害文言が消え、かつ idle の agent が居る"
-    return False, ""
-
-
-def format_upstream_detect_alert(episode, throttle_min):
-    agents_desc = ", ".join(
-        f"{a}(task={e.get('task_id')})" for a, e in sorted(episode["agents"].items()))
-    eta = episode.get("resets_eta") or "解釈不能(R2 fallbackで点検通知)"
-    eta_v = parse_iso_to_naive_local(episode.get("resets_eta"))
-    if eta_v is not None and resets_eta_implausible(episode, eta_v):
-        # cmd_1356: 可笑しな値は生のまま印字し (人が気付ける経路を殺さぬ)、機械の扱いを注記
-        eta = (f"{eta} ★妥当域({MAX_RESETS_ETA_AHEAD_HOURS}h)超=stale banner 誤読の疑い"
-               f"ゆえ待たず、初回検知+{FALLBACK_RESUME_MIN}分の R2 点検通知が引き受ける★")
-    return (f"⚠上流障害(枠切れ/account系)検知 (idle_revive cmd_1355): 対象への /clear を抑止した"
-            f" (context保全・上流障害中の clear は何も直さぬ)。対象: {agents_desc}。"
-            f"検知文言『{episode.get('resets_hint', '')}』/ resets ETA={eta}。"
-            f"★枠回復の見込み時刻に再開通知を別途1通上げる★ — それまで対象への再dispatchは"
-            f"無駄弾になる。本警報は 1 episode 1通 (+{throttle_min}分 throttle)。")
-
-
-def format_upstream_resume_alert(episode, reason):
-    agents_desc = ", ".join(
-        f"{a}(task={e.get('task_id')}, 沈黙開始={e.get('detected_ts')})"
-        for a, e in sorted(episode["agents"].items()))
-    return (f"🔔上流障害の解除見込み — ★再開せよ★ (idle_revive cmd_1355): 判定={reason}。"
-            f"上流障害で沈黙したまま残る agent: {agents_desc}。"
-            f"各 agent は枠が戻っても自分では再開せぬ (2026-07-26 全軍3h停止の後半の死因)。"
-            f"inbox nudge または task 再確認で起こされたし。"
-            f"本通知は 1 episode に 1通のみ。台帳=queue/state/{UPSTREAM_OUTAGE_STATE_FILE}")
-
-
-def upstream_alert_throttled(state_dir: Path, throttle_min, now):
-    p = state_dir / UPSTREAM_ALERT_THROTTLE_FILE
-    try:
-        last = parse_iso_to_naive_local(p.read_text(encoding="utf-8").strip())
-    except OSError:
-        return False
-    if last is None:
-        return False
-    return (now - last).total_seconds() / 60.0 < throttle_min
-
-
-def upstream_alert_mark(state_dir: Path, now):
-    state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / UPSTREAM_ALERT_THROTTLE_FILE).write_text(
-        now.isoformat(timespec="seconds") + "\n", encoding="utf-8")
-
-
-def outage_probe_agent(agent, pane_states, tasks_dir: Path):
-    """台帳 agent の現況を採る: (recovered_bool, state_dict)。
-
-    recovered = pane が busy (実働再開) / task が active でなくなった (完遂・再割当)。
-    pane_states に無い agent (karo 等) は probe_agent_state で単発 probe。
-    """
-    state = pane_states.get(agent)
-    if state is None:
-        state = probe_agent_state(agent)
-    if state == "busy":
-        return True, {"pane_state": state, "upstream_pattern": None}
-    task_path = tasks_dir / f"{agent}.yaml"
-    if agent != KARO_STATE_KEY and task_path.is_file():
-        t = parse_task(task_path)
-        if t and t.get("status") not in ACTIVE_STATUSES:
-            return True, {"pane_state": state, "upstream_pattern": None}
-    pat = detect_upstream_failure(pane_upstream_text(agent))
-    return False, {"pane_state": state, "upstream_pattern": pat}
-
-
-def outage_maintain(state_dir: Path, pane_states, tasks_dir: Path, now=None):
-    """台帳の保守 + 解除判定。毎 scan (非 dry-run) 呼ばれる。
-
-    戻り値 = None | {"action": "upstream_resume", "episode":.., "reason":..}。
-    副作用: 回復 agent の剪定・全回復/expire での episode close (save)。
-    resume 通知の送信と resume_notified_ts の永続化は呼出元 (main) が担う —
-    送信失敗時に「通知済」と誤記しないため (cmd_1338 流儀: 失敗を握り潰さない)。
-    """
-    if now is None:
-        now = datetime.datetime.now()
-    episode = load_outage(state_dir)
-    if episode is None:
-        return None
-    first = parse_iso_to_naive_local(episode.get("first_detected"))
-    if first is not None and (now - first).total_seconds() / 3600.0 >= OUTAGE_EXPIRE_HOURS:
-        print(f"[idle_revive] outage 台帳 expire ({OUTAGE_EXPIRE_HOURS}h 超過) — episode close",
-              file=sys.stderr)
-        outage_history_append(state_dir, episode, "expired", now)
-        save_outage(state_dir, None)
-        return None
-    agents = episode.get("agents") or {}
-    remaining = {}
-    agent_states = {}
-    for agent in sorted(agents):
-        recovered, st = outage_probe_agent(agent, pane_states, tasks_dir)
-        if recovered:
-            print(f"[idle_revive] outage 台帳: {agent} 回復 (実働/task更新) — 剪定",
-                  file=sys.stderr)
-            continue
-        remaining[agent] = agents[agent]
-        agent_states[agent] = st
-    if not remaining:
-        # 全員回復 = 上流障害は終わった。通知不要 (起こす相手が居らぬ)。
-        # ★cmd_1385: 此処こそ偽陽性の判定点★ — 「抑止した相手が現に働いた」を
-        # 番人自身が判じた瞬間ゆえ、閉じる前に追記台帳へ焼く。
-        print("[idle_revive] outage 台帳: 全 agent 回復 — episode close (通知不要)",
-              file=sys.stderr)
-        outage_history_append(state_dir, episode, "all_recovered", now)
-        save_outage(state_dir, None)
-        return None
-    if remaining != agents:
-        episode = dict(episode)
-        episode["agents"] = remaining
-        save_outage(state_dir, episode)
-    if episode.get("resume_notified_ts"):
-        return None  # 1 episode 1通 — 既に上げた。あとは家老の手番。
-    release, reason = outage_release_check(episode, agent_states, now)
-    if not release:
-        return None
-    return {"action": "upstream_resume", "episode": episode, "reason": reason}
-
-
-# ─────────────────────────────────────────────────────────────
-# cmd_1355: 変異試験用 selftest (bats/tmux 非依存・gate-2 台帳から scratch 実行される)
-# ─────────────────────────────────────────────────────────────
-def selftest_upstream():
-    """実 pane 文言 fixture と (D) 解除判定の契約を検分する。exit 0=PASS / 1=FAIL。
-
-    gate-2 (config/mutation_registry.yaml MUT-1355-*) がこの selftest を変異後に走らせ、
-    「pattern を1つ外す / 解除条件を折る」と★名指しで★赤くなることを毎朝確かめる。
-    """
-    ng = []
-    fixture = REPO_ROOT / "tests" / "fixtures" / "upstream_session_limit_pane.txt"
-
-    # U1: 実 pane 文言 (2026-07-26 採取・byte 凍結) を検知できること。
-    # ★行単位で個別に検める★ — fixture 全文には pattern が2つ (session limit /
-    # /usage-credits) 共存するため、全文一括の検分では「片方の pattern を外す」変異が
-    # もう片方の hit に隠れて空振りする (検分自身の沈黙。書いた直後に自分で踏みかけた)。
-    try:
-        real = fixture.read_text(encoding="utf-8")
-    except OSError as e:
-        real = ""
-        ng.append(f"U0 fixture 読めず: {e}")
-    if detect_upstream_failure(real) is None:
-        ng.append("U1a 実pane文言(全文)を検知できぬ — "
-                  "UPSTREAM_FAILURE_PATTERNS から実文言 pattern が消えておる")
-    banner = next((l for l in real.splitlines() if "session limit" in l.lower()), "")
-    if not banner or detect_upstream_failure(banner) is None:
-        ng.append("U1b banner行『You've hit your session limit …』を単独で検知できぬ — "
-                  "pattern \"session limit\" が消えておる")
-    credits = next((l for l in real.splitlines() if "/usage-credits" in l.lower()), "")
-    if not credits or detect_upstream_failure(credits) is None:
-        ng.append("U1c 誘導行『/usage-credits to finish …』を単独で検知できぬ — "
-                  "pattern \"/usage-credits\" が消えておる")
-    # U2: 良性文言 (status bar / 通常出力) を誤検知しないこと (過剰抑止の防止)
-    for benign in ("⏵⏵ bypass permissions on (shift+tab to cycle) · ←",
-                   "Read 2 files, ran 9 shell commands",
-                   "writing tests for the scanner"):
-        if detect_upstream_failure(benign) is not None:
-            ng.append(f"U2 良性文言を誤検知: {benign!r}")
-    # U3: resets ETA parse (当日到来 / 翌日繰上げ / 解釈不能)
-    base = datetime.datetime(2026, 7, 26, 2, 0, 0)
-    eta = parse_resets_eta("You've hit your session limit · resets 4:30am", base)
-    if eta != datetime.datetime(2026, 7, 26, 4, 30):
-        ng.append(f"U3a 当日 4:30 を導けぬ: {eta}")
-    eta = parse_resets_eta("resets 1am", datetime.datetime(2026, 7, 26, 23, 0))
-    if eta != datetime.datetime(2026, 7, 27, 1, 0):
-        ng.append(f"U3b 翌日繰上げが効かぬ: {eta}")
-    if parse_resets_eta("no such marker here", base) is not None:
-        ng.append("U3c 解釈不能を None にできぬ")
-    # U4: 解除判定 R1/R2 (両側: 未到来では鳴らず・到来/超過で鳴る)
-    ep = {"first_detected": "2026-07-26T02:00:00", "resets_eta": "2026-07-26T04:30:00",
-          "agents": {"x": {}}}
-    still = {"x": {"pane_state": "idle", "upstream_pattern": "session limit"}}
-    rel, _ = outage_release_check(ep, still, datetime.datetime(2026, 7, 26, 4, 0))
-    if rel:
-        ng.append("U4a ETA 未到来なのに解除された (早すぎる再開通知)")
-    rel, reason = outage_release_check(ep, still, datetime.datetime(2026, 7, 26, 4, 34))
-    if not rel or "R1" not in reason:
-        ng.append(f"U4b ETA+grace 経過でも解除されぬ: rel={rel} reason={reason!r}")
-    ep_noeta = {"first_detected": "2026-07-26T02:00:00", "resets_eta": None,
-                "agents": {"x": {}}}
-    rel, _ = outage_release_check(ep_noeta, still, datetime.datetime(2026, 7, 26, 2, 30))
-    if rel:
-        ng.append("U4c ETA不明・30分では鳴らぬはずが解除された")
-    rel, reason = outage_release_check(ep_noeta, still, datetime.datetime(2026, 7, 26, 3, 1))
-    if not rel or "R2" not in reason:
-        ng.append(f"U4d ETA不明の fallback (R2) が効かぬ: rel={rel} reason={reason!r}")
-    # U5: R3 (補助) — 全 pane から文言が消え idle が居れば解除
-    gone = {"x": {"pane_state": "idle", "upstream_pattern": None}}
-    rel, reason = outage_release_check(
-        {"first_detected": "2026-07-26T02:00:00", "resets_eta": "2026-07-26T09:00:00",
-         "agents": {"x": {}}}, gone, datetime.datetime(2026, 7, 26, 2, 30))
-    if not rel or "R3" not in reason:
-        ng.append(f"U5 R3 (文言消失+idle) が効かぬ: rel={rel} reason={reason!r}")
-    # U6: ★ETA 妥当域の蓋 (cmd_1356)★ — 「parse成功だが値が誤り」(stale banner の翌日誤読 =
-    #     軍師二号 OBS-1 実測23.8h) を R1 の根拠にせず R2 (60分点検) が引き受ける。
-    #     両側: 妥当域内 (今夜の正しい形 1.8h) は従来どおり R1。MUT-1355-006 の的。
-    stale = {"first_detected": "2026-07-26T04:45:00",   # 検知04:45 = reset04:30 の後
-             "resets_eta": "2026-07-27T04:30:00",       # → 翌日へ誤読 (23.8h 先)
-             "agents": {"x": {}}}
-    rel, reason = outage_release_check(stale, still, datetime.datetime(2026, 7, 26, 5, 46))
-    if not rel or "R2" not in reason:
-        ng.append(f"U6a stale banner 誤読ETA(23.8h) を R2 が引き受けぬ = 23.8時間の窓が開いた"
-                  f"まま (guard 導入前より遅い): rel={rel} reason={reason!r}")
-    elif "2026-07-27T04:30:00" not in reason:
-        ng.append(f"U6b R2 理由が信じなんだ ETA を名指しせぬ (人が気付ける経路): reason={reason!r}")
-    rel, _ = outage_release_check(stale, still, datetime.datetime(2026, 7, 26, 5, 0))
-    if rel:
-        ng.append("U6c 妥当域外でも初回検知+60分より前に鳴った (早すぎる点検通知)")
-    sane = {"first_detected": "2026-07-26T02:45:00",
-            "resets_eta": "2026-07-26T04:30:00", "agents": {"x": {}}}
-    rel, reason = outage_release_check(sane, still, datetime.datetime(2026, 7, 26, 4, 34))
-    if not rel or "R1" not in reason:
-        ng.append(f"U6d 妥当域内 (今夜の正しい形 1.8h) が蓋に誤って弾かれた: rel={rel} reason={reason!r}")
-    alert = format_upstream_detect_alert(dict(stale, agents={"x": {"task_id": "t"}}), 30)
-    if "2026-07-27T04:30:00" not in alert:
-        ng.append("U6e 検知警報から可笑しな ETA の印字が消えた (人が気付ける経路が死んだ)")
-    elif "妥当域" not in alert:
-        ng.append("U6f 検知警報が妥当域外の注記をせぬ (人は見ても機械の扱いが分からぬ)")
-    # U7: ★expire = 台帳の掃除屋 (cmd_1356・軍師二号 G-M5 SURVIVED の是正)★ — 25h 前の
-    #     episode は close され resume 判定へ進まぬ。通知はせぬ (安全網でなく掃除屋 —
-    #     起こす保証は R1/R2 の役)。probe は monkeypatch し tmux 非接触を保つ。MUT-1355-005 の的。
-    import tempfile
-    with tempfile.TemporaryDirectory() as td:
-        sdir = Path(td) / "state"
-        save_outage(sdir, {"first_detected": "2026-07-25T00:00:00", "resets_eta": None,
-                           "detect_notified_ts": "2026-07-25T00:00:00",
-                           "resume_notified_ts": None,
-                           "agents": {"x": {"detected_ts": "2026-07-25T00:00:00"}}})
-        g = globals()
-        orig_probe = g["outage_probe_agent"]
-        g["outage_probe_agent"] = lambda agent, ps, tdir: (
-            False, {"pane_state": "idle", "upstream_pattern": "session limit"})
-        try:
-            hit = outage_maintain(sdir, {}, Path(td) / "tasks",
-                                  now=datetime.datetime(2026, 7, 26, 1, 0))
-        finally:
-            g["outage_probe_agent"] = orig_probe
-        if hit is not None:
-            ng.append("U7a 25h 超の episode が expire されず resume 判定へ進んだ "
-                      "(OUTAGE_EXPIRE_HOURS が死んでおる = stale 台帳が永続する)")
-        if load_outage(sdir) is not None:
-            ng.append("U7b expire 後も台帳が畳まれておらぬ (掃除屋が働かぬ)")
-
-    # ── U8: ★壁の生死の三値判定 (cmd_1385)★ ──
-    # 2026-07-26 の実害 = 番人が banner の残渣を live と読み、家老が其れを信じて
-    # 殿へ誤った3択を迫りかけた。★両側で撃つ★ = 残渣を live と言わぬこと (偽陽性)
-    # かつ 本物を residue と言わぬこと (★偽陰性 = こちらを壊すと壁の最中に /clear が
-    # 飛び、cmd_1355 の北極星が死ぬ★)。MUT-1385-001/002 の的。
-    #
-    # 時刻を撃ち込む形にしてある = 「今 何時か」で結果が変わる試験は
-    # 【緑が何も証明せぬ】族ゆえ (cmd_1356 が同じ理由で resets_eta の蓋を
-    #  parse 時でなく使用点へ置いた)。
-    cont_only = ("     /usage-credits to finish what you’re working\n"
-                 "     on.\n"
-                 "✻ Worked for 3m 46s")
-    v, pat, why = upstream_wall_verdict(cont_only, datetime.datetime(2026, 7, 26, 20, 0))
-    if v != UPSTREAM_RESIDUE:
-        ng.append(f"U8a 続き行だけの pane を残渣と判ぜぬ (本日 gunshi1 20:00 / ashigaru3 "
-                  f"19:30 の実形 = 偽陽性2件がそのまま戻る): verdict={v} pat={pat!r}")
-    elif "/usage-credits" not in (pat or ""):
-        ng.append(f"U8b 残渣と判じたが根拠の pattern を名指しせぬ: pat={pat!r} why={why!r}")
-
-    # 本物の塞がった pane (byte 凍結)。★検知が reset より前なら LIVE★。
-    v, _p, why = upstream_wall_verdict(real, datetime.datetime(2026, 7, 26, 2, 0))
-    if v != UPSTREAM_LIVE:
-        ng.append(f"U8c 本物の session-limit pane (reset 2.5h 先) を live と判ぜぬ = "
-                  f"★壁の最中に /clear が飛び context が死ぬ★: verdict={v} why={why!r}")
-    # ★同じ pane を、reset が過ぎた後に見た時は残渣★ (本日 ashigaru5 18:24 の時刻)。
-    v, _p, why = upstream_wall_verdict(real, datetime.datetime(2026, 7, 26, 18, 24))
-    if v != UPSTREAM_RESIDUE:
-        ng.append(f"U8d reset 済 (次の到来が翌日 = 10h 先) の banner を残渣と判ぜぬ: "
-                  f"verdict={v} why={why!r}")
-    elif "4:30" not in why and "04:30" not in why:
-        ng.append(f"U8e 残渣の理由が信じなんだ時刻を名指しせぬ (人が気付ける経路): why={why!r}")
-    # 主文は在るが期限を名乗らぬ = 行が崩れた断片。
-    v, _p, _w = upstream_wall_verdict("You've hit your session limit",
-                                      datetime.datetime(2026, 7, 26, 2, 0))
-    if v != UPSTREAM_RESIDUE:
-        ng.append(f"U8f 期限を名乗らぬ session limit 行を残渣と判ぜぬ: verdict={v}")
-    # ★期限を持たぬ族は従来どおり LIVE★ = 蓋を広げすぎておらぬことの確認 (偽陰性側)。
-    for benign_head in ("Your credit balance is too low",
-                        "API Error: authentication_error",
-                        "Please run /login to authenticate"):
-        v, _p, _w = upstream_wall_verdict(benign_head, datetime.datetime(2026, 7, 26, 2, 0))
-        if v != UPSTREAM_LIVE:
-            ng.append(f"U8g 期限を持たぬ族 {benign_head!r} が live でなくなった = "
-                      f"人が直すまでの壁を見逃す: verdict={v}")
-    # 良性文言は三値でも None。
-    if upstream_wall_verdict("Read 2 files, ran 9 shell commands",
-                             datetime.datetime(2026, 7, 26, 2, 0))[0] is not None:
-        ng.append("U8h 良性文言に verdict が付いた")
-    # episode_has_live_wall = 断定の門。両側 + 旧台帳の後方互換。
-    if episode_has_live_wall({"agents": {"x": {"verdict": UPSTREAM_RESIDUE}}}):
-        ng.append("U8i 残渣のみの episode で断定の門が開いた = 家老へ偽の上流障害警報が飛ぶ")
-    if not episode_has_live_wall({"agents": {"x": {"verdict": UPSTREAM_RESIDUE},
-                                             "y": {"verdict": UPSTREAM_LIVE}}}):
-        ng.append("U8j live が1体でも居るのに断定の門が閉じた = 本物の障害を報せぬ")
-    if not episode_has_live_wall({"agents": {"x": {"detected_ts": "t"}}}):
-        ng.append("U8k verdict を持たぬ旧 entry で門が閉じた = 旧台帳の断定が黙って消える")
-
-    # U8l: ★断定を保留した episode でも【再開通知は上がる】★ (cmd_1385 OBS-A1・軍師二号)
-    #
-    # ★何故 此の契約が要るか★ = cmd_1385 は ★新しい死に方を1つ増やした★。
-    #   残渣しか無い episode では detect_notified_ts を ★立てぬ★ 道を作ったゆえ、
-    #   「detect_notified_ts が立っておる」を再開判定の前提に置く変異が入ると
-    #   ★保留された episode だけが永久に再開通知を貰えぬ★ = cmd_1355 の北極星が死ぬ。
-    #   ★然るに U1-U8k は全て緑のまま★ であった (軍師二号が変異を1本当てて実測)。
-    #   機序 = ★U4/U5/U6 は outage_release_check を【直に】呼んでおり、
-    #   剪定・close・再開の門を束ねる outage_maintain を一度も通っておらなんだ★。
-    # ⇒ ★此処だけは outage_maintain を通す★ = 門の側を縛る契約にござる。
-    with tempfile.TemporaryDirectory() as td:
-        sdir = Path(td) / "state"
-        # 残渣ゆえ断定を保留した episode = ★detect_notified_ts が立っておらぬ★形。
-        # first_detected から FALLBACK_RESUME_MIN 超 = R2 が解除を返すべき盤面。
-        save_outage(sdir, {"first_detected": "2026-07-26T20:00:00", "resets_eta": None,
-                           "detect_notified_ts": None,
-                           "resume_notified_ts": None,
-                           "agents": {"x": {"detected_ts": "2026-07-26T20:00:00",
-                                            "task_id": "t", "verdict": UPSTREAM_RESIDUE}}})
-        g = globals()
-        orig_probe = g["outage_probe_agent"]
-        # 未回復 (剪定されぬ) かつ banner は消えておる = R2 で解除される形
-        g["outage_probe_agent"] = lambda agent, ps, tdir: (
-            False, {"pane_state": "idle", "upstream_pattern": None})
-        try:
-            hit = outage_maintain(sdir, {}, Path(td) / "tasks",
-                                  now=datetime.datetime(2026, 7, 26, 21, 30))
-        finally:
-            g["outage_probe_agent"] = orig_probe
-        if hit is None:
-            ng.append("U8l ★断定を保留した episode (detect_notified_ts 無し) で再開通知が上がらぬ★ = "
-                      "cmd_1385 が増やした死に方を縛る契約が折れた。残渣と判じて黙った相手は "
-                      "枠が戻っても永久に起こされぬ = cmd_1355 の北極星が死ぬ")
-        elif hit.get("action") != "upstream_resume":
-            ng.append(f"U8l2 再開通知の action が変わった: {hit.get('action')!r}")
-        else:
-            # ★上がる通知が【人に読める物】であることまで見る★ (main が送る本文と同じ経路)
-            body = format_upstream_resume_alert(hit["episode"], hit["reason"])
-            if "再開せよ" not in body:
-                ng.append(f"U8l3 再開通知の本文から命令が消えた (家老が何をすべきか読めぬ): {body[:80]!r}")
-
-    # ── U9: ★番人の迂回路を【構造で】塞ぐ (cmd_1389)★ ──
-    # 2026-07-26 22:25 軍師二号 A3 の実測 = ★"usage limit" が HEAD_PATTERNS の先頭に居り、
-    # 照合が first-match ゆえ、期限を名乗る banner と同居すると期限の枝へ一度も入らぬ★。
-    # ⇒ ★己の reset 時刻を literal で名乗っておる banner でさえ live と断ずる★。
-    # 是正は二本 = (1)期限を読めたかで判ずる (2)並び順に依らぬ選び方。両方を此処で縛る。
-    # 時刻は撃ち込む (「今 何時か」で結果が変わる試験は緑が何も証明せぬ族ゆえ)。
-    bypass = ("Claude usage limit reached. Try again later.\n"
-              "  ⎿  You've hit your session limit · resets 4:30am\n"
-              "     (Asia/Tokyo)")
-    # U9a: ★本件の実害そのもの★ — reset を過ぎた banner が、先頭 pattern に隠れて live になる。
-    v, pat, why = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 18, 24))
-    if v != UPSTREAM_RESIDUE:
-        ng.append(f"U9a ★期限を名乗る banner が【先頭 pattern に隠れて】live と断ぜられた★ = "
-                  f"cmd_1389 の迂回路が戻った (残渣判定を丸ごと迂回する形): "
-                  f"verdict={v} pat={pat!r} why={why!r}")
-    elif "04:30" not in why and "4:30" not in why:
-        ng.append(f"U9b 残渣と判じたが、信じなんだ期限を名指しせぬ (人が気付ける経路): why={why!r}")
-    # U9c: ★偽陰性側★ — 同じ pane を reset の前に見た時は LIVE のまま (蓋を広げておらぬ)。
-    v, _p, why = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 2, 0))
-    if v != UPSTREAM_LIVE:
-        ng.append(f"U9c 生きた期限 (2.5h 先) を名乗る pane が live でなくなった = "
-                  f"★壁の最中に /clear が飛ぶ★: verdict={v} why={why!r}")
-    # U9d: ★退行なきこと★ — 期限を名乗らぬ純 usage limit は従来どおり live。
-    v, _p, why = upstream_wall_verdict("Claude usage limit reached. Try again later.",
-                                       datetime.datetime(2026, 7, 26, 2, 0))
-    if v != UPSTREAM_LIVE:
-        ng.append(f"U9d 期限を名乗らぬ純 usage limit banner が live でなくなった = "
-                  f"期限を読めぬ族まで残渣へ倒しておる (蓋の広げすぎ): verdict={v} why={why!r}")
-    # U9e: ★順序独立の実証★ — HEAD_PATTERNS を並べ替えても判定が1件も変わらぬこと。
-    #      ★台帳の並び順という【無関係な事情】が判定を支配しておらぬか★ を機械に問う。
-    corpus = [
-        (bypass, datetime.datetime(2026, 7, 26, 18, 24)),
-        (bypass, datetime.datetime(2026, 7, 26, 2, 0)),
-        (real, datetime.datetime(2026, 7, 26, 2, 0)),
-        (real, datetime.datetime(2026, 7, 26, 18, 24)),
-        (cont_only, datetime.datetime(2026, 7, 26, 20, 0)),
-        ("Claude usage limit reached.", datetime.datetime(2026, 7, 26, 2, 0)),
-        ("You've hit your session limit", datetime.datetime(2026, 7, 26, 2, 0)),
-        ("Your credit balance is too low", datetime.datetime(2026, 7, 26, 2, 0)),
-        ("rate_limit_error · resets 4:30am", datetime.datetime(2026, 7, 26, 2, 0)),
-        ("Read 2 files, ran 9 shell commands", datetime.datetime(2026, 7, 26, 2, 0)),
-    ]
-    base_out = [upstream_wall_verdict(t, n) for t, n in corpus]
-    g = globals()
-    orig_heads = g["UPSTREAM_HEAD_PATTERNS"]
-    perms = {
-        "逆順": tuple(reversed(orig_heads)),
-        "辞書順": tuple(sorted(orig_heads)),
-        "1つ回転": orig_heads[1:] + orig_heads[:1],
-    }
-    try:
-        for label, perm in perms.items():
-            g["UPSTREAM_HEAD_PATTERNS"] = perm
-            out = [upstream_wall_verdict(t, n) for t, n in corpus]
-            if out == base_out:
-                continue
-            j = next(i for i in range(len(out)) if out[i] != base_out[i])
-            ng.append(f"U9e ★HEAD_PATTERNS を{label}に並べ替えたら判定が変わった★ = "
-                      f"台帳の並び順が判定を支配しておる (first-match の順序依存が戻った): "
-                      f"corpus#{j} {base_out[j]!r} → {out[j]!r}")
-            break
-    finally:
-        g["UPSTREAM_HEAD_PATTERNS"] = orig_heads
-    # U9f: ★族の登録に依らぬことの実証★ — TIMED tuple を空にしても、期限が読めた pane の
-    #      判定は変わらぬ (= 登録漏れが【期限を名乗る banner】に対して構造的に起こらぬ)。
-    #      ★U8f/U8d と役割が別である★: 彼は「期限を読めなんだ時」を縛り、此は「読めた時」を縛る。
-    orig_timed = g["UPSTREAM_TIMED_HEAD_PATTERNS"]
-    try:
-        g["UPSTREAM_TIMED_HEAD_PATTERNS"] = ()
-        v_stale, _p, _w = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 18, 24))
-        v_live, _p, _w = upstream_wall_verdict(bypass, datetime.datetime(2026, 7, 26, 2, 0))
-    finally:
-        g["UPSTREAM_TIMED_HEAD_PATTERNS"] = orig_timed
-    if v_stale != UPSTREAM_RESIDUE or v_live != UPSTREAM_LIVE:
-        ng.append(f"U9f ★TIMED 族の登録を空にしたら、期限を読めた pane の判定が変わった★ = "
-                  f"期限の枝が pattern 名に依存しておる (族の登録漏れが再び効く形): "
-                  f"reset後={v_stale} reset前={v_live}")
-
-    # ── U10: ★週次上限の族 (cmd_1401)★ ──
-    # ★2026-07-27 01:5x の実測★= 此の literal は網を【一つも】通らず None が返り、
-    # ★週次上限で沈黙した agent へ /clear が撃たれる形★であった (cmd_1355 の実害と同型)。
-    # 根拠 = commit 40cdde0 (cmd_1401)。下の banner 文字列がその commit で入った物で、
-    # git に残る。最初の観測を書いた dashboard と report YAML は追跡外なので復元できない
-    # (詳しくは UPSTREAM_FAILURE_PATTERNS の "weekly limit" の註)。本物の pane の凍結ではない。
-    weekly = "You've hit your weekly limit · resets Jul 29, 4am (Asia/Tokyo)"
-    # U10a: ★抑止が効くこと★ = 本任の芯 (期限の精度は二の次)。
-    if detect_upstream_failure(weekly) is None:
-        ng.append("U10a ★週次上限 banner を検知できぬ★ = pattern \"weekly limit\" が消えておる "
-                  "⇒ 週次で沈黙した agent へ /clear が撃たれる (cmd_1401 の実害そのもの)")
-    # U10b: ★断定は live★ = 期限を読めずとも壁は現に立っておる ⇒ 家老へ上がる。
-    #       ("weekly limit" を TIMED 族へ入れると残渣へ倒れて警報が消える = 其の退行の的)
-    v_wk, p_wk, why_wk = upstream_wall_verdict(weekly, datetime.datetime(2026, 7, 27, 2, 0))
-    if v_wk != UPSTREAM_LIVE:
-        ng.append(f"U10b ★週次上限 banner が live と断ぜられぬ★ (verdict={v_wk} why={why_wk!r}) "
-                  f"= 家老への上流障害警報が消える。TIMED 族へ入れたのではないか")
-    # U10c: ★期限は今は読めぬ★ことを【契約として】固定する — 読める様になったら此処が鳴り、
-    #       其の時こそ TIMED 族へ移す判断が要る (黙って挙動が変わらぬための目印)。
-    if parse_resets_eta(weekly, datetime.datetime(2026, 7, 27, 2, 0)) is not None:
-        ng.append("U10c 週次の日付つき期限が読める様になっておる (RESETS_RE が広がった?) "
-                  "⇒ ★TIMED 族へ移すか否かを判じ直せ★ (U10b の前提が変わる)")
-    # U10d: ★過剰抑止の側★ = 「week」を含む良性文言で誤検知せぬ (語を短く採り過ぎておらぬか)。
-    for benign in ("this week's plan", "weekly report generated", "week 3 of the sprint"):
-        if detect_upstream_failure(benign) is not None:
-            ng.append(f"U10d 良性文言を週次上限と誤検知: {benign!r}")
-
-    if ng:
-        for line in ng:
-            print(f"★NG★ {line}")
-        print(f"selftest_upstream: FAIL ({len(ng)}件)")
-        return 1
-    print("selftest_upstream: PASS (U1-U10 全て契約どおり)")
-    return 0
-
-
-# ─────────────────────────────────────────────────────────────
 # YAML helpers (stall_watchdog_scan.py と同型)
 # ─────────────────────────────────────────────────────────────
-# status は機械 token ([a-z_]) — 最初の ASCII 語 run が status 本体。装飾は何であれ語ではない。
-_STATUS_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
-
-
-def normalize_status(value):
-    """status 文字列を照合可能な正規形へ (最初の ASCII 語 run の抽出 + lowercase)。
-
-    家老の帳簿慣行 `status: 'assigned   # 2026-07-26 07:23 家老dispatch=…'` は
-    YAML 上【引用符内の一つの文字列】であり、生のまま ACTIVE_STATUSES と完全一致
-    照合すると全 active task が scan に不可視になる — 2026-07-26 朝の枠切れ
-    (07:28-08:31) で番人が盲目のまま走った実害の真因 (個別stall・quorum停電型・
-    家老degrade・上流障害台帳・R1/R2 の全経路が入口で消灯した)。
-    注記は運用上有用ゆえ家老は書き続ける (agent_status.sh で一覧できる) —
-    「注記を書くな」でなく「注記が在っても読める」側で吸収する (家老裁定 08:52)。
-
-    ★初版 (先頭空白 token + 末尾 :;,. 落とし) は装飾の blocklist であった★ —
-    軍師二号 OBS-2 が『★assigned★家老dispatch★』(空白を挟まぬ ★ 密着)・全角括弧/
-    全角句読点・…・—・/ の 9 形で盲目が戻ることを実証した (家老は ★ を常用ゆえ
-    現実の的)。blocklist は次の装飾文字で必ず破れる — ★語の側を allowlist で取る★:
-    status は機械 token ([A-Za-z][A-Za-z0-9_]*) ゆえ最初の ASCII 語 run が status。
-    最初の run を採る = 'done   # assigned直後…' の注記中の状態語には乗っ取られぬ
-    (先に現れた語が勝つ = 偽 active を作らぬ側の契約 T-STA-002 は据え置き)。
-    数字始まりの run は語でない ([A-Za-z] 先頭必須) = '2026-07-26 assigned' 型の
-    日付先行注記でも状態語へ届く。ASCII 語が一つも無ければ "" (従来どおり不可視)。
-    """
-    if not isinstance(value, str):
-        return value
-    m = _STATUS_TOKEN_RE.search(value)
-    return m.group(0).lower() if m else ""
-
-
 def parse_task(path: Path):
     try:
         with path.open(encoding="utf-8") as f:
@@ -1546,9 +160,7 @@ def parse_task(path: Path):
     return {
         "task_id": t.get("task_id"),
         "parent_cmd": t.get("parent_cmd"),
-        # 正規化して返す = 全消費点 (scan/quorum分母/_has_active_task/outage_probe)
-        # が注記付き status でも読める。出所は本関数の1点のみ (二重管理禁)。
-        "status": normalize_status(t.get("status")),
+        "status": t.get("status"),
         "target_path": t.get("target_path"),
     }
 
@@ -1565,27 +177,21 @@ def parse_iso_to_naive_local(s):
     return dt
 
 
-def report_completion_state(report_path: Path, task_id):
-    """report が完遂を記しておるかを★三値★で返す: "done" | "not_done" | "unreadable".
+def report_shows_completion(report_path: Path, task_id):
+    """True if the latest report record for task_id records a completion status.
 
-    ★cmd_1394 (3): 【読めなんだ】は【働いておらぬ】ではない★ (軍師一号の具申・家老下命)。
-    従来は parse 落ちを False (=未完) へ倒しており、★観測が成り立たなんだ区間を
-    観測値として合算しておった★ (cmd_1392 の病の別の面) =
-    ★働いておる agent の report が壊れておるだけで、番人が /clear を撃ちうる形★。
-    実測: logs/idle_revive_scan.log に "report YAML parse failed" が多数・書き手は 8 名全員。
-    ⇒ 呼び手が「判じられぬ」を第三の値として受け取れるようにする。
-
-    "not_done" は ★読めた上での「まだ」★ である (file 不在も含む = 未提出は読めておる)。
+    Used for the (b) 未完 gate: a task whose report already says done is a
+    bookkeeping omission (stall_watchdog territory), not an idle-stuck task.
     """
     if not report_path.is_file():
-        return "not_done"
+        return False
     try:
         with report_path.open(encoding="utf-8") as f:
             docs = list(yaml.safe_load_all(f))
     except (yaml.YAMLError, OSError) as e:
         print(f"[idle_revive] WARN: report YAML parse failed: {report_path}: {e}",
               file=sys.stderr)
-        return "unreadable"
+        return False
     latest_status = None
     latest_dt = None
     for doc in docs:
@@ -1602,16 +208,8 @@ def report_completion_state(report_path: Path, task_id):
             latest_dt = dt
             latest_status = inner.get("status")
     if isinstance(latest_status, str):
-        # report 側 status も同じ注記慣行がありうる — task 側と同じ正規形で読む。
-        return "done" if normalize_status(latest_status) in COMPLETION_STATUSES else "not_done"
-    return "not_done"
-
-
-def report_shows_completion(report_path: Path, task_id):
-    """後方互換の薄い皮 (True/False)。★unreadable は False へ倒れる★ゆえ、
-    「読めなんだ」を区別せねばならぬ呼び手は report_completion_state を直に使え。
-    """
-    return report_completion_state(report_path, task_id) == "done"
+        return latest_status.lower() in COMPLETION_STATUSES
+    return False
 
 
 def _newest_mtime_in_dir(root: Path, cap: int = 2000):
@@ -1716,79 +314,6 @@ def load_pane_state_file(path: Path):
 # ─────────────────────────────────────────────────────────────
 # Task B: 家老 degrade 検知 (設計 §3) — 実データ乖離ベース・prose 非scrape
 # ─────────────────────────────────────────────────────────────
-# ★家老の生死判定に用いる証拠の一覧 (cmd_1339・2026-07-25 23:39 家老誤clear 実データ)★
-#   dashboard.md mtime は家老の成果物の一つにすぎない【代理変数】である。23:39 の
-#   誤clearでは、家老は 21分間で task を4本 dispatch していた (queue/tasks の
-#   updated_at が実証) のに、dashboard の鮮度だけで「死」と判定された。
-#   ★dashboard mtime 単独では家老を殺せない★ — 以下のいずれかが window 内なら生存:
-#     (K1) dashboard.md mtime                — 従来 signal (staleness の一次判定)
-#     (K2) queue/tasks/*.yaml mtime          — task dispatch/更新は家老の労働
-#     (K3) queue/inbox/*.yaml 内 from: karo  — メッセージ送信は家老の労働 (timestamp で判定)
-#     (K4) queue/shogun_to_karo.yaml mtime   — 台帳 progress 追記は家老の労働
-#   ★queue/reports/*.yaml は足軽/軍師の労働ゆえ含めない★ — 含めると 2026-07-01 型の
-#   真の degrade (現場は動くが家老だけ固まる) を見逃す。
-#   caveat (正直な明示): K2 は足軽が自 task YAML の status を書換えた場合も更新される
-#   = その窓 (≤window分) だけ真の家老 degrade の検知が遅れる。/clear は破壊的操作ゆえ
-#   「疑わしきは撃たない」側に倒す (2026-07-25 に誤clear が家老3件+足軽/軍師4件 vs
-#   真の家老 degrade は 7-01 の1件、という実績非対称に基づく)。
-KARO_LABOR_FUTURE_SKEW_MIN = 5  # mtime が now より未来の場合の許容 (clock skew)。それ超は無視。
-
-
-def karo_labor_evidence(tasks_dir: Path, window_min, now):
-    """家老の『実際の労働』の証跡 (K2/K3/K4) を探し、あれば説明文字列を返す。
-
-    無ければ None。K1 (dashboard) は呼出元 scan_karo_degrade が判定済みの前提。
-    """
-    queue_root = tasks_dir.parent
-
-    def _fresh(path: Path):
-        try:
-            age = (now.timestamp() - path.stat().st_mtime) / 60.0
-        except OSError:
-            return None
-        if -KARO_LABOR_FUTURE_SKEW_MIN <= age <= window_min:
-            return round(age, 1)
-        return None
-
-    # (K2) task YAML 書込
-    for p in sorted(tasks_dir.glob("*.yaml")):
-        age = _fresh(p)
-        if age is not None:
-            return f"K2: task YAML {p.name} 書込 {age}分前"
-
-    # (K4) 台帳書込
-    ledger = queue_root / "shogun_to_karo.yaml"
-    age = _fresh(ledger)
-    if age is not None:
-        return f"K4: 台帳 shogun_to_karo.yaml 書込 {age}分前"
-
-    # (K3) inbox の from: karo メッセージ (file mtime 前置 filter で parse cost を抑える)
-    inbox_dir = queue_root / "inbox"
-    if inbox_dir.is_dir():
-        for p in sorted(inbox_dir.glob("*.yaml")):
-            if _fresh(p) is None:
-                continue  # file 自体が古ければ中の message も古い
-            try:
-                with p.open(encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
-            except (yaml.YAMLError, OSError):
-                continue
-            msgs = data.get("messages") if isinstance(data, dict) else None
-            if not isinstance(msgs, list):
-                continue
-            for m in msgs:
-                if not isinstance(m, dict) or m.get("from") != "karo":
-                    continue
-                dt = parse_iso_to_naive_local(m.get("timestamp"))
-                if dt is None:
-                    continue
-                age_min = (now - dt).total_seconds() / 60.0
-                if -KARO_LABOR_FUTURE_SKEW_MIN <= age_min <= window_min:
-                    return (f"K3: inbox {p.name} へ from:karo メッセージ "
-                            f"{round(age_min, 1)}分前")
-    return None
-
-
 def _has_active_task(tasks_dir: Path):
     """True if any scanned agent holds an active task (someone should be working)."""
     for task_path in tasks_dir.glob("*.yaml"):
@@ -1860,22 +385,6 @@ def scan_karo_degrade(dashboard_path: Path, tasks_dir: Path, reports_dir: Path,
     if not _has_active_task(tasks_dir):
         return None, clear_log
 
-    # ★cmd_1339: 家老労働証跡 gate (K2/K3/K4)★ — dashboard が stale でも、家老が
-    # 実際に働いた形跡 (task dispatch / inbox 送信 / 台帳追記) が window 内にあれば
-    # 生存と判定し /clear を撃たない。dashboard mtime は代理変数にすぎない
-    # (2026-07-25 23:39: dispatch 4本の最中に dashboard 鮮度だけで誤clearされた実例)。
-    labor = karo_labor_evidence(tasks_dir, karo_stale_min, now)
-    if labor is not None:
-        print(f"[idle_revive] karo生存証跡: {labor} — dashboard "
-              f"{round(dash_age_min, 1)}分 stale でも clear せず (cmd_1339)",
-              file=sys.stderr)
-        if entry.get("consecutive") or entry.get("last_alert_ts"):
-            entry = dict(entry)
-            entry["consecutive"] = 0
-            entry.pop("last_alert_ts", None)
-            clear_log[KARO_STATE_KEY] = entry
-        return None, clear_log
-
     reality_moved = _reality_moved_after(dash_mtime, tasks_dir, reports_dir)
     consecutive = int(entry.get("consecutive", 0) or 0)
 
@@ -1935,151 +444,20 @@ def scan_karo_degrade(dashboard_path: Path, tasks_dir: Path, reports_dir: Path,
 # ─────────────────────────────────────────────────────────────
 # scan
 # ─────────────────────────────────────────────────────────────
-IMPOSSIBLE_STATE_KEYS = ("impossible_consecutive", "impossible_ages", "impossible_alerted")
-
-
-def _has_impossible_state(entry):
-    return any(entry.get(k) for k in IMPOSSIBLE_STATE_KEYS)
-
-
-def _clear_impossible_state(entry):
-    """cmd_1392: 矛盾でなかった走行で crash-loop の連番を落とす (dict は複写済前提)。
-
-    ★落とし忘れると永久に鳴る★ = 一度 3 回 続いた agent が、其の後 何ヶ月 健全でも
-    「起き直り続けておる」と名乗り続ける。★連続の意味を保つのは此の 3 行である★。
-    """
-    for k in IMPOSSIBLE_STATE_KEYS:
-        entry.pop(k, None)
-    return entry
-
-
-def load_switch_history(state_dir: Path):
-    """cmd_1387: agent → ★最後の切替の epoch 秒★ を読む。
-
-    戻り = (mapping, source)。source は ★三値★ である:
-      "ok"         … 記録を現に読んだ
-      "absent"     … file が無い (★切替が無かったの証ではない = 源が不在★)
-      "unreadable" … 在るが読めなんだ (権限・破損)
-    ★三値に分ける理由★= 二値へ潰せば ★「切替は無かった」と「見ておらぬ」が
-      同じ顔になる★ = 本日 全軍で潰してきた病そのものである。
-
-    ★壊れた行は黙って捨てず数える★= 捨てた事も名乗れる様に (bad 件数を返す)。
-    """
-    p = state_dir / SWITCH_HISTORY_FILE
-    try:
-        text = p.read_text(encoding="utf-8", errors="replace")
-    except FileNotFoundError:
-        return {}, "absent", 0
-    except OSError:
-        return {}, "unreadable", 0
-    hist, bad = {}, 0
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        parts = line.split("\t")
-        if len(parts) < 3:
-            bad += 1
-            continue
-        try:
-            ts = float(parts[0])
-        except ValueError:
-            bad += 1
-            continue
-        agent = parts[2].strip()
-        if not agent:
-            bad += 1
-            continue
-        # ★第 5 欄 = 事由 (switch=切替 / boot=出陣)★ (cmd_1387・家老 17:31 の裁(甲))。
-        #   ★欠けておれば switch と読む★= 本欄が生まれる前の行は悉く切替であったゆえ
-        #   (★「無い」を「別の物」と読ませぬ = 古い行を黙って化けさせぬ★)。
-        event = parts[4].strip() if len(parts) >= 5 and parts[4].strip() else "switch"
-        # ★最後の 1 件を採る★= 追記のみゆえ後の行が新しい。
-        if agent not in hist or ts > hist[agent][0]:
-            hist[agent] = (ts, event)
-    return hist, "ok", bad
-
-
-def switch_annotation(hist, source, agent, now_ts, age_sec):
-    """cmd_1387: ★判定へは 1bit も触れぬ★ — 名乗りへ添える札を作る。
-
-    戻り = (token, sentence)。token は ACTION 行へ・sentence は家老への文へ。
-    ★否の側も必ず名乗る★= 「切替の記録が無い」も札にする。沈黙にすれば
-      読む者は ★「切替は無かった」と読む★ が、其れは我らが証しておらぬ。
-    """
-    if source == "absent":
-        return ("SWITCH=no_source",
-                "★切替の記録が無い (queue/state/switch_history.tsv 不在) = "
-                "【切替が無かった】ではなく【源が不在】である★")
-    if source == "unreadable":
-        return ("SWITCH=unreadable",
-                "★切替の記録を読めなんだ = 齢の若さの出所は判じられぬ★")
-    rec = hist.get(agent)
-    ts, event = (rec if rec is not None else (None, None))
-    # ★事由で言葉を選ぶ★= ★出陣で生まれた体に「切替が在った」と名乗れば、読む者は
-    #   在りもせぬ切替を探す★ (門が己の見た物を正しく名乗る、の一部である)。
-    what = "出陣 (初回起動)" if event == "boot" else "切替"
-    if ts is None:
-        return ("SWITCH=none",
-                "★此の agent の生年の記録は無い (記録の源は生きておる) = "
-                "齢の若さは切替でも出陣でも説明せぬ★")
-    since_min = round((now_ts - ts) / 60.0, 1)
-    if age_sec is None:
-        return (f"SWITCH={since_min}m_ago",
-                f"★直前に{what}が在った ({since_min} 分前) = 而して齢を判じられぬゆえ "
-                f"突き合わせられぬ★")
-    birth_ts = now_ts - age_sec
-    if birth_ts >= ts - SWITCH_EXPLAINS_SLACK_SEC:
-        return (f"SWITCH={since_min}m_ago_EXPLAINS",
-                f"★直前に{what}が在った ({since_min} 分前) = ★process の誕生が其れと重なる★ ⇒ "
-                f"★齢の若さは【我らが撃った{what}】に由来する公算が高い (crash-loop ではない)★ — "
-                f"★但し之は【真因の申し送り】であって【判定】ではない★= 抑止も警報も 1bit も動いておらぬ")
-    return (f"SWITCH={since_min}m_ago_OLDER",
-            f"★{what}は {since_min} 分前に在ったが、process は其れより古い★ ⇒ "
-            f"★此の齢の若さを切替では説明せぬ★")
-
-
 def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
          stall_min, min_interval_min, max_consecutive,
-         alert_cooldown_min=DEFAULT_ALERT_COOLDOWN_MIN, now=None,
-         quorum_min_stalled=DEFAULT_QUORUM_MIN_STALLED,
-         quorum_ratio=DEFAULT_QUORUM_RATIO,
-         quorum_enabled=True,
-         impossible_loop_threshold=DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD,
-         recent_scan_gap=False):
+         alert_cooldown_min=DEFAULT_ALERT_COOLDOWN_MIN, now=None):
     """Evaluate every scanned agent and return (candidates, updated_clear_log).
 
     Each returned candidate dict carries the reason + the action decided
     (revive / rate_limited / escalation_stop / alert_cooldown) so --dry-run
     can report it.
-
-    cmd_1339 quorum gate: stall 条件成立が同一 cycle で quorum_min_stalled 体以上
-    かつ scan 対象の quorum_ratio 以上なら停電型 (相関沈黙) と判定し、個別 clear /
-    escalation を "blackout_suppressed" へ差し替え (state 非消費)、合成 entry
-    (action="blackout_alert", agent=BLACKOUT_AGENT_KEY) を 1 つ追加する。
     """
     if now is None:
         now = datetime.datetime.now()
     now_ts = now.timestamp()
     results = []
     clear_log = dict(clear_log)
-    # ★cmd_1392 是正 = 「抑止 0 体」の二義を割る母数★ (家老 09:58 の任(2))。
-    # ★軍師二号は log 1,912 件の ACTION から `impossible_claim_suppressed` = 0 を示し、
-    #   「(甲) 条件が成らなんだ / (乙) 成る盤面が来ておらぬ の何れかは拙者には割れぬ」と申した★。
-    # ★割れなんだ理由は【分母が一度も印字されておらなんだ】ゆえである★ =
-    #   ★0 だけを見せて母数を見せぬ数は、原理的に読めぬ★ (本朝 全軍へ配った規の、我が門の側)。
-    # ⇒ ★判定へ入った体数と、其のうち齢を判じられた体数を数え、名乗りへ載せる★。
-    IMPOSSIBLE_JUDGE_STATS.update(judged=0, age_known=0, age_unknown=0)
-
-    # ★cmd_1387: 切替の記録を【1 走行に 1 度】読む★ (agent 毎に読めば file が
-    #   走行中に育った時、体ごとに別の盤面を見る = 一つの走行が二つの世を名乗る)。
-    switch_hist, switch_source, switch_bad = load_switch_history(tasks_dir.parent / "state")
-    SWITCH_READ_STATS.update(source=switch_source, records=len(switch_hist),
-                             bad_lines=switch_bad)
-
-    # quorum 集計: eligible = active task を持つ scan 対象 (busy 含む)。
-    # stalled = うち「沈黙」(idle+出力停止 / absent+出力停止) の agent。
-    eligible_count = 0
-    stalled = []
 
     for task_path in sorted(tasks_dir.glob("*.yaml")):
         agent = task_path.stem
@@ -2101,72 +479,27 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         # (a) spinner: busy/absent → 稼働 or 不在 → 触らない。復帰とみなし consecutive reset。
         # latch 解除ゆえ再警報 cooldown (last_alert_ts) もクリア (cmd_1280)。
         if state != "idle":
-            if (entry.get("consecutive") or entry.get("last_alert_ts")
-                    or _has_impossible_state(entry)):
+            if entry.get("consecutive") or entry.get("last_alert_ts"):
                 entry = dict(entry)
                 entry["consecutive"] = 0
                 entry.pop("last_alert_ts", None)
-                _clear_impossible_state(entry)   # cmd_1392: 稼働へ戻った = 連続は切れた
                 clear_log[agent] = entry
-            # quorum 集計: busy は「系が健全」の証拠として分母のみ。absent は
-            # 出力も止まっておれば分子にも数える (tmux server 消失 = 全 pane absent
-            # の 2026-07-25 22:3x 型を同じ網に掛ける)。clear 発行対象にはしない。
-            # cmd_1394 (3): "unreadable" は分母にも数えぬ (判じられぬ物を分母へ入れれば
-            # quorum の割合が薄まる)。★黙って外すのではない★ — parse 落ちの WARN 行は
-            # report_completion_state が毎回 印字しておる。
-            if task.get("status") in ACTIVE_STATUSES and report_completion_state(
-                    reports_dir / f"{agent}_report.yaml", task.get("task_id")) == "not_done":
-                eligible_count += 1
-                if state == "absent":
-                    newest = newest_output_mtime(agent, task, tasks_dir, reports_dir, repo_root)
-                    a_idle = (now_ts - newest) / 60.0 if newest is not None else None
-                    if a_idle is None or a_idle >= stall_min:
-                        stalled.append({
-                            "agent": agent,
-                            "idle_min": round(a_idle, 1) if a_idle is not None else None,
-                            "pane_state": "absent",
-                        })
             continue
 
         # (b) task status ∈ active。それ以外は対象外(復帰扱いで reset)。
         status = task.get("status")
         if status not in ACTIVE_STATUSES:
-            if (entry.get("consecutive") or entry.get("last_alert_ts")
-                    or _has_impossible_state(entry)):
+            if entry.get("consecutive") or entry.get("last_alert_ts"):
                 entry = dict(entry)
                 entry["consecutive"] = 0
                 entry.pop("last_alert_ts", None)
-                _clear_impossible_state(entry)   # cmd_1392: 対象外へ戻った = 連続は切れた
                 clear_log[agent] = entry
             continue
 
         # (b) 未完: report が既に done → bookkeeping 漏れ(stall_watchdog 領分)ゆえ除外。
         report_path = reports_dir / f"{agent}_report.yaml"
-        completion = report_completion_state(report_path, task.get("task_id"))
-        if completion == "done":
+        if report_shows_completion(report_path, task.get("task_id")):
             continue
-        if completion == "unreadable":
-            # ★cmd_1394 (3): 【読めなんだ】と【沈黙】を混ぜぬ★ —
-            # 此処で従来どおり「未完」へ倒せば、★report が壊れておるだけの
-            # 働いておる agent へ /clear が飛ぶ★ (観測の失敗を観測値に混ぜる病)。
-            # ⇒ revive 候補にせず・stalled にも eligible にも数えず・★書き手を名指す★。
-            # 家老へ inbox は上げぬ (3分毎ゆえ spam になる = cmd_1280 の轍)。
-            # 名指しは本行が担い、行は決定 (ACTION=) として log の同じ高さに出る。
-            results.append({
-                "agent": agent,
-                "task_id": task.get("task_id"),
-                "parent_cmd": task.get("parent_cmd"),
-                "idle_min": None,
-                "consecutive": int(entry.get("consecutive", 0) or 0),
-                "action": "report_unreadable",
-                "detail": (f"report YAML を読めなんだ ({report_path.name}) ⇒ "
-                           f"★【読めなんだ】は【働いておらぬ】ではない★ゆえ revive 対象から外し、"
-                           f"quorum の分母からも外した。★書き手 {agent} が report を直すまで"
-                           f"番人は此の agent を判じられぬ★ (cmd_1394 (3))"),
-            })
-            continue
-
-        eligible_count += 1
 
         # (c) file mtime: 直近書込があれば slow-gen とみなし触らない。
         newest = newest_output_mtime(agent, task, tasks_dir, reports_dir, repo_root)
@@ -2178,101 +511,8 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
             # 出力漸進中 → slow-gen → revive しない
             continue
 
-        idle_min_disp = round(idle_min, 1) if idle_min is not None else None
-
-        # ── cmd_1392: ★名乗ろうとしておる沈黙の間、其の process は存在したか★ ──
-        # ★之は真偽の判定ではない★ = 「働いておったか」は問わず【存在の有無】のみを問う。
-        # ★idle_min が None (出力が一つも無い) の時★= 番人は「stall_min 以上 黙っておる」
-        #   を暗に名乗って撃つゆえ、其の最小の主張 (stall_min) を claimed とする。
-        #   ★None を「主張が無い」と読んで素通りさせれば、最も強い主張が最も無検査になる★。
-        claimed_silence_sec = (idle_min * 60.0) if idle_min is not None else stall_min * 60.0
-        # ★now_ts を渡す★= ★沈黙 (idle_min) が測られた其の一点から齢も測る★ =
-        #   渡さねば「同じ族へ揃えた」筈が ★scan の所要時間だけ別の起点になる★。
-        age_sec = agent_proc_age_sec(agent, now_ts=now_ts)
-        # ★母数を数える★= ★此処へ来た = 【判定へ現に入った】である★。
-        #   ★judged=0 の 0 と、judged>0 で抑止 0 の 0 は、全く別の物である★。
-        IMPOSSIBLE_JUDGE_STATS["judged"] += 1
-        if age_sec is None:
-            IMPOSSIBLE_JUDGE_STATS["age_unknown"] += 1
-        else:
-            IMPOSSIBLE_JUDGE_STATS["age_known"] += 1
-        if age_sec is not None and age_sec < claimed_silence_sec:
-            age_min = age_sec / 60.0
-            ratio = (f"{idle_min / age_min:.1f}" if (idle_min is not None and age_min > 0)
-                     else "n/a")
-            # ★cmd_1387: 真因を【判定へ混ぜず】名乗りへ添える★ —
-            #   此処より下で抑止の可否は 1bit も変わらぬ (札を作るだけ)。
-            sw_token, sw_sentence = switch_annotation(
-                switch_hist, switch_source, agent, now_ts, age_sec)
-            entry = dict(entry)
-            streak = int(entry.get("impossible_consecutive", 0) or 0) + 1
-            ages = list(entry.get("impossible_ages") or [])[-(impossible_loop_threshold - 1):]
-            ages.append(int(age_sec))
-            entry["impossible_consecutive"] = streak
-            entry["impossible_ages"] = ages
-            # ★state 非消費★= consecutive / last_clear_ts を進めぬ = 齢が育った其の scan で
-            # 従来判定へ★自動で★戻る (抑止は【遅延】であって【免除】ではない・最大 stall_min)。
-            clear_log[agent] = entry
-            # ★分子から外す★= stalled は quorum の観測値であり、★成り立たぬ主張を
-            #   観測値へ混ぜるのは本病そのもの★ (家老へ「4体が同時に沈黙」と偽を上げ、
-            #   上流障害台帳にも其の 4 体を焼く)。分母 (eligible_count) には残す =
-            #   ★見ておらぬのではない。見た上で「言えぬ」と申しておる★。
-            results.append({
-                "agent": agent,
-                "task_id": task.get("task_id"),
-                "parent_cmd": task.get("parent_cmd"),
-                "idle_min": idle_min_disp,      # ★元の数を書き換えぬ★ (家老規律「前の数も残せ」)
-                "consecutive": int(entry.get("consecutive", 0) or 0),
-                "action": "impossible_claim_suppressed",
-                "proc_age_min": round(age_min, 1),
-                "claim_ratio": ratio,
-                "impossible_streak": streak,
-                "switch_note": sw_sentence,
-                "detail": (f"PROC_AGE_MIN={round(age_min, 1)} CLAIM_RATIO={ratio} "
-                           f"STREAK={streak} SCAN_GAP_BEFORE={'yes' if recent_scan_gap else 'no'} "
-                           f"{sw_token} "
-                           f"— ★観測が存在せなんだ区間を含む★: process の齢 "
-                           f"{round(age_min, 1)}分 < 名乗る沈黙 "
-                           f"{idle_min_disp if idle_min_disp is not None else f'≥{stall_min}'}分。"
-                           f"★此の scan で言えるのは「齢の分だけ黙っておる」までである★ "
-                           f"(cmd_1392)"),
-            })
-            # ── 牙(2): 起き直り続ける agent を捕える (crash-loop の罠) ──
-            # ★之が無ければ、絶えず落ちて生まれ直す agent が永久に免除される★。
-            # ★別の口から出す★= revive ではなく警報 (/clear は撃たぬ = 撃っても直らぬ族)。
-            if streak >= impossible_loop_threshold and not entry.get("impossible_alerted"):
-                alerted = dict(entry)
-                alerted["impossible_alerted"] = True
-                results.append({
-                    "agent": agent,
-                    "task_id": task.get("task_id"),
-                    "parent_cmd": "cmd_1392",
-                    "idle_min": idle_min_disp,
-                    "consecutive": int(entry.get("consecutive", 0) or 0),
-                    "action": "restart_loop_alert",
-                    "ages": ages,
-                    "switch_note": sw_sentence,
-                    "detail": (f"AGES={','.join(str(a) for a in ages)} "
-                               f"STREAK={streak} {sw_token} — ★齢が育たぬまま抑止が続いておる = "
-                               f"起き直り続けておる★ (連続{streak}回・閾{impossible_loop_threshold})。"
-                               f"★/clear は撃たぬ (撃っても直らぬ族ゆえ) = 家老へ回す★ (cmd_1392)"),
-                    "_new_state": alerted,
-                })
-            continue
-
-        if _has_impossible_state(entry):
-            # ★齢が育った / 判じられぬへ転じた★= 連続は切れた。
-            entry = dict(entry)
-            _clear_impossible_state(entry)
-            clear_log[agent] = entry
-
-        stalled.append({
-            "agent": agent,
-            "idle_min": idle_min_disp,
-            "pane_state": "idle",
-        })
-
         # ── ここまでで複合 AND 成立 = revive 候補 ──
+        idle_min_disp = round(idle_min, 1) if idle_min is not None else None
 
         # rate limit: 前回 clear からの間隔
         last_ts = entry.get("last_clear_ts")
@@ -2341,246 +581,35 @@ def scan(tasks_dir, reports_dir, repo_root, pane_states, clear_log,
         base["_new_state"] = entry
         results.append(base)
 
-    # ── cmd_1339: 停電型 (相関沈黙) quorum gate ──
-    # 判定は毎 scan ゼロから再計算 (状態 file は警報 throttle 専用) = いずれかの
-    # agent の出力 mtime が動けば次 scan で自然に不成立へ戻り、復帰漏れしない。
-    if (quorum_enabled
-            and len(stalled) >= quorum_min_stalled
-            and eligible_count > 0
-            and len(stalled) / eligible_count >= quorum_ratio):
-        for r in results:
-            if r["action"] in ("revive", "escalation_stop"):
-                r["suppressed_action"] = r["action"]
-                r["action"] = "blackout_suppressed"
-                # state 非消費: rate limit / consecutive を進めない =
-                # 停電解消後は従来の個別判定が即座に働く。
-                r.pop("_new_state", None)
-                r["detail"] = (f"停電型quorum成立につき {r['suppressed_action']} を抑止 "
-                               f"(state非消費・復帰後は従来判定へ自動復帰)")
-        results.append({
-            "agent": BLACKOUT_AGENT_KEY,
-            "task_id": None,
-            "parent_cmd": "cmd_1339",
-            "idle_min": None,
-            "consecutive": 0,
-            "action": "blackout_alert",
-            "stalled_count": len(stalled),
-            "eligible_count": eligible_count,
-            "detail": (f"停電型(相関沈黙)検知: scan対象{eligible_count}体中"
-                       f"{len(stalled)}体が同時にstall条件成立 "
-                       f"(≥{quorum_min_stalled}体かつ≥{int(quorum_ratio * 100)}%) "
-                       f"→ 個別clearを全面抑止し家老へ警報1通のみ"),
-            "_stalled": stalled,
-        })
-
-    # eligible_count も返す = 「対象なし」が【分母0 (何も見えておらぬ)】なのか
-    # 【分母>0 だが全員健全】なのかを log で区別可能にする (具申c・原理(ii)
-    # 「操作でなく状態を見よ」の log 側の顔。分母0の検知層は全PASSと区別がつかぬ)。
-    return results, clear_log, eligible_count
+    return results, clear_log
 
 
 # ─────────────────────────────────────────────────────────────
 # revive 発行
 # ─────────────────────────────────────────────────────────────
-def format_clear_body(hit, context=""):
-    ctx = f"{context} " if context else ""
+def format_clear_body(hit):
     return (f"idle固着検知({hit['idle_min']}分 出力停止・spinner無・task {hit['task_id']} 未完)。"
-            f"{ctx}"
             f"/clear で session reset → task YAML 再読で自走再開せよ。"
             f"(idle_revive_scan cmd_1154)")
 
 
-def format_escalation_alert(hit, context=""):
-    ctx = f" 判断材料: {context}" if context else ""
+def format_escalation_alert(hit):
     return (f"🚨 clear-loop 断ち切り: {hit['agent']} を連続 {hit['consecutive']}回 "
             f"clear しても復帰せず (task {hit['task_id']}, {hit['parent_cmd']})。"
-            f"自動 revive を停止した。手動確認要。{ctx}"
-            f"(idle_revive_scan cmd_1154)")
+            f"自動 revive を停止した。手動確認要。(idle_revive_scan cmd_1154)")
 
 
-def format_karo_clear_body(hit, context=""):
-    ctx = f"{context} " if context else ""
+def format_karo_clear_body(hit):
     return (f"家老degrade検知(dashboard {hit['idle_min']}分 stale + active task 存在)。"
-            f"{ctx}"
             f"/clear で session reset → SessionStart hook で persona/戦国口調/state 復旧 → "
             f"CLAUDE.md Session Start で queue YAML から dashboard 再構築せよ"
             f"(state は YAML 永続ゆえ非破壊)。(idle_revive_scan cmd_1154)")
 
 
-def format_karo_escalation_alert(hit, context=""):
-    ctx = f" 判断材料: {context}" if context else ""
+def format_karo_escalation_alert(hit):
     return (f"🚨 家老 clear-loop 断ち切り: karo を連続 {hit['consecutive']}回 clear しても "
             f"dashboard staleness({hit['idle_min']}分)解消せず。自動 revive を停止した。"
-            f"家老 session を手動確認要。{ctx}(idle_revive_scan cmd_1154)")
-
-
-def format_blackout_alert(hit, upstream_notes, throttle_min):
-    agents_desc = ", ".join(
-        f"{s['agent']}({s['idle_min']}分{'/pane消失' if s['pane_state'] == 'absent' else ''})"
-        for s in hit.get("_stalled", []))
-    up = f" pane上流障害痕跡: {'; '.join(upstream_notes)}。" if upstream_notes else ""
-    return (f"🚨停電型(相関沈黙)検知 (idle_revive quorum gate・cmd_1339): "
-            f"scan対象{hit['eligible_count']}体中{hit['stalled_count']}体が同時にstall条件成立。"
-            f"agent個別の固着ではなく上流障害 (殿token枠切れ/credit/auth/API障害/tmux server喪失) "
-            f"を疑え。★個別clearは全面抑止した=1本も撃っていない (context保全・家老degrade clearも抑止)★。"
-            f"対象: {agents_desc}。{up}"
-            f"いずれかのagentの出力が動けば次scanで自動的に通常監視へ戻る。"
-            f"本警報は{throttle_min}分に一度。")
-
-
-def format_restart_loop_alert(hit, threshold):
-    """cmd_1392 牙(2): 起き直り続ける agent を家老へ回す文面 (/clear は撃たぬ)。"""
-    ages = ", ".join(f"{a}秒" for a in hit.get("ages", []))
-    # ★cmd_1387: 真因の申し送りを【同じ便へ同梱する】★ — 別便にすれば
-    #   ★警報を読んだ其の場で真因が手に入らぬ★ (六号が cmd_1411 で立てた形と同じ)。
-    sw = hit.get("switch_note")
-    sw_line = f" {sw}。" if sw else ""
-    return (f"🚨起き直り続ける agent (idle_revive cmd_1392): {hit['agent']} は "
-            f"★連続{threshold}回 の scan で【名乗る沈黙より process が若い】状態が続いておる★"
-            f" (齢の推移: {ages})。"
-            f"★齢が育たぬまま抑止が続く = agent が落ちて生まれ直しておる公算★ "
-            f"(task {hit['task_id']})。"
-            f"★/clear は撃っておらぬ★ = 撃っても直らぬ族ゆえ (session を殺すだけ)。"
-            f"{sw_line}"
-            f"pane を実査し、CLI が crash-loop に陥っておらぬかを検められたい。"
-            f"★本警報は1 episode 1通★ = 齢が育てば自動で解け、其の後 再発すれば改めて鳴る。")
-
-
-def blackout_throttled(state_dir: Path, throttle_min, now):
-    """前回 blackout 警報から throttle_min 分未満なら True (警報抑止)。"""
-    p = state_dir / BLACKOUT_STATE_FILE
-    try:
-        last = parse_iso_to_naive_local(p.read_text(encoding="utf-8").strip())
-    except OSError:
-        return False
-    if last is None:
-        return False
-    return (now - last).total_seconds() / 60.0 < throttle_min
-
-
-def blackout_mark_alerted(state_dir: Path, now):
-    state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / BLACKOUT_STATE_FILE).write_text(
-        now.isoformat(timespec="seconds") + "\n", encoding="utf-8")
-
-
-# ─────────────────────────────────────────────────────────────
-# cmd_1394 (1): ★判じた★と★撃った★を log の上で分ける
-# ─────────────────────────────────────────────────────────────
-# ★scan() の段階で既に抑止が決しておる action★ = 発行相では何もせぬ。
-# 其れでも OUTCOME を出す = ★何もせなんだ事も log に残す★ (沈黙を作らぬ)。
-PRE_SUPPRESSED_REASONS = {
-    "blackout_suppressed": "blackout_quorum",
-    "rate_limited": "rate_limit",
-    "alert_cooldown": "alert_cooldown",
-    "report_unreadable": "report_unreadable",   # cmd_1394 (3): 判じられぬゆえ撃たぬ
-    # cmd_1392: 名乗る沈黙の間 process が存在せなんだ = 主張が成り立たぬゆえ撃たぬ
-    "impossible_claim_suppressed": "impossible_claim",
-}
-
-
-def outcome_base(r):
-    """result entry → OUTCOME の語幹。
-
-    blackout_suppressed / rate_limited / alert_cooldown は【本来撃つ筈であった物が
-    撃たれなんだ】形ゆえ、抑止された側の行為 (revive / escalation) で名乗る =
-    ★読み手が探す語で出る★ (「revive は撃たれたか」を grep する者に届く)。
-    """
-    a = r.get("action")
-    if a == "blackout_suppressed":
-        a = r.get("suppressed_action") or "revive"
-    return {"revive": "revive",
-            "rate_limited": "revive",
-            "report_unreadable": "revive",
-            # cmd_1392: 抑止された側の行為で名乗る = 「revive は撃たれたか」を
-            # grep する者に届く (blackout_suppressed と同じ流儀)。
-            "impossible_claim_suppressed": "revive",
-            "escalation_stop": "escalation",
-            "alert_cooldown": "escalation",
-            "restart_loop_alert": "restart_loop_alert",
-            "blackout_alert": "blackout_alert"}.get(a, str(a))
-
-
-def emit_outcome(r, fired: bool, reason: str):
-    """★決定 1 件につき丁度 1 行★ の実行相 log (stderr = 実行相の他の行と同じ流れ)。
-
-    ★この行が無い決定は【撃ったか判らぬ決定】である★ — 決定行 (ACTION=) の数と
-    本行の数が一致することを試験が縛る (T-LOG-004)。ゆえに新しい分岐を足す者は
-    ★continue する前に必ず本関数を呼べ★。REASON は空白を含まぬ機械語で書く。
-    ★但し --json 時は決定行 (ACTION=) を出さぬゆえ、一致するのは平文出力の時のみ★
-    (本行は mode に依らず出る = 撃った証は json でも log に残る)。
-    """
-    print(f"[idle_revive] OUTCOME={outcome_base(r)}_{'fired' if fired else 'not_fired'} "
-          f"AGENT={r.get('agent')} TASK_ID={r.get('task_id')} REASON={reason}",
-          file=sys.stderr)
-
-
-# ─────────────────────────────────────────────────────────────
-# cmd_1394 (2): 走行の刻 = 欠測 (観測者の不在) を次回走行が名指す
-# ─────────────────────────────────────────────────────────────
-def load_scan_heartbeat(state_dir: Path):
-    p = state_dir / SCAN_HEARTBEAT_FILE
-    if not p.is_file():
-        return None
-    try:
-        data = yaml.safe_load(p.read_text(encoding="utf-8"))
-    except (yaml.YAMLError, OSError) as e:
-        print(f"[idle_revive] WARN: scan heartbeat parse failed: {p}: {e}",
-              file=sys.stderr)
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def save_scan_heartbeat(state_dir: Path, now, mode):
-    """★走行の刻だけ★を記す (判定 state ではない)。
-
-    ★dry-run でも書く★= 本 file が答えるのは「番人は走ったか」であって
-    「番人は撃ったか」ではない。dry-run を欠測扱いにすれば、人が様子を見た事が
-    ★番人の不在★として log に嘘を書くことになる。判定 state (clear_log/上流障害
-    台帳) は従来どおり dry-run では 1 byte も動かさぬ。
-    """
-    state_dir.mkdir(parents=True, exist_ok=True)
-    p = state_dir / SCAN_HEARTBEAT_FILE
-    doc = {
-        "# managed by": "scripts/idle_revive_scan.py (cmd_1394)",
-        "last_scan_ts": now.isoformat(timespec="seconds"),
-        "mode": mode,
-        "pid": os.getpid(),
-    }
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(doc, f, allow_unicode=True, sort_keys=False)
-    tmp.replace(p)
-
-
-def scan_gap_line(prev, now, expected_sec, factor):
-    """前回走行との差が周期の factor 倍を超えておれば、欠測を名指す1行を返す。
-
-    戻り値 None = 名指すことが無い (正常周期 / 判じられぬ)。
-    ★判じられぬ場合に何も言わぬのは誤り★ゆえ、走行記録が無い場合は呼び手が
-    NOTE=scan_history_absent を出す (沈黙を「健全」と読ませぬため)。
-    """
-    if not isinstance(prev, dict):
-        return None
-    last = parse_iso_to_naive_local(prev.get("last_scan_ts"))
-    if last is None:
-        return None
-    prev_mode = prev.get("mode") or "unknown"
-    elapsed = (now - last).total_seconds()
-    if elapsed < 0:
-        # 時計が巻き戻った (手動変更/tz 事故)。欠測と同じ扱いにはできぬゆえ別名で。
-        return (f"[idle_revive] WARN=scan_clock_rewind LAST={last.isoformat(timespec='seconds')} "
-                f"ELAPSED_SEC={int(elapsed)} PREV_MODE={prev_mode} "
-                f"— ★前回走行が未来に在る★= 欠測判定は本走行では成り立たぬ。")
-    if expected_sec <= 0 or elapsed <= expected_sec * factor:
-        return None
-    missed = max(1, int(elapsed // expected_sec) - 1)
-    return (f"[idle_revive] WARN=scan_gap LAST={last.isoformat(timespec='seconds')} "
-            f"ELAPSED_SEC={int(elapsed)} EXPECTED_SEC={int(expected_sec)} "
-            f"MISSED={missed} PREV_MODE={prev_mode} "
-            f"— ★番人の走行が欠けておった ({elapsed / 60.0:.1f}分)★= "
-            f"此の窓で起きた固着は誰も見ておらぬ。"
-            f"★「対象なし が出ておらぬ」と「走っておらぬ」は別である★。")
+            f"家老 session を手動確認要。(idle_revive_scan cmd_1154)")
 
 
 def send_inbox(target, body, msg_type, from_agent):
@@ -2590,40 +619,11 @@ def send_inbox(target, body, msg_type, from_agent):
     )
 
 
-def _write_end_stamp(args, rc):
-    """走り畢えた刻を 1 行 残す (cmd_1465 の丙)。
-
-    この script は既に「走った刻」を state へ書いている (cmd_1394 の欠測判定用)。
-    それは走行の ★入口★ に在り、途中で死んでも残る = 「始まった」しか言えない。
-    ここで書くのは ★出口★ の証で、最後まで来た時にだけ残る。二つは別物ゆえ、
-    片方をもう片方の代わりに使わないこと。
-
-    rc で書く / 書かないを分けない理由は stall_watchdog_scan.py と同じ
-    (異常を見つけた走行も「走り畢えた」側である)。
-
-    書く条件: --stamp-dir を渡されたら必ずそこへ。渡されず本番の走行なら本番の
-    logs/ へ。試験の走行 (--queue-root / --dry-run) では書かない。
-    """
-    if args.stamp_dir is not None:
-        target = args.stamp_dir
-    elif args.queue_root is None and not args.dry_run:
-        target = None
-    else:
-        return
-    try:
-        liveness.write_completion_stamp("idle_revive_scan", target, rc)
-    except OSError as e:
-        print(f"[idle_revive] WARN: 終わりの証の書込に失敗 ({e}) — "
-              f"次の見張りで『証を持たない』と鳴る", file=sys.stderr)
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true",
-                    help="判定を stdout に出すのみ(clear/alert を発行しない・判定 state"
-                         "(clear_log/上流障害台帳)書込なし)。★走行の刻だけは記す"
-                         "(cmd_1394・欠測判定の要)★。")
+                    help="判定を stdout に出すのみ(clear/alert を発行しない・state 書込なし)。")
     ap.add_argument("--stall-min", type=int, default=DEFAULT_STALL_MIN,
                     help=f"(c) 出力 file 無更新の許容分=slow_gen_grace (default {DEFAULT_STALL_MIN})。")
     ap.add_argument("--min-interval-min", type=int, default=DEFAULT_MIN_INTERVAL_MIN,
@@ -2644,44 +644,10 @@ def main(argv=None):
     ap.add_argument("--pane-state-file", type=Path, default=None,
                     help="smoke/test: pane 状態(agent→busy/idle/absent の JSON/YAML mapping)を "
                          "注入し tmux probe を bypass。")
-    ap.add_argument("--quorum-min-stalled", type=int, default=DEFAULT_QUORUM_MIN_STALLED,
-                    help=f"cmd_1339: 停電型判定に要する同時 stall 最小体数 "
-                         f"(default {DEFAULT_QUORUM_MIN_STALLED})。")
-    ap.add_argument("--quorum-ratio", type=float, default=DEFAULT_QUORUM_RATIO,
-                    help=f"cmd_1339: 停電型判定の stall 割合下限 (default {DEFAULT_QUORUM_RATIO})。")
-    ap.add_argument("--no-quorum-gate", action="store_true",
-                    help="cmd_1339: 停電型 quorum gate を無効化 (個別判定のみ)。変異試験用。")
-    ap.add_argument("--impossible-loop-threshold", type=int,
-                    default=DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD,
-                    help=f"cmd_1392: 【名乗る沈黙より process が若い】が連続何回で "
-                         f"起き直り警報を上げるか (default "
-                         f"{DEFAULT_IMPOSSIBLE_LOOP_THRESHOLD} = 9分 < stall_min)。")
-    ap.add_argument("--blackout-throttle-min", type=int, default=DEFAULT_BLACKOUT_THROTTLE_MIN,
-                    help=f"cmd_1339: 停電型 warning の最小間隔分 (default {DEFAULT_BLACKOUT_THROTTLE_MIN})。")
-    ap.add_argument("--upstream-alert-throttle-min", type=int,
-                    default=DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN,
-                    help=f"cmd_1355: 上流障害の検知/再開通知の最小間隔分 (episode 1通が主・"
-                         f"これは保険。default {DEFAULT_UPSTREAM_ALERT_THROTTLE_MIN})。")
-    ap.add_argument("--selftest-upstream", action="store_true",
-                    help="cmd_1355: 実 pane 文言 fixture と再開判定契約の selftest "
-                         "(tmux/queue 非接触・gate-2 変異試験の的)。")
-    ap.add_argument("--expected-interval-sec", type=int,
-                    default=DEFAULT_EXPECTED_INTERVAL_SEC,
-                    help=f"cmd_1394: 走行周期の物差し秒 (cron */3 = default "
-                         f"{DEFAULT_EXPECTED_INTERVAL_SEC})。欠測判定に使う。")
-    ap.add_argument("--gap-warn-factor", type=float, default=DEFAULT_GAP_WARN_FACTOR,
-                    help=f"cmd_1394: 周期の何倍を超えたら欠測を名指すか "
-                         f"(default {DEFAULT_GAP_WARN_FACTOR})。")
     ap.add_argument("--json", action="store_true", help="結果を JSON で出力。")
     ap.add_argument("--queue-root", type=Path, default=None,
                     help="queue root 上書き(tasks/ reports/ state/ を含む)。主にテスト用。")
-    ap.add_argument("--stamp-dir", type=Path, default=None,
-                    help="終わりの証 (cmd_1465 の丙) を書く先を差し替える (試験用)。"
-                         "渡せば必ず書く。渡さねば、本番の走行の時だけ本番の logs/ へ書く。")
     args = ap.parse_args(argv)
-
-    if args.selftest_upstream:
-        return selftest_upstream()
 
     if args.queue_root is not None:
         tasks_dir = args.queue_root / "tasks"
@@ -2694,90 +660,22 @@ def main(argv=None):
 
     dashboard_path = args.dashboard_path if args.dashboard_path is not None else DEFAULT_DASHBOARD
 
-    # ── cmd_1394 (2): ★走行の刻を先に検め、先に記す★ ──
-    # 検分を先に置く理由 = 本走行が落ちても「欠測が在った」事実は log に残る。
-    # 記すのを先に置く理由 = 以降の処理が落ちても「走った」事実は次回走行が読める
-    # (走ったが落ちた を 走っておらぬ と読ませぬ)。
-    state_dir = state_path.parent
-    run_mode = "dry-run" if args.dry_run else "live"
-    scan_now = datetime.datetime.now()
-    heartbeat = load_scan_heartbeat(state_dir)
-    gap_line = scan_gap_line(heartbeat, scan_now,
-                             args.expected_interval_sec, args.gap_warn_factor)
-    if gap_line is not None:
-        print(gap_line, file=sys.stderr)
-    elif heartbeat is None:
-        print("[idle_revive] NOTE=scan_history_absent — 走行記録が無い "
-              "(初回 or state 消失)。★欠測は次回走行から名指せる★ (cmd_1394)",
-              file=sys.stderr)
-    try:
-        save_scan_heartbeat(state_dir, scan_now, run_mode)
-    except OSError as e:
-        # ★欠測の目が潰れた事自体を黙らせぬ★ (本走行は続ける)。
-        print(f"[idle_revive] WARN: 走行の刻の書込に失敗 ({e}) — "
-              f"次回走行の欠測判定が効かぬ", file=sys.stderr)
-
     if args.pane_state_file is not None:
         pane_states = load_pane_state_file(args.pane_state_file)
     else:
         pane_states = get_pane_states(REPO_ROOT)
     clear_log = load_clear_log(state_path)
 
-    results, new_clear_log, eligible_count = scan(
+    results, new_clear_log = scan(
         tasks_dir, reports_dir, REPO_ROOT, pane_states, clear_log,
         stall_min=args.stall_min,
         min_interval_min=args.min_interval_min,
         max_consecutive=args.max_consecutive,
         alert_cooldown_min=args.alert_cooldown_min,
-        quorum_min_stalled=args.quorum_min_stalled,
-        quorum_ratio=args.quorum_ratio,
-        quorum_enabled=not args.no_quorum_gate,
-        impossible_loop_threshold=args.impossible_loop_threshold,
-        # cmd_1392 §4: ★閾は動かさぬ★ — 欠測の直後は【最も固着が溜まる刻】ゆえ
-        # 番人を鈍らせる向きは逆である。名乗りへ添えるだけ (朝の読み手が
-        # 「環境が建て直った夜であった」を1行で悟れる)。
-        recent_scan_gap=(gap_line is not None),
     )
-    blackout = next((r for r in results if r["action"] == "blackout_alert"), None)
-
-    # ── cmd_1392 牙(3): ★抑止の総量を毎 scan 名乗らせる★ ──
-    # ★常に鳴る門が外されるのと同じく、常に抑止する門も外されるべきである★ =
-    # N が毎晩 0 でないなら環境が頻繁に建て直っておる証。人が数で見られる形にする。
-    # ★0 の時も出す★ = 「出ておらぬ」を「起きなんだ」とも「見ておらぬ」とも読める
-    # 沈黙にせぬため (本夜 全軍で潰してきた形)。
-    _imp = [r for r in results if r["action"] == "impossible_claim_suppressed"]
-    _imp_loop = [r for r in _imp
-                 if int(r.get("impossible_streak", 0) or 0) >= args.impossible_loop_threshold]
-    # ★母数を同じ行へ載せる (cmd_1392 是正・家老 09:58 の任(2))★:
-    #   ★JUDGED=0 の 0★ = 【判定へ入った者が居らぬ】= 条件は成否を問われてすら居らぬ
-    #   ★JUDGED>0 で 0★ = 【現に問うて、成らなんだ】
-    #   ★AGE_UNKNOWN が JUDGED に等しい★ = 【齢を一度も判じられておらぬ = 門は盲】
-    # ⇒ ★之で「0」の三通りが log 単独で割れる★ (従前は 0 だけが出ており、
-    #    軍師二号は 1,912 件の ACTION を数えてなお割れなんだ = 分母が無かったゆえ)。
-    _st = IMPOSSIBLE_JUDGE_STATS
-    _zero_note = ""
-    if len(_imp) == 0:
-        if _st["judged"] == 0:
-            _zero_note = " ★0 の意味 = 判定へ入った者が居らぬ (条件は問われておらぬ)★"
-        elif _st["age_known"] == 0:
-            _zero_note = " ★0 の意味 = 齢を一度も判じられなんだ (門が盲である)★"
-        else:
-            _zero_note = " ★0 の意味 = 現に問うて、成らなんだ★"
-    # ★cmd_1387: 添える側の【源】も同じ行で名乗る★ — 添え札が出ておらぬ時、
-    #   「切替が無かった」と「源を読めなんだ」を読み手が割れる様に。
-    _sw = SWITCH_READ_STATS
-    print(f"[idle_revive] IMPOSSIBLE_CLAIM 抑止 = {len(_imp)} 体 "
-          f"(うち連続 {args.impossible_loop_threshold} 回以上 = {len(_imp_loop)} 体) "
-          f"JUDGED={_st['judged']} AGE_KNOWN={_st['age_known']} "
-          f"AGE_UNKNOWN={_st['age_unknown']}{_zero_note} "
-          f"SWITCH_SRC={_sw['source']} SWITCH_RECORDS={_sw['records']} "
-          f"SWITCH_BAD_LINES={_sw['bad_lines']}",
-          file=sys.stderr)
 
     # ── Task B: 家老 degrade 検知(同居)。scan() の clear_log を引き継ぐ。 ──
-    # cmd_1339: 停電型成立中は家老 degrade 判定も抑止 — 上流障害中は家老の
-    # dashboard も止まって当然であり、karo /clear も context を失うだけである。
-    if not args.no_karo_check and blackout is None:
+    if not args.no_karo_check:
         karo_hit, new_clear_log = scan_karo_degrade(
             dashboard_path, tasks_dir, reports_dir, new_clear_log,
             karo_stale_min=args.karo_stale_min,
@@ -2787,9 +685,6 @@ def main(argv=None):
         )
         if karo_hit is not None:
             results.append(karo_hit)
-    elif blackout is not None and not args.no_karo_check:
-        print("[idle_revive] 停電型quorum成立中につき家老degrade判定を抑止 "
-              "(karo /clear も撃たない)", file=sys.stderr)
 
     if args.json:
         printable = [{k: v for k, v in r.items() if not k.startswith("_")}
@@ -2797,29 +692,13 @@ def main(argv=None):
         print(json.dumps(printable, ensure_ascii=False))
     else:
         if not results:
-            # eligible=0 が assigned 存在下で常態化しておれば番人は盲目である
-            # (2026-07-26 朝: この行が82 scan連続で出たが分母が見えず気付けなんだ)。
-            print("[idle_revive] revive 対象なし(全 agent 稼働 or 完了 or 出力漸進)。"
-                  f"eligible={eligible_count}")
+            print("[idle_revive] revive 対象なし(全 agent 稼働 or 完了 or 出力漸進)。")
         for r in results:
-            # ★cmd_1394 (1): 此の行は【判じた】であって【撃った】ではない★ —
-            # MODE/PHASE を焼いて其れを行自身に名乗らせる。既存の読み手を壊さぬため
-            # ★ACTION=/AGENT=/TASK_ID=/IDLE_MIN=/CONSECUTIVE= の並びは1字も動かさぬ★
-            # (cmd_1385 の契約 test / 家老の grep は此の前置きを見ておる)。
             print(f"ACTION={r['action']} AGENT={r['agent']} TASK_ID={r['task_id']} "
                   f"IDLE_MIN={r['idle_min']} CONSECUTIVE={r['consecutive']} "
-                  f"MODE={run_mode} PHASE=decided "
                   f"— {r['detail']}")
 
     if args.dry_run:
-        # ★判じたまま撃たなんだ事を log に残す★ = 「dry-run ゆえ抑止が効いた」を
-        # ★log だけで★言えるようにする唯一の行 (2026-07-27 に家老が誤った其の点)。
-        for r in results:
-            emit_outcome(r, False, PRE_SUPPRESSED_REASONS.get(r["action"], "dry_run"))
-        # 乾式も「走り畢えた」側なので、ここも終わりの証を書く出口である
-        # (2026-07-28 に、ここを見落としたまま陽性側を撃って現に取り落とした。
-        #  canary が「この file が出るか」を見ていたので、その場で判った = 条5)
-        _write_end_stamp(args, 0)
         return 0
 
     # ── 実発行(非 dry-run) ──
@@ -2828,119 +707,12 @@ def main(argv=None):
     state_dirty = (new_clear_log != clear_log)
     for r in results:
         is_karo = (r["agent"] == KARO_STATE_KEY)
-        if r["action"] == "blackout_suppressed":
-            # 停電型: 個別 clear/escalation は抑止済 (scan() 側)。log のみ。
-            print(f"[idle_revive] BLACKOUT抑止: {r['agent']} "
-                  f"(本来={r.get('suppressed_action')}) — {r['detail']}", file=sys.stderr)
-            emit_outcome(r, False, PRE_SUPPRESSED_REASONS["blackout_suppressed"])
-            continue
-        if r["action"] == "impossible_claim_suppressed":
-            # cmd_1392: 齢が名乗る沈黙に届かぬ = 主張が成り立たぬゆえ撃たぬ。
-            # ★state 非消費は scan() 側で済んでおる★ (consecutive を進めておらぬ) =
-            # ★齢が育った其の scan で従来判定へ自動で戻る★。
-            print(f"[idle_revive] IMPOSSIBLE_CLAIM抑止: {r['agent']} "
-                  f"(齢 {r.get('proc_age_min')}分 < 名乗る沈黙 {r['idle_min']}分・"
-                  f"比 {r.get('claim_ratio')}倍・連続 {r.get('impossible_streak')}回) "
-                  f"— {r['detail']}", file=sys.stderr)
-            emit_outcome(r, False, PRE_SUPPRESSED_REASONS["impossible_claim_suppressed"])
-            continue
-        if r["action"] == "restart_loop_alert":
-            # cmd_1392 牙(2): 起き直り続ける agent = /clear では直らぬゆえ家老へ回す。
-            body = format_restart_loop_alert(r, args.impossible_loop_threshold)
-            proc = send_inbox("karo", body, "warning", "idle_revive_scan")
-            if proc.returncode != 0:
-                # cmd_1338 流儀: 握り潰さぬ・alerted を立てぬ = 次 scan で再試行。
-                print(f"[idle_revive] ERROR: 起き直り警報の inbox_write 失敗: "
-                      f"{proc.stderr.strip()}", file=sys.stderr)
-                emit_outcome(r, False, "inbox_write_failed")
-                exit_code = 1
-            else:
-                new_clear_log[r["agent"]] = r["_new_state"]
-                state_dirty = True
-                emit_outcome(r, True, "karo_warning_sent")
-            continue
-        if r["action"] in ("rate_limited", "alert_cooldown", "report_unreadable"):
-            # scan() 段階で抑止が決しており発行相では何もせぬ action。
-            # ★決定 1 件 : OUTCOME 1 行★ を破らぬため此処でも名乗る (cmd_1394)。
-            emit_outcome(r, False, PRE_SUPPRESSED_REASONS[r["action"]])
-            continue
-        if r["action"] == "blackout_alert":
-            # 停電型: 家老へ warning 1通のみ (30分 throttle・supervisor不在警告と同型)。
-            now = datetime.datetime.now()
-            # 各 pane 末尾の上流障害痕跡 (token/usage limit 等) を警報へ引用 (runbook §5)。
-            # cmd_1355: ★throttle 判定より前に★台帳へ記録する — 警報が throttle で
-            # 出ない cycle でも、抑止された agent の記録 (再開通知の入力) は落とさない。
-            upstream_notes = []
-            for s in r.get("_stalled", [])[:10]:
-                b_text = pane_upstream_text(s["agent"])
-                pat = detect_upstream_failure(b_text)
-                if pat:
-                    upstream_notes.append(f"{s['agent']}=『{pat}』")
-                    b_task = parse_task(tasks_dir / f"{s['agent']}.yaml")
-                    outage_record(state_dir, s["agent"], pat, b_text,
-                                  task_id=(b_task or {}).get("task_id"))
-            if blackout_throttled(state_dir, args.blackout_throttle_min, now):
-                print("[idle_revive] BLACKOUT警報 throttle 中 (前回から "
-                      f"{args.blackout_throttle_min}分未満) — 再警報せず", file=sys.stderr)
-                emit_outcome(r, False, "throttle")
-                continue
-            body = format_blackout_alert(r, upstream_notes, args.blackout_throttle_min)
-            proc = send_inbox("karo", body, "warning", "idle_revive_scan")
-            if proc.returncode != 0:
-                # cmd_1338 流儀: 握り潰さない。throttle も進めない = 次回 scan で再試行。
-                print(f"[idle_revive] FATAL: 停電型警報の inbox_write 失敗: "
-                      f"{proc.stderr.strip()}", file=sys.stderr)
-                emit_outcome(r, False, "inbox_write_failed")
-                exit_code = 1
-            else:
-                blackout_mark_alerted(state_dir, now)
-                emit_outcome(r, True, "karo_warning_sent")
-            continue
         if r["action"] == "revive":
-            # cmd_1339 (e): /clear は★破壊的操作★ — 発行直前に対象 pane を再 probe し、
-            # busy/absent/unknown へ転じていれば発行しない (scan→発行の TOCTOU 封鎖)。
-            # 判定不能 (unknown) も発行しない = 破壊的操作は疑わしきは止める側に倒す。
-            state_now = probe_agent_state(r["agent"])
-            if state_now != "idle":
-                print(f"[idle_revive] SKIP(発行直前gate): {r['agent']} は再probeで "
-                      f"{state_now} — 破壊的 /clear を発行せず (cmd_1339 (e))",
-                      file=sys.stderr)
-                emit_outcome(r, False, f"probe_gate:{state_now}")
-                # state を進めない (rate limit / consecutive を消費させない)
-                if r["agent"] in clear_log:
-                    new_clear_log[r["agent"]] = clear_log[r["agent"]]
-                else:
-                    new_clear_log.pop(r["agent"], None)
-                continue
-            # cmd_1339 quorum補強 (軍師一号具申): pane 末尾に上流障害文字列 (usage limit /
-            # credit / auth / rate limit) が見えたら発行しない — 上流障害中の /clear は
-            # context を失うだけで何も直さない。state 非消費 = 障害解消後は従来判定。
-            upstream_text = pane_upstream_text(r["agent"])
-            upstream_hit = detect_upstream_failure(upstream_text)
-            if upstream_hit:
-                print(f"[idle_revive] SKIP(上流障害gate): {r['agent']} pane に"
-                      f"『{upstream_hit}』検知 — 上流障害中の /clear は context を失うだけ"
-                      f"ゆえ発行せず (cmd_1339 quorum補強)", file=sys.stderr)
-                emit_outcome(r, False, "upstream_gate")
-                # cmd_1355: 抑止した事実を台帳へ (pane 文言は誤 clear や scroll で消える
-                # 揮発証拠ゆえ、抑止の瞬間に永続化する)。枠回復時の再開通知 (下の
-                # outage_maintain) の入力になる。
-                outage_record(state_dir, r["agent"], upstream_hit, upstream_text,
-                              task_id=r.get("task_id"))
-                if r["agent"] in clear_log:
-                    new_clear_log[r["agent"]] = clear_log[r["agent"]]
-                else:
-                    new_clear_log.pop(r["agent"], None)
-                continue
-            # cmd_1339 (f): 家老が後から誤検知/真stall を検分できる文脈を本文へ添付
-            context = agent_context_note(r["agent"], reports_dir)
-            body = (format_karo_clear_body(r, context) if is_karo
-                    else format_clear_body(r, context))
+            body = format_karo_clear_body(r) if is_karo else format_clear_body(r)
             proc = send_inbox(r["agent"], body, "clear_command", "idle_revive_scan")
             if proc.returncode != 0:
                 print(f"[idle_revive] ERROR: clear_command 発行失敗 {r['agent']}: "
                       f"{proc.stderr.strip()}", file=sys.stderr)
-                emit_outcome(r, False, "inbox_write_failed")
                 exit_code = 1
                 # 発行失敗時は state を進めない(次回再試行)。旧 state を維持。
                 if r["agent"] in clear_log:
@@ -2953,50 +725,24 @@ def main(argv=None):
                 # cron 毎回 clear 再発行 → ≥5分間隔 / escalation 停止が機能しない。
                 new_clear_log[r["agent"]] = r["_new_state"]
                 state_dirty = True
-                # ★撃った証を log にも置く★ — 従来 last_clear_ts (clear_log.yaml) だけが
-                # 証拠であり、log からは永久に判じられなんだ (cmd_1394 穴(a))。
-                emit_outcome(r, True, "clear_command_sent")
         elif r["action"] == "escalation_stop":
-            # cmd_1355: escalation にも上流障害 gate — 枠切れ agent への「復帰せず」警報は
-            # 誤診 (固着でなく上流障害) であり、2026-07-26 未明はこの型の警報が家老 inbox に
-            # 10通積もった。検知したら台帳へ記録し警報は出さない (episode 初回の
-            # 上流障害警報が下で 1通だけ出る)。state 非消費 = 次 scan でも再評価。
-            esc_text = pane_upstream_text(r["agent"])
-            esc_hit = detect_upstream_failure(esc_text)
-            if esc_hit:
-                print(f"[idle_revive] SKIP(上流障害gate/escalation): {r['agent']} pane に"
-                      f"『{esc_hit}』検知 — 固着でなく上流障害ゆえ escalation 警報を出さぬ "
-                      f"(cmd_1355)", file=sys.stderr)
-                emit_outcome(r, False, "upstream_gate")
-                outage_record(state_dir, r["agent"], esc_hit, esc_text,
-                              task_id=r.get("task_id"))
-                if r["agent"] in clear_log:
-                    new_clear_log[r["agent"]] = clear_log[r["agent"]]
-                else:
-                    new_clear_log.pop(r["agent"], None)
-                continue
             # karo degrade の escalation は shogun へ(karo 自身が復帰不能ゆえ)。
             # 足軽/軍師の escalation は従来どおり karo へ。
-            # cmd_1339 (f): 警報に対象 agent の直前文脈 (pane末尾/report mtime) を添付
-            context = agent_context_note(r["agent"], reports_dir)
             if is_karo:
-                target, body = "shogun", format_karo_escalation_alert(r, context)
+                target, body = "shogun", format_karo_escalation_alert(r)
             else:
-                target, body = "karo", format_escalation_alert(r, context)
+                target, body = "karo", format_escalation_alert(r)
             proc = send_inbox(target, body,
                               "idle_revive_escalation_alert", "idle_revive_scan")
             if proc.returncode != 0:
                 print(f"[idle_revive] ERROR: escalation alert 発行失敗: "
                       f"{proc.stderr.strip()}", file=sys.stderr)
-                emit_outcome(r, False, "inbox_write_failed")
                 exit_code = 1
-            else:
-                emit_outcome(r, True, f"alert_sent_to:{target}")
-                if "_new_state" in r:
-                    # alert 発行成功 → last_alert_ts を永続化(再警報 cooldown の要・cmd_1280)。
-                    # 発行失敗時は進めない(次回 scan で再試行)。
-                    new_clear_log[r["agent"]] = r["_new_state"]
-                    state_dirty = True
+            elif "_new_state" in r:
+                # alert 発行成功 → last_alert_ts を永続化(再警報 cooldown の要・cmd_1280)。
+                # 発行失敗時は進めない(次回 scan で再試行)。
+                new_clear_log[r["agent"]] = r["_new_state"]
+                state_dirty = True
 
     if state_dirty:
         try:
@@ -3005,56 +751,6 @@ def main(argv=None):
             print(f"[idle_revive] ERROR: clear_log 書込失敗: {e}", file=sys.stderr)
             exit_code = 1
 
-    # ── cmd_1355: 上流障害 episode の家老警報 (初回1通) + ★枠復帰時の再開通知★ ──
-    now = datetime.datetime.now()
-    episode = load_outage(state_dir)
-    if episode is not None and not episode.get("detect_notified_ts"):
-        # episode 初回の検知警報。停電型 blackout 警報が同 cycle で出ておれば重ねない
-        # (家老 inbox 10通 spam の再発禁) — blackout 警報が上流痕跡を既に運んでおる。
-        if blackout is not None:
-            episode["detect_notified_ts"] = now.isoformat(timespec="seconds") + " (blackout警報へ相乗り)"
-            save_outage(state_dir, episode)
-        elif not episode_has_live_wall(episode):
-            # ★cmd_1385: 残渣しか無い episode では断定を上げぬ★。
-            # detect_notified_ts は ★立てない★ = 同じ episode で後から本物の壁
-            # (生きた期限を名乗る主文) が見えたなら、その時に改めて1通上がる。
-            for a, e in sorted((episode.get("agents") or {}).items()):
-                print(f"[idle_revive] 上流障害の断定を保留: {a} は "
-                      f"{e.get('verdict')} — {e.get('verdict_reason')} "
-                      f"(抑止と台帳は据え置き・cmd_1385)", file=sys.stderr)
-        elif upstream_alert_throttled(state_dir, args.upstream_alert_throttle_min, now):
-            print("[idle_revive] 上流障害検知警報 throttle 中 — 次 scan で再試行", file=sys.stderr)
-        else:
-            body = format_upstream_detect_alert(episode, args.upstream_alert_throttle_min)
-            proc = send_inbox("karo", body, "warning", "idle_revive_scan")
-            if proc.returncode != 0:
-                # cmd_1338 流儀: 失敗を「通知済」と誤記しない (次 scan で再試行)。
-                print(f"[idle_revive] ERROR: 上流障害検知警報の inbox_write 失敗: "
-                      f"{proc.stderr.strip()}", file=sys.stderr)
-                exit_code = 1
-            else:
-                episode["detect_notified_ts"] = now.isoformat(timespec="seconds")
-                save_outage(state_dir, episode)
-                upstream_alert_mark(state_dir, now)
-
-    resume_hit = outage_maintain(state_dir, pane_states, tasks_dir, now)
-    if resume_hit is not None:
-        ep = resume_hit["episode"]
-        body = format_upstream_resume_alert(ep, resume_hit["reason"])
-        proc = send_inbox("karo", body, "warning", "idle_revive_scan")
-        if proc.returncode != 0:
-            print(f"[idle_revive] ERROR: 再開通知の inbox_write 失敗 (次 scan で再試行): "
-                  f"{proc.stderr.strip()}", file=sys.stderr)
-            exit_code = 1
-        else:
-            ep["resume_notified_ts"] = now.isoformat(timespec="seconds")
-            save_outage(state_dir, ep)
-            upstream_alert_mark(state_dir, now)
-            print(f"[idle_revive] 再開通知を家老へ発行 ({resume_hit['reason']})",
-                  file=sys.stderr)
-
-    # ★ここが最後である。ここより後に処理を足さないこと★ (cmd_1465 の丙)
-    _write_end_stamp(args, exit_code)
     return exit_code
 
 

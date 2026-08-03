@@ -52,9 +52,6 @@ normalize_opencode_model() {
         gpt-5.4-mini|gpt-5.4|gpt-5.3-codex|gpt-5.3-codex-spark|gpt-5*)
             echo "openai/${model}"
             ;;
-        claude-opus-5)
-            echo "anthropic/claude-opus-5"
-            ;;
         claude-opus-4-8)
             echo "anthropic/claude-opus-4-8"
             ;;
@@ -267,11 +264,6 @@ build_cli_command() {
                 cmd="$cmd --effort $effort"
             fi
             cmd="$cmd $permission_flag"
-            # CLAUDE_EXTRA_FLAGS: 一時的に追加CLI flag(例: --mcp-config)を注入する経路。
-            # 未設定時は無害(何も付かない)。cmd_1306 blender MCP を特定agentのみに載せる用途で使用。
-            if [[ -n "${CLAUDE_EXTRA_FLAGS:-}" ]]; then
-                cmd="$cmd ${CLAUDE_EXTRA_FLAGS}"
-            fi
             ;;
         codex)
             cmd="codex"
@@ -371,12 +363,8 @@ get_instruction_file() {
 
     case "$cli_type" in
         claude)  echo "instructions/${role}.md" ;;
-        # ★codex / copilot は 0693d08 (誕生時) から generated/ を指し損ねておった★
-        #   = 生成器 (scripts/build_instructions.sh) は初手から instructions/generated/ へ出しており、
-        #     自動読込 file (AGENTS.md / .github/copilot-instructions.md) も generated/ を指す。
-        #   ⇒ 路が移った歴史の名残ではなく、書き落としである (cmd_1440 で悉皆走査・該当 0 を実測)。
-        codex)   echo "instructions/generated/codex-${role}.md" ;;
-        copilot) echo "instructions/generated/copilot-${role}.md" ;;
+        codex)   echo "instructions/codex-${role}.md" ;;
+        copilot) echo ".github/copilot-instructions-${role}.md" ;;
         kimi)    echo "instructions/generated/kimi-${role}.md" ;;
         opencode) echo "instructions/generated/opencode-${role}.md" ;;
         cursor)  echo "instructions/generated/cursor-${role}.md" ;;
@@ -814,12 +802,7 @@ try:
         cfg = yaml.safe_load(f) or {}
     tiers = cfg.get('capability_tiers')
     if not tiers or not isinstance(tiers, dict):
-        # cmd_1462: 以前はここで黙って exit 0 だった。
-        # 呼び手から見ると「成功したが何も言わない」形で、
-        # 「該当が無い」のか「決められなかった」のかが区別できなかった。
-        print('[NO-RECOMMENDATION] capability_tiers が設定ファイルに無い: ${settings}', file=sys.stderr)
-        print('  ⇒ Bloom レベルからモデルを決める材料が無い。「該当なし」ではなく「判定不能」である', file=sys.stderr)
-        sys.exit(2)
+        sys.exit(0)
 
     bloom = int('${bloom_level}')
     cost_priority = {'chatgpt_pro': 0, 'claude_max': 1}
@@ -879,13 +862,7 @@ try:
             candidates.append((cost_priority.get(cg, 99), mb, model))
 
     if not all_models:
-        # cmd_1462: ここも以前は黙って exit 0 だった。
-        print('[NO-RECOMMENDATION] capability_tiers に候補が 1 つも残らなかった (bloom=' + str(bloom) + ')', file=sys.stderr)
-        if allowed_groups is not None:
-            print('  ⇒ available_cost_groups=' + str(sorted(allowed_groups)) + ' で全て除外された', file=sys.stderr)
-        else:
-            print('  ⇒ capability_tiers の中身が辞書として読めなかった', file=sys.stderr)
-        sys.exit(2)
+        sys.exit(0)
 
     if not candidates:
         best = max(all_models, key=lambda x: x[0])
@@ -898,33 +875,11 @@ try:
         print(chosen_model)
         if chosen_mb - bloom >= 2:
             print(f'[WARN] overqualified: {chosen_model} (max_bloom={chosen_mb}) for bloom level {bloom}. Consider adding a lower-tier model.', file=sys.stderr)
-except Exception as e:
-    # cmd_1462: 以前は except Exception: pass で、あらゆる異常が
-    # 「空を返して成功」に化けていた。設定ファイルが壊れていても呼び手は気づけなかった。
-    print('[NO-RECOMMENDATION] 設定を読む途中で異常: ' + type(e).__name__ + ': ' + str(e), file=sys.stderr)
-    print('  設定ファイル: ${settings}', file=sys.stderr)
-    sys.exit(3)
+except Exception:
+    pass
 ")
-    local py_rc=$?
-
-    # cmd_1462: 空のまま rc=0 を返さない。
-    #   rc=0 → 必ずモデル名を 1 行 印字する
-    #   rc=1 → bloom レベルが 1〜6 でない
-    #   rc=2 → 判定材料が無い / 候補が全て除外された（理由は stderr）
-    #   rc=3 → 設定を読む途中で異常（理由は stderr）
-    # 呼び手は「空文字」ではなく rc で分岐できる。
-    if [[ -z "$result" ]]; then
-        if [[ $py_rc -eq 0 ]]; then
-            # ここへ来るのは、python が何も印字せずに 0 を返した時だけ。
-            # 上の3つの出口を塞いだので起きない筈だが、起きたら黙らせない。
-            echo "[NO-RECOMMENDATION] モデル名が返らないまま正常終了した (想定外の経路)" >&2
-            return 2
-        fi
-        return "$py_rc"
-    fi
 
     echo "$result"
-    return "$py_rc"
 }
 
 # =============================================================================

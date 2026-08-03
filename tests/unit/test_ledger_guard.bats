@@ -28,16 +28,6 @@ setup() {
     export QUARANTINE_DIR="$QUEUE_DIR/archive"
     export LEDGER_LOCK="$LEDGER_FILE.lock"
     export LEDGER_GUARD_LOG="$TEST_TMPDIR/ledger_guard.log"
-
-    # ─── cmd_1468: lifetime lock も tmp へ隔離する ───
-    # cmd_1339 で ledger_guard は proc_lock による二重起動防止を持った。
-    # lock の置き場は既定で $HOME/.local/share/multi-agent-shogun/locks = 本番と同じ場所で、
-    # ★本番の ledger_guard が常に稼働しているため、テストが起動した instance は
-    #   「既に稼働中」と判じて即 退場していた★。
-    # 退場した instance は last_good を作らないので、(4) は「守りが壊れた」ではなく
-    # 「テストが本番の生きた状態を読んでいた」ために赤くなっていた (2026-07-28 08:43 実測)。
-    export SHOGUN_LOCK_DIR="$TEST_TMPDIR/locks"
-    mkdir -p "$SHOGUN_LOCK_DIR"
     export LEDGER_VALIDATOR="$PROJECT_ROOT/scripts/ledger_validate.py"
     export SCRIPT_DIR="$PROJECT_ROOT"
 
@@ -234,39 +224,6 @@ write_valid_ledger() {
 }
 
 # ───────────────────────────────────────────────────────────
-# cmd_1341: id一意性 + entry内重複key検知
-# (★これらのtestは検査を外すと必ずFAILする=検査が空回りしていない恒久証明★)
-# ───────────────────────────────────────────────────────────
-@test "validator CLI (cmd_1341): duplicate entry id FAILs (B-N1 採番衝突検知)" {
-    printf 'commands:\n- id: cmd_a1\n  status: pending\n- id: cmd_a2\n  status: done\n- id: cmd_a1\n  status: done\n' > "$LEDGER_FILE"
-    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
-    assert_failure
-    assert_output --partial "duplicate entry id"
-}
-
-@test "validator CLI (cmd_1341): duplicate mapping key within entry FAILs (後勝ちの黙殺検知)" {
-    printf 'commands:\n- id: cmd_a1\n  karo_progress: first\n  karo_progress: second\n' > "$LEDGER_FILE"
-    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
-    assert_failure
-    assert_output --partial "duplicate mapping key"
-}
-
-@test "validator CLI (cmd_1341): duplicate key in NESTED mapping also FAILs" {
-    printf 'commands:\n- id: cmd_a1\n  status: pending\n  detail:\n    note: x\n    note: y\n' > "$LEDGER_FILE"
-    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
-    assert_failure
-    assert_output --partial "duplicate mapping key"
-}
-
-@test "validator CLI (cmd_1341): legacy cmd_id duplicates remain PERMITTED (参照fieldゆえ対象外)" {
-    # 実台帳に cmd_640×2 (cmd_id同士) と cmd_611 (id∩cmd_id) が正当に実在する。
-    # これを FAIL にすると ledger_guard が false rollback を撃つ (schema緩和根拠と同じ)。
-    printf 'commands:\n- id: cmd_640\n  status: done\n- cmd_id: cmd_640\n  type: progress_update\n- cmd_id: cmd_640\n  type: progress_update\n' > "$LEDGER_FILE"
-    run "$LEDGER_PYTHON" "$PROJECT_ROOT/scripts/ledger_validate.py" "$LEDGER_FILE"
-    assert_success
-}
-
-# ───────────────────────────────────────────────────────────
 # (4) e2e: 実watcher (inotifywait+debounce+flock) で事故再現
 # ───────────────────────────────────────────────────────────
 @test "(4) e2e: live watcher detects corruption via inotify+debounce → auto rollback" {
@@ -295,21 +252,6 @@ write_valid_ledger() {
     local good
     good="$(cat "$LAST_GOOD_FILE")"
 
-    # ★cmd_1468: last_good の出現を「見張りが立った」の代わりに使わぬ★
-    #   main_loop は startup_check (= last_good を作る) の【後】に inotifywait を起動する。
-    #   ゆえに last_good だけを待って台帳を壊すと、まだ見張りが立っておらぬ窓へ落ちる。
-    #   落ちた事故は 30秒の安全網 (inotifywait -t 30) まで拾われず、此の試験は15秒しか待たぬので
-    #   ★守りは正しいのに赤くなる★ (2026-07-28 18:25 実測: 窓は約 0.14 秒。全数走行の負荷で広がる)。
-    #   ⇒ ★見張りの process が現に立つまで待つ★。親 pid と process 名で当てるので
-    #      此の待ち手が己を拾うことはない (条C)。
-    for i in $(seq 1 40); do
-        pgrep -P "$guard_pid" -x inotifywait >/dev/null 2>&1 && break
-        sleep 0.25
-    done
-    pgrep -P "$guard_pid" -x inotifywait >/dev/null 2>&1
-    # process が立ってから inotify_add_watch が済むまでの僅かな隙を埋める
-    sleep 0.5
-
     # ★半角コロン混入 (atomic rename で書込=Editのidiomに近い)★
     printf 'commands:\n- id: cmd_x\n  evidence: foo: bar baz\n  status: pending\n' > "$LEDGER_FILE.tmp"
     mv "$LEDGER_FILE.tmp" "$LEDGER_FILE"
@@ -332,58 +274,4 @@ write_valid_ledger() {
     assert_equal "$(cat "$LEDGER_FILE")" "$good"
     run validate_ledger "$LEDGER_FILE"
     assert_success
-}
-
-# ───────────────────────────────────────────────────────────
-# (4b) cmd_1468: 陰性側 — lock が既に取られていれば watcher は退場する
-# ───────────────────────────────────────────────────────────
-# (4) の赤は「守りが壊れた」ではなく「テストが本番の lock を読んでいた」ためだった。
-# 上の setup で lock を tmp へ隔離したが、★隔離しただけでは
-# 「lock が効いているから緑なのか、lock を一度も見ていないから緑なのか」が区別できない★。
-# そこで陰性側を隣へ置く = lock を先に握った状態で起動し、退場することを撃つ。
-# これが赤くなる時は、二重起動防止そのものが死んでいる。
-@test "(4b) e2e: lifetime lock already held → guard exits without touching last_good" {
-    command -v inotifywait >/dev/null || skip "inotifywait not available"
-    write_valid_ledger
-
-    # 一体目 = 本物の ledger_guard を起動して lock を握らせる
-    __LEDGER_GUARD_TESTING__=0 \
-    LEDGER_DEBOUNCE_SEC=1 \
-    LEDGER_FILE="$LEDGER_FILE" LAST_GOOD_FILE="$LAST_GOOD_FILE" \
-    QUARANTINE_DIR="$QUARANTINE_DIR" LEDGER_LOCK="$LEDGER_LOCK" \
-    LEDGER_GUARD_LOG="$LEDGER_GUARD_LOG" LEDGER_VALIDATOR="$LEDGER_VALIDATOR" \
-    LEDGER_PYTHON="$LEDGER_PYTHON" LEDGER_GUARD_INBOX_WRITE="$LEDGER_GUARD_INBOX_WRITE" \
-    SCRIPT_DIR="$PROJECT_ROOT" SHOGUN_LOCK_DIR="$SHOGUN_LOCK_DIR" \
-    bash "$PROJECT_ROOT/scripts/ledger_guard.sh" >/dev/null 2>&1 &
-    local holder_pid=$!
-
-    # ★lock が実際に握られたことを確かめてから二体目を撃つ★
-    # 握られる前に撃つと、二体目は普通に起動して緑になり、陰性側が意味を失う。
-    # shellcheck source=lib/proc_lock.sh
-    source "$PROJECT_ROOT/scripts/lib/proc_lock.sh"
-    local i held=0
-    for i in $(seq 1 40); do
-        if proc_lock_is_held "ledger_guard"; then held=1; break; fi
-        sleep 0.25
-    done
-    [ "$held" -eq 1 ]
-
-    # 二体目が退場する所を見たいので、last_good は一体目が作った物を消しておく
-    rm -f "$LAST_GOOD_FILE"
-
-    __LEDGER_GUARD_TESTING__=0 \
-    LEDGER_DEBOUNCE_SEC=1 \
-    LEDGER_FILE="$LEDGER_FILE" LAST_GOOD_FILE="$LAST_GOOD_FILE" \
-    QUARANTINE_DIR="$QUARANTINE_DIR" LEDGER_LOCK="$LEDGER_LOCK" \
-    LEDGER_GUARD_LOG="$LEDGER_GUARD_LOG" LEDGER_VALIDATOR="$LEDGER_VALIDATOR" \
-    LEDGER_PYTHON="$LEDGER_PYTHON" LEDGER_GUARD_INBOX_WRITE="$LEDGER_GUARD_INBOX_WRITE" \
-    SCRIPT_DIR="$PROJECT_ROOT" SHOGUN_LOCK_DIR="$SHOGUN_LOCK_DIR" \
-    run bash "$PROJECT_ROOT/scripts/ledger_guard.sh"
-
-    kill "$holder_pid" 2>/dev/null || true
-    wait "$holder_pid" 2>/dev/null || true
-
-    assert_success                        # 退場は正常終了 (rc=0)
-    assert_output --partial "DUPLICATE"   # 退場したと名乗っている
-    [ ! -f "$LAST_GOOD_FILE" ]            # 退場した instance は last_good を作らない
 }

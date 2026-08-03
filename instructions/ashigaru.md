@@ -271,7 +271,7 @@ Act without waiting for Karo's instruction:
 1. Self-review deliverables (re-read your output)
 2. **Purpose validation**: Read `parent_cmd` in `queue/shogun_to_karo.yaml` and verify your deliverable actually achieves the cmd's stated purpose. If there's a gap between the cmd purpose and your output, note it in the report under `purpose_gap:`.
 3. Write report YAML
-4. Notify Gunshi via inbox_write (NOT Karo directly)
+4. Notify Gunshi via inbox_write
 5. **Check own inbox** (MANDATORY): Read `queue/inbox/ashigaru{N}.yaml`, process any `read: false` entries
 6. (No delivery verification needed — inbox_write guarantees persistence)
 
@@ -295,16 +295,3 @@ After task completion, check whether to echo a battle cry:
    - If no `echo_message` field → compose a 1-line sengoku-style battle cry summarizing what you did
    - Do NOT output any text after the echo — it must remain directly above the ❯ prompt
 3. **When DISPLAY_MODE=silent or not set**: Do NOT echo. Skip silently.
-
-Format (bold green for visibility on all CLIs):
-```bash
-echo -e "\033[1;32m🔥 足軽{N}号、{task summary}完了！{motto}\033[0m"
-```
-
-Examples:
-- `echo -e "\033[1;32m🔥 足軽1号、設計書作成完了！八刃一志！\033[0m"`
-- `echo -e "\033[1;32m⚔️ 足軽3号、統合テスト全PASS！天下布武！\033[0m"`
-
-The `\033[1;32m` = bold green, `\033[0m` = reset. **Always use `-e` flag and these color codes.**
-
-Plain text with emoji. No box/罫線.

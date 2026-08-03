@@ -46,31 +46,6 @@ done
 # ─── Load shared library ───
 source "$SCRIPT_DIR/lib/agent_status.sh"
 
-# ─── Load pane CLI liveness library (cmd_1418) ───
-# 「pane に何が描かれているか」ではなく「pane で CLI プロセスが現に動いているか」を見る。
-# 無くても既存の表示は動く (実体欄が '不明' になるだけ)。
-PCL_AVAILABLE=false
-if [[ -f "$SCRIPT_DIR/lib/pane_cli_liveness.sh" ]]; then
-    source "$SCRIPT_DIR/lib/pane_cli_liveness.sh"
-    PCL_AVAILABLE=true
-fi
-
-# 実体欄の値を返す。ライブラリが無い時は '不明' / 'UNKNOWN'。
-proc_state_label() {
-    local pane_target="$1" expected_cli="${2:-}"
-    if ! $PCL_AVAILABLE; then
-        pane_cli_liveness_label_fallback "$LANG_MODE"
-        return
-    fi
-    local verdict
-    verdict=$(pane_cli_liveness_check "$pane_target" "$expected_cli") || true
-    pane_cli_liveness_label "$verdict" "$LANG_MODE"
-}
-
-pane_cli_liveness_label_fallback() {
-    [[ "${1:-ja}" == "en" ]] && echo "UNKNOWN" || echo "不明"
-}
-
 # ─── Label functions ───
 state_label() {
     local rc="$1"
@@ -133,17 +108,14 @@ if $STANDALONE; then
         while IFS= read -r line; do PANE_TARGETS+=("$line"); done < <(tmux list-panes -s -t "$SESSION_NAME" -F '#{session_name}:#{window_name}.#{pane_index}' 2>/dev/null)
     fi
 
-    # 全 pane を同じ瞬間のプロセス表で判ずる (cmd_1418)
-    $PCL_AVAILABLE && pane_cli_liveness_snapshot on
-
     # Header
     printf "\n"
     if [[ "$LANG_MODE" == "en" ]]; then
-        printf "%-30s %-10s %-9s %s\n" "Pane" "State" "Process" "Agent ID"
-        printf "%-30s %-10s %-9s %s\n" "------------------------------" "----------" "---------" "----------"
+        printf "%-30s %-10s %s\n" "Pane" "State" "Agent ID"
+        printf "%-30s %-10s %s\n" "------------------------------" "----------" "----------"
     else
-        printf "%-30s %-10s %-9s %s\n" "Pane" "状態" "実体" "Agent ID"
-        printf "%-30s %-10s %-9s %s\n" "------------------------------" "----------" "---------" "----------"
+        printf "%-30s %-10s %s\n" "Pane" "状態" "Agent ID"
+        printf "%-30s %-10s %s\n" "------------------------------" "----------" "----------"
     fi
 
     for pane_target in "${PANE_TARGETS[@]}"; do
@@ -153,13 +125,10 @@ if $STANDALONE; then
 
         agent_is_busy_check "$pane_target" && rc=0 || rc=$?
         label=$(state_label "$rc")
-        proc_label=$(proc_state_label "$pane_target")
 
         print_padded "$pane_target" 30
         printf " "
         print_padded "$label" 10
-        printf " "
-        print_padded "$proc_label" 9
         printf " %s\n" "$agent_id"
     done
     printf "\n"
@@ -197,10 +166,6 @@ if declare -f agent_registry_multiagent_agents >/dev/null 2>&1; then
     done < <(agent_registry_multiagent_agents)
 fi
 if [ "${#AGENTS[@]}" -eq 0 ]; then
-    # 最後の手段。settings.yaml が読めない時だけ使う旧構成 (OSS 素の陣容) の名前で、
-    # 今の盤の陣容ではない。今の盤は pane 0-8 = karo + ashigaru1-6 + gunshi1(pane 7)
-    # + gunshi2(pane 8) (2026-07-27 実測。ashigaru7 と 名無しの gunshi は居ない)。
-    # 旧構成の盤でも点呼が落ちないよう、この一覧そのものは減らさない。
     AGENTS=("karo" "ashigaru1" "ashigaru2" "ashigaru3" "ashigaru4" "ashigaru5" "ashigaru6" "ashigaru7" "gunshi")
 fi
 
@@ -250,45 +215,16 @@ except Exception:
 " 2>/dev/null || echo "?"
 }
 
-# ─── 廃止済みのエージェント (cmd_1418) ───
-# settings.yaml に deprecated: true と書かれた定義 (cmd_645 の gunshi_a / gunshi_b)。
-# pane は元より無いため、既存の点呼はこれを「待機中」と出していた = 誤り。
-# 一覧から除くと「居たものが黙って消える」形になるので、除かずに札を替える。
-DEPRECATED_AGENTS=()
-if declare -f agent_registry_deprecated_agents >/dev/null 2>&1; then
-    while IFS= read -r _d; do
-        [ -n "$_d" ] && DEPRECATED_AGENTS+=("$_d")
-    done < <(agent_registry_deprecated_agents)
-fi
-is_deprecated_agent() {
-    local a
-    for a in ${DEPRECATED_AGENTS[@]+"${DEPRECATED_AGENTS[@]}"}; do
-        [[ "$a" == "$1" ]] && return 0
-    done
-    return 1
-}
-deprecated_label() {
-    if $PCL_AVAILABLE; then
-        pane_cli_liveness_label deprecated "$LANG_MODE"
-    else
-        [[ "$LANG_MODE" == "en" ]] && echo "RETIRED" || echo "廃止済"
-    fi
-}
-
-# 全 pane を同じ瞬間のプロセス表で判ずる (cmd_1418)
-$PCL_AVAILABLE && pane_cli_liveness_snapshot on
-
 # ─── Output ───
 printf "\n"
 if [[ "$LANG_MODE" == "en" ]]; then
-    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "Agent" "CLI" "State" "Process" "Task ID" "Status" "Inbox"
-    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "---------" "------------------------------------------" "----------" "-----"
+    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "Agent" "CLI" "State" "Task ID" "Status" "Inbox"
+    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "------------------------------------------" "----------" "-----"
 else
-    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "Agent" "CLI" "Pane" "実体" "Task ID" "Status" "Inbox"
-    printf "%-10s %-7s %-9s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "---------" "------------------------------------------" "----------" "-----"
+    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "Agent" "CLI" "Pane" "Task ID" "Status" "Inbox"
+    printf "%-10s %-7s %-9s %-42s %-10s %s\n" "----------" "-------" "---------" "------------------------------------------" "----------" "-----"
 fi
 
-retired_count=0
 for i in "${!AGENTS[@]}"; do
     agent="${AGENTS[$i]}"
     pane_idx=$((PANE_BASE + i))
@@ -301,20 +237,9 @@ for i in "${!AGENTS[@]}"; do
         cli_type="?"
     fi
 
-    if is_deprecated_agent "$agent"; then
-        # 廃止済み — pane は無い。生死を問う対象ではないので判定しない。
-        retired_count=$((retired_count + 1))
-        pane_state=$(deprecated_label)
-        proc_state="-"
-    else
-        # Pane state
-        agent_is_busy_check "$pane_target" "$cli_type" && rc=0 || rc=$?
-        pane_state=$(state_label "$rc")
-
-        # 実体 (pane で CLI プロセスが現に動いているか) — cmd_1418
-        # metadata (CLI 欄) が緑でも実体が落ちている形を、ここで名指す。
-        proc_state=$(proc_state_label "$pane_target" "$cli_type")
-    fi
+    # Pane state
+    agent_is_busy_check "$pane_target" "$cli_type" && rc=0 || rc=$?
+    pane_state=$(state_label "$rc")
 
     # Task info
     task_info=$(get_task_info "$agent")
@@ -327,30 +252,7 @@ for i in "${!AGENTS[@]}"; do
     # Print with CJK padding
     printf "%-10s %-7s " "$agent" "$cli_type"
     print_padded "$pane_state" 9
-    printf " "
-    print_padded "$proc_state" 9
     printf " %-42s %-10s %s\n" "$task_id" "$task_status" "$unread"
 done
 
-printf "\n"
-
-# 母数の内訳を必ず出す (cmd_1418)。廃止済みを黙って除かない・黙って混ぜない。
-active_count=$(( ${#AGENTS[@]} - retired_count ))
-retired_names=""
-if (( retired_count > 0 )); then
-    retired_names=" ($(IFS=,; echo "${DEPRECATED_AGENTS[*]}"))"
-fi
-if [[ "$LANG_MODE" == "en" ]]; then
-    printf "Total %d = active %d + retired %d%s\n" \
-        "${#AGENTS[@]}" "$active_count" "$retired_count" "$retired_names"
-    if (( retired_count > 0 )); then
-        printf "Retired entries have no pane; liveness is not judged for them.\n"
-    fi
-else
-    printf "母数 %d 件 = 現役 %d 件 + 廃止済み %d 件%s\n" \
-        "${#AGENTS[@]}" "$active_count" "$retired_count" "$retired_names"
-    if (( retired_count > 0 )); then
-        printf "廃止済みは pane が無い。生死の判定は行わない (実体欄は -)。\n"
-    fi
-fi
 printf "\n"

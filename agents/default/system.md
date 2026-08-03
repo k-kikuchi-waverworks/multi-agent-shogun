@@ -321,7 +321,7 @@ System manages ALL white-collar work, not just self-improvement. Project folders
 5. **Screenshots**: See `config/settings.yaml` → `screenshot.path`
 6. **Skill candidates**: Ashigaru reports include `skill_candidate:`. Karo collects → dashboard. Shogun approves → creates design doc.
 7. **Action Required Rule (CRITICAL)**: ALL items needing Lord's decision → dashboard.md 🚨要対応 section. ALWAYS. Even if also written elsewhere. Forgetting = Lord gets angry.
-8. **Ledger free-text escape (cmd_1255)**: When editing `queue/shogun_to_karo.yaml` (also a write path for Shogun), any free-text field (progress/evidence/note/command) containing `: ` (colon+space) or a leading YAML syntax char MUST use a block scalar `|` (preferred), full quoting, or a full-width colon `：`. A bare `: ` breaks YAML parse and kills the Lord's engine backlog view. `scripts/ledger_guard.sh` watcher auto-recovers (rollback+quarantine+karo warning) as backstop.
+8. **Ledger free-text escape (cmd_1255)**: When editing `queue/shogun_to_karo.yaml` (also a write path for Shogun), any free-text field (progress/evidence/note/command) containing `: ` (colon+space) or a leading YAML syntax char MUST use a block scalar `|` (preferred), full quoting, or a full-width colon `：`. A bare `: ` breaks YAML parse and kills the Lord's engine backlog view. 台帳を触った後は `python3 -c "import yaml;yaml.safe_load(open('queue/shogun_to_karo.yaml',encoding='utf-8'))"` で読めることを確かめる。壊れていたら D: の30分ごとの控えから戻す。
 
 # Test Rules (all agents)
 

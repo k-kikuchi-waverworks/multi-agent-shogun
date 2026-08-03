@@ -114,13 +114,13 @@ workflow:
   # === Report Reception Phase ===
   - step: 9
     action: receive_wakeup
-    from: gunshi*  # cmd_652 (2026-05-16) v2: gunshi1/gunshi2 (Round-robin + 継続性 record)
+    from: gunshi  # 2026-08-03 (cmd_1634): 軍師は 1 人。gunshi1 は退役
     via: inbox
     note: "Gunshi reports QC results. Ashigaru no longer reports directly to Karo."
   - step: 10
     action: scan_all_reports
     target: "queue/reports/ashigaru*_report.yaml + queue/reports/gunshi*_report.yaml"
-    note: "Scan ALL reports (ashigaru + gunshi*). cmd_652 (2026-05-16) v2 architecture — gunshi1/gunshi2 active、gunshi/gunshi_a/gunshi_b deprecated retain (cmd_645 backward compat、新規 dispatch 禁止)。Communication loss safety net."
+    note: "報告は ashigaru*_report.yaml と gunshi_report.yaml を全部 見る。2026-08-03 (cmd_1634): 現役の軍師は gunshi の 1 人だけ。gunshi1/gunshi_a/gunshi_b は退役 (file は履歴として残すが新規 dispatch 禁止)。読み落としを拾う安全網である。"
   - step: 11
     action: update_dashboard
     target: dashboard.md
@@ -155,25 +155,23 @@ workflow:
 files:
   input: queue/shogun_to_karo.yaml
   task_template: "queue/tasks/ashigaru{N}.yaml"
-  # cmd_652 (2026-05-16) v2: gunshi1/gunshi2 active (Round-robin + 継続性 record)、deprecated retain
-  gunshi1_task: queue/tasks/gunshi1.yaml       # cmd_652 v2: active 軍師 1 (Round-robin)
-  gunshi2_task: queue/tasks/gunshi2.yaml       # cmd_652 v2: active 軍師 2 (Round-robin、pane 0.9 殿手動 trigger 必須)
-  gunshi_task: queue/tasks/gunshi.yaml         # cmd_645 deprecated (backward compat retain、新規 dispatch 禁止)
-  gunshi_a_task: queue/tasks/gunshi_a.yaml     # cmd_645 deprecated (backward compat retain、新規 dispatch 禁止)
-  gunshi_b_task: queue/tasks/gunshi_b.yaml     # cmd_645 deprecated (backward compat retain、新規 dispatch 禁止)
+  # 2026-08-03 (cmd_1634): 軍師は gunshi の 1 人。下の 3 本は退役 (file は残すが新規 dispatch 禁止)
+  gunshi_task: queue/tasks/gunshi.yaml         # 現役の軍師 (pane multiagent:0.8)
+  gunshi1_task: queue/tasks/gunshi1.yaml       # 退役 (cmd_1634)
+  gunshi_a_task: queue/tasks/gunshi_a.yaml     # 退役 (cmd_645)
+  gunshi_b_task: queue/tasks/gunshi_b.yaml     # 退役 (cmd_645)
   report_pattern: "queue/reports/ashigaru{N}_report.yaml"
-  gunshi1_report: queue/reports/gunshi1_report.yaml
-  gunshi2_report: queue/reports/gunshi2_report.yaml
-  gunshi_report: queue/reports/gunshi_report.yaml         # deprecated (backward compat)
-  gunshi_a_report: queue/reports/gunshi_a_report.yaml     # deprecated (backward compat)
-  gunshi_b_report: queue/reports/gunshi_b_report.yaml     # deprecated (backward compat)
-  cmd_owner_record: queue/cmd_owner_record.yaml           # cmd_652 v2: cmd 系統継続性 record (Round-robin + 同一担当者継続)
+  gunshi_report: queue/reports/gunshi_report.yaml         # 現役の軍師の報告
+  gunshi1_report: queue/reports/gunshi1_report.yaml       # 退役 (cmd_1634、履歴として残す)
+  gunshi_a_report: queue/reports/gunshi_a_report.yaml     # 退役 (cmd_645)
+  gunshi_b_report: queue/reports/gunshi_b_report.yaml     # 退役 (cmd_645)
+  cmd_owner_record: queue/cmd_owner_record.yaml           # cmd 系統ごとの担当者 record
   gpu_occupancy_record: queue/gpu_occupancy_record.yaml   # cmd_652 v2: GPU 占有 orchestration record
   dashboard: dashboard.md
 
 panes:
   self: multiagent:0.0
-  # cmd_652 (2026-05-16) v2: ash1-6 active、ash7 削除 (queue/tasks/ash7.yaml は status: archived 物理 retain)
+  # 2026-08-03 (cmd_1634): 足軽は 1-7 の 7 人。軍師一号が抜けた pane 7 を足軽七号へ振り替えた
   ashigaru_default:
     - { id: 1, pane: "multiagent:0.1" }
     - { id: 2, pane: "multiagent:0.2" }
@@ -181,11 +179,11 @@ panes:
     - { id: 4, pane: "multiagent:0.4" }
     - { id: 5, pane: "multiagent:0.5" }
     - { id: 6, pane: "multiagent:0.6" }
-  # cmd_652 (2026-05-16) v2: 軍師 2 人体制 (Round-robin + 継続性 record)。pane 0.9 殿手動 trigger 必須。
-  gunshi1: { pane: "multiagent:0.8", role: "Round-robin (cmd_652 v2)" }
-  gunshi2: { pane: "multiagent:0.9", role: "Round-robin (cmd_652 v2)" }
-  # cmd_645 deprecated retain (backward compat、watcher 自動起動からも除外、新規 dispatch 禁止)
-  gunshi: { pane: "multiagent:0.8", deprecated: true }
+    - { id: 7, pane: "multiagent:0.7" }
+  # 2026-08-03 (cmd_1634): 軍師は 1 人。gunshi が pane 0.8 に座る
+  gunshi: { pane: "multiagent:0.8" }
+  # 退役した軍師 (watcher 自動起動からも外れる。新規 dispatch 禁止)
+  gunshi1: { pane: "multiagent:0.7", deprecated: true }   # 2026-08-03 (cmd_1634) 退役。pane は足軽七号へ
   gunshi_a: { pane: "multiagent:0.8", deprecated: true }
   gunshi_b: { pane: "multiagent:0.9", deprecated: true }
   agent_id_lookup: "tmux list-panes -t multiagent -F '#{pane_index}' -f '#{==:#{@agent_id},ashigaru{N}}'"

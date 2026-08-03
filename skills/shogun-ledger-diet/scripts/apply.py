@@ -166,6 +166,10 @@ def do_ledger(args, backup):
         arc_before = ARCHIVE_HEADER.format(
             name=src.name, stamp=args.stamp, reason=args.reason, approved=args.approved
         ) + "commands:\n"
+    # 既にある退避先が改行で終わっていないと、最後の行と移す塊の1行目が繋がってしまう。
+    # 繋がった行は塊として切り出せず、検算に落ちて1本も移せなくなる。
+    if arc_before and not arc_before.endswith("\n"):
+        arc_before += "\n"
     arc_after = arc_before + "".join(b["text"] for b in move)
     new_main = header + "".join(b["text"] for b in keep)
 
@@ -262,6 +266,9 @@ def do_inbox(args, backup):
                 approved=args.approved,
             ) + "messages:\n"
         )
+        # 台帳側と同じ理由。繋ぐ前に、退避先が改行で終わっていることを確かめる。
+        if arc_before and not arc_before.endswith("\n"):
+            arc_before += "\n"
         dst.write_text(arc_before + "".join(b["text"] for b in move), encoding="utf-8")
         p.write_text(header + "".join(b["text"] for b in keep), encoding="utf-8")
 

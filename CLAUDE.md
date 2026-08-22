@@ -298,6 +298,22 @@ Layer 3: YAML Queue      — persistent task data (queue/ — authoritative sour
 Layer 4: Session context — volatile (CLAUDE.md auto-loaded, instructions/*.md, lost on /clear)
 ```
 
+## ★定め ＝ 「成果物」を `plans/` に置いて後から参照させるな（殿の裁 2026-08-21・こちらが正しい）★
+
+殿の逐語（2026-08-21）= **「★cmd を行うための素材とか資料を plans に置くのはいいけど、その成果物をそこに置いて参照させるのは良くない★。というのも plans は定期的に掃除するので…」**
+
+- **★よい★** = **その cmd の作業中にだけ読む「素材・資料」を `plans/` に置くこと**
+- **★駄目★** = **その「成果物」を `plans/` に置き、★後から／別の仕事から／機械が★参照させること**
+- **訳** = **`plans/` は★定期的に掃除する場所★だからである**
+- **正しい置き場** = **後から読む物・機械が読む物は★その repo の中（git 管理下）へ★**（例 = app の `docs/adoption_evidence/`）
+- **★2026-08-20 の言い方「app / ml / engine から plans/ を新しく参照するな」は行き過ぎであった★**（素材まで禁じる読み方になる）。**殿が 08-21 に線を引き直された。上の言い方が正である**
+
+**実害（2026-08-20〜21 に判った分）** = ①配信の企画の受け渡しが `plans/` 経由で、掃除の回に**本番経路が黙って切れた** ②`adopted_models.yaml` が `plans/` の紙34本を指し24本が切れた ③app 全体で **`plans/` を名指す参照 213本のうち 189本が切れていた** ④**恋の門の RAG 層ハーネス**が `plans/` に在り、**今は `D:` の控えにしか無い**（門は落ちず**★黙って SKIP★**になる） ⑤**凍結した probe 集**が片付けの折に書き換えられ **pin が割れた**
+
+- **例外** = `plans/cmd/cmd_1744/` に在る **`.env` の写し3本**（`.bak_pre_gemma4_20260814` ／ `.bak_pre_util_20260814_2155` ／ `.env.gemma4_20260814`）は
+  **殿の裁でローカル専管・★掃除も退避もしてはならない★**（**API キーを含み git へ写せない**）
+  - **★守る理由は名の綴りではなく中身である★**（3本目は `.bak` ではないが同じく `.env` の写し）
+
 # plans/ Directory (Lord-local only)
 
 `plans/` is gitignored (via `.gitignore` whitelist) and **OSS本家コミット対象外**. Lord-local shared workspace only.

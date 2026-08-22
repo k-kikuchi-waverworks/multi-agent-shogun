@@ -37,7 +37,6 @@
       "Bash(rm -rf ~*)",
       "Bash(sudo *)",
       "Bash(su *)",
-      "Bash(kill *)",
       "Bash(killall *)",
       "Bash(git push --force*)",
       "Bash(git push -f *)",

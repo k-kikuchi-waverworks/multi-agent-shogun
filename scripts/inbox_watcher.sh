@@ -751,6 +751,17 @@ send_context_reset() {
         *)        reset_cmd="/new" ;;  # safe default (codex-safe)
     esac
 
+    # Busy guard (2026-09-19): never send a context reset while the agent is
+    # actively working. send_cli_command already refuses /clear when busy
+    # ("Sending /clear during Working destroys in-progress context and causes
+    # data loss"), but this path used to send unconditionally — the same danger
+    # with no guard. Defer to the next cycle instead; the caller keeps
+    # NEW_CONTEXT_SENT=0 so the reset is retried once the agent goes idle.
+    if agent_is_busy; then
+        echo "[$(date)] [SKIP] $AGENT_ID is busy — context reset ($reset_cmd) deferred to next cycle" >&2
+        return 1
+    fi
+
     echo "[$(date)] [CONTEXT-RESET] Sending $reset_cmd before task_assigned for $AGENT_ID ($effective_cli)" >&2
 
     # Codex/OpenCode/Cursor: send new-context command as a single atomic operation.
@@ -1212,8 +1223,9 @@ for s in data.get('specials', []):
         # Skip if: (1) already sent this batch, (2) clear_command already handled above,
         #          (3) agent is shogun (human-controlled).
         if [ "$has_task_assigned" = "1" ] && [ "$NEW_CONTEXT_SENT" -eq 0 ] && [ "$clear_seen" -eq 0 ]; then
-            send_context_reset
-            NEW_CONTEXT_SENT=1
+            if send_context_reset; then
+                NEW_CONTEXT_SENT=1
+            fi
         fi
 
         # If startup prompt was just sent (Codex), skip follow-up nudge this cycle.

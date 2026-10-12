@@ -46,7 +46,22 @@
       "Bash(mkfs*)",
       "Bash(dd if=*)",
       "Bash(chmod -R * /)",
-      "Bash(chown -R * /)"
+      "Bash(chown -R * /)",
+      "Read(//mnt/f/r18_local/ref_screens/cg/**)",
+      "Edit(//mnt/f/r18_local/ref_screens/cg/**)",
+      "Read(//mnt/c/Users/k-kikuchi/development/ai-automate-engine/data/profile_research/**)",
+      "Edit(//mnt/c/Users/k-kikuchi/development/ai-automate-engine/data/profile_research/**)",
+      "Read(//mnt/c/Users/k-kikuchi/Downloads/d_785457/**/resources/**)",
+      "Edit(//mnt/c/Users/k-kikuchi/Downloads/d_785457/**/resources/**)",
+      "Read(//mnt/f/r18_ai_lab/works/**)",
+      "Edit(//mnt/f/r18_ai_lab/works/**)",
+      "Read(//mnt/f/r18_ai_lab/samples/**)",
+      "Edit(//mnt/f/r18_ai_lab/samples/**)",
+      "Bash(*ref_screens/cg*)",
+      "Bash(*profile_research*)",
+      "Bash(*d_785457*resources*)",
+      "Bash(*r18_ai_lab/works*)",
+      "Bash(*r18_ai_lab/samples*)"
     ]
   },
   "spinnerVerbs": {

@@ -362,38 +362,98 @@ send_exit() {
     esac
 }
 
-# ─── シェルプロンプト待ち（最大15秒） ───
-wait_for_shell_prompt() {
+# ─── シェルへ戻るのを待つ（最大30秒） ───
+# cmd_2057: 前は画面の字 (❯ や exit) で判定していた。Claude Code の入力欄も ❯ で、
+# 打ち込んだ "/exit" も exit に当たるため、古い CLI が終わる前に「戻った」と判定し、
+# 起動のコマンドが終わりかけの CLI に食われて新しい CLI が起動しないことがあった
+# (2026-10-13 19:47〜48 の足軽3・6・7号。SessionStart hook が一度も走っていない)。
+# 今は tmux の pane_current_command がシェルになったかで判定する。
+is_shell_command() {
+    case "$1" in
+        bash|zsh|sh|dash|fish|-bash|-zsh|-sh) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+pane_command() {
+    tmux display-message -t "$1" -p '#{pane_current_command}' 2>/dev/null || true
+}
+
+wait_for_shell() {
     local pane="$1"
-    local max_wait=15
+    local max_wait=30
     local waited=0
+    local cmd
 
-    log "Waiting for shell prompt on ${pane}..."
-
+    log "Waiting for shell on ${pane}..."
     while [ "$waited" -lt "$max_wait" ]; do
         sleep 1
         waited=$((waited + 1))
-
-        local last_lines
-        last_lines=$(tmux capture-pane -t "$pane" -p 2>/dev/null | grep -v '^$' | tail -3)
-
-        # シェルプロンプトの検出パターン
-        # PS1にはカスタムプロンプト（shutsujin由来）や標準的な$/%が含まれる
-        if echo "$last_lines" | grep -qE '[\$%#❯►] *$'; then
-            log "Shell prompt detected after ${waited}s"
-            return 0
-        fi
-
-        # "exit" / "Bye" 等のCLI終了メッセージを検出
-        if echo "$last_lines" | grep -qiE '(bye|goodbye|exiting|exit)'; then
-            sleep 1  # 終了メッセージの後、プロンプトが出るまで少し待つ
-            log "CLI exit message detected after ${waited}s"
+        cmd=$(pane_command "$pane")
+        if is_shell_command "$cmd"; then
+            sleep 1  # プロンプトが出るまでの間
+            log "Shell detected after ${waited}s (pane_current_command=${cmd})"
             return 0
         fi
     done
+    log "ERROR: still not a shell after ${max_wait}s (pane_current_command=${cmd})"
+    return 1
+}
 
-    log "WARN: Shell prompt not detected after ${max_wait}s. Proceeding anyway."
-    return 0  # タイムアウトしても続行（最悪でもコマンドが送られるだけ）
+# ─── 起動を送り、CLI が立ち上がったかを確かめる（cmd_2057） ───
+# 起動を送った後、pane_current_command がシェル以外になり、5秒後もそのままなら成功。
+# claude の時は pane_current_command が claude であることまで見る。
+# 立ち上がらなければ、シェルに居る事を確かめてから撃ち直す（全部で3回まで）。
+launch_and_confirm() {
+    local pane="$1"
+    local cmd_line="$2"
+    local cli_type="$3"
+    local attempt waited cur
+
+    for attempt in 1 2 3; do
+        log "Launching new CLI (attempt ${attempt}/3): ${cmd_line}"
+        tmux send-keys -t "$pane" "$cmd_line" 2>/dev/null || true
+        sleep 0.3
+        tmux send-keys -t "$pane" Enter 2>/dev/null || true
+
+        waited=0
+        while [ "$waited" -lt 20 ]; do
+            sleep 1
+            waited=$((waited + 1))
+            cur=$(pane_command "$pane")
+            if ! is_shell_command "$cur"; then
+                break
+            fi
+        done
+
+        if ! is_shell_command "$cur"; then
+            sleep 5
+            cur=$(pane_command "$pane")
+            local up=0
+            if [[ "$cli_type" == "claude" ]]; then
+                [[ "$cur" == "claude" ]] && up=1
+            elif ! is_shell_command "$cur"; then
+                up=1
+            fi
+            if [ "$up" -eq 1 ]; then
+                log "CLI is up after attempt ${attempt} (pane_current_command=${cur})"
+                return 0
+            fi
+        fi
+        log "WARN: CLI not up after attempt ${attempt} (pane_current_command=${cur})"
+        if ! wait_for_shell "$pane"; then
+            return 1
+        fi
+    done
+    return 1
+}
+
+notify_karo_failure() {
+    local msg="$1"
+    if [[ "$AGENT_ID" != "karo" && -x "${PROJECT_ROOT}/scripts/inbox_write.sh" ]]; then
+        bash "${PROJECT_ROOT}/scripts/inbox_write.sh" karo "switch_cli: ${AGENT_ID} の切替に失敗。${msg} 画面を確かめよ。" switch_failed switch_cli \
+            >/dev/null 2>&1 || true
+    fi
 }
 
 # ─── モデル表示名の正規化（cli_adapter.sh の get_model_display_name を使用） ───
@@ -506,6 +566,21 @@ if [[ -n "$NEW_MODEL" && -z "$NEW_TYPE" ]]; then
     esac
 fi
 
+# Step 0.7: 作業中なら切り替えない (cmd_2057)。最大2分、区切りを待つ。
+# 作業中に /exit を送ると仕事が切れる。待っても作業中なら settings.yaml も触らずに止める。
+source "${PROJECT_ROOT}/lib/agent_status.sh"
+busy_waited=0
+while agent_is_busy_check "$PANE_TARGET" "$(get_current_pane_cli "$PANE_TARGET")"; do
+    if [ "$busy_waited" -ge 120 ]; then
+        log "ERROR: ${AGENT_ID} is still working after 120s. Not switching."
+        echo "BUSY: ${AGENT_ID} は作業中なので切り替えなかった。区切りの後に撃ち直すこと。" >&2
+        exit 3
+    fi
+    [ "$busy_waited" -eq 0 ] && log "${AGENT_ID} is working. Waiting for it to finish (max 120s)..."
+    sleep 5
+    busy_waited=$((busy_waited + 5))
+done
+
 # Step 1: settings.yaml 更新（--type/--model/--variant 指定時のみ）
 if [[ -n "$NEW_TYPE" || -n "$NEW_MODEL" || -n "$NEW_VARIANT" || -n "$NEW_EFFORT" ]]; then
     update_settings_yaml "$AGENT_ID" "$NEW_TYPE" "$NEW_MODEL" "$NEW_VARIANT" "$NEW_EFFORT"
@@ -528,14 +603,19 @@ CURRENT_CLI=$(get_current_pane_cli "$PANE_TARGET")
 log "Current CLI: ${CURRENT_CLI}"
 send_exit "$PANE_TARGET" "$CURRENT_CLI"
 
-# Step 4: シェルプロンプトを待つ
-wait_for_shell_prompt "$PANE_TARGET"
+# Step 4: シェルへ戻るのを待つ (戻らなければ起動を送らない)
+if ! wait_for_shell "$PANE_TARGET"; then
+    notify_karo_failure "古い CLI が30秒で終わらなかったので、新しい CLI を送っていない。"
+    echo "FAIL: ${AGENT_ID} の古い CLI が終わらない" >&2
+    exit 4
+fi
 
-# Step 5: 新しいCLIコマンドを送信
-log "Launching new CLI: ${TARGET_CMD}"
-tmux send-keys -t "$PANE_TARGET" "$TARGET_CMD" 2>/dev/null || true
-sleep 0.3
-tmux send-keys -t "$PANE_TARGET" Enter 2>/dev/null || true
+# Step 5: 新しいCLIコマンドを送信し、立ち上がったかを確かめる
+if ! launch_and_confirm "$PANE_TARGET" "$TARGET_CMD" "$TARGET_CLI_TYPE"; then
+    notify_karo_failure "新しい CLI が3回撃っても立ち上がらない (${TARGET_CMD})。"
+    echo "FAIL: ${AGENT_ID} の新しい CLI が立ち上がらない" >&2
+    exit 5
+fi
 
 # Step 6: tmux pane metadata 更新
 DISPLAY_NAME=$(get_model_display_name "$AGENT_ID")
